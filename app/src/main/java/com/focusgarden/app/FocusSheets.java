@@ -173,7 +173,6 @@ final class FocusSheets {
         };
         renderQuote.run();
         quoteCard.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, false);
             quoteOffset[0]++;
             renderQuote.run();
         });
@@ -249,7 +248,7 @@ final class FocusSheets {
                 String pauseStr = running ? "暂停离线" : "继续离线";
                 if (!pauseStr.contentEquals(pauseBtn.getText())) pauseBtn.setText(pauseStr);
 
-                int showClaim = (anyActive && claimable >= FocusState.MINUTE) ? View.VISIBLE : View.GONE;
+                int showClaim = (anyActive && state.canClaimOffline(now)) ? View.VISIBLE : View.GONE;
                 if (lastClaimVis[0] != showClaim) {
                     claimOfflineBtn.setVisibility(showClaim);
                     lastClaimVis[0] = showClaim;
@@ -320,7 +319,6 @@ final class FocusSheets {
                             sel ? BLUE : INK_SUB, 12, 38);
                     if (!sel) chip.setBackground(touchCard(activity, CARD, BORDER, 12));
                     chip.setOnClickListener(v -> {
-                        haptic(v, state.hapticFeedback, false);
                         state.presetWork = m;
                         onChanged.run();
                         rebuildSetup[0].run();
@@ -384,7 +382,7 @@ final class FocusSheets {
 
         View.OnClickListener modeClick = v -> {
             if (state.active() || state.offlineActive()) return;
-            haptic(v, state.hapticFeedback, false);
+            haptic(v, state.hapticFeedback, HapticKind.NAV);
             mode[0] = v == tabOffline ? 0 : v == tabCount ? 1 : 2;
             activity.setTimerTabMode(mode[0]);
             rebuildSetup[0].run();
@@ -395,7 +393,7 @@ final class FocusSheets {
         tabPomo.setOnClickListener(modeClick);
 
         startBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, true);
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             long now = System.currentTimeMillis();
             TimerReceiver.advance(activity, now);
             if (mode[0] == 0) state.startOffline(now);
@@ -405,7 +403,7 @@ final class FocusSheets {
             refresh.run();
         });
         pauseBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, false);
+            haptic(v, state.hapticFeedback, HapticKind.NAV);
             long now = System.currentTimeMillis();
             if (state.offlineActive()) {
                 if (state.offlineRunning()) state.pauseOffline(now);
@@ -418,15 +416,17 @@ final class FocusSheets {
             refresh.run();
         });
         endBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, false);
             if (state.offlineActive()) {
                 long now = System.currentTimeMillis();
                 long elapsed = state.stopOffline(now, ZoneId.systemDefault());
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 onChanged.run();
                 rebuildSetup[0].run();
                 refresh.run();
-                if (elapsed >= FocusState.MINUTE) {
+                if (elapsed >= FocusState.MIN_OFFLINE_CLAIM_MS) {
                     Toast.makeText(activity, "离线已结算 " + duration(elapsed) + "，可点击首页按钮兑换", Toast.LENGTH_SHORT).show();
+                } else if (elapsed > 0L) {
+                    Toast.makeText(activity, "离线已累计 " + duration(elapsed) + "（累计满 5 分钟可兑换）", Toast.LENGTH_SHORT).show();
                 }
             } else {
                 new AlertDialog.Builder(activity)
@@ -434,6 +434,7 @@ final class FocusSheets {
                         .setMessage("已完成的轮次会保留奖励，当前未完成的轮次不计入结余。")
                         .setNegativeButton("继续", null)
                         .setPositiveButton("结束", (d, w) -> {
+                            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                             TimerReceiver.advance(activity, System.currentTimeMillis());
                             state.cancel();
                             onChanged.run();
@@ -443,9 +444,15 @@ final class FocusSheets {
             }
         });
         claimOfflineBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, true);
-            long gained = state.claimOffline(System.currentTimeMillis(), ZoneId.systemDefault());
+            long now = System.currentTimeMillis();
+            if (!state.canClaimOffline(now)) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity, "累计离线需满 5 分钟且可兑换满 1 分钟才可领取", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            long gained = state.claimOffline(now, ZoneId.systemDefault());
             if (gained > 0L) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 onChanged.run();
                 refresh.run();
                 Toast.makeText(activity, "已兑换 +" + duration(gained) + " 到今日可用时长", Toast.LENGTH_SHORT).show();
@@ -527,19 +534,19 @@ final class FocusSheets {
         body.addView(guardCard);
 
         Dialog[] sheetRef = new Dialog[1];
+        KeepAliveManager.StatusSnapshot[] lastRendered = {null};
 
-        Runnable rebuild = () -> {
+        Consumer<KeepAliveManager.StatusSnapshot> renderSnap = snap -> {
+            lastRendered[0] = snap;
             long now = System.currentTimeMillis();
-            state.recordHeartbeat(now);
-            FocusStore.get(activity).save();
 
-            boolean usageOk = KeepAliveManager.hasUsageStatsPermission(activity);
-            boolean overlayOk = KeepAliveManager.hasOverlayPermission(activity);
-            boolean notifOk = KeepAliveManager.hasNotificationPermission(activity);
-            boolean accOk = KeepAliveManager.hasAccessibilityPermission(activity);
-            boolean wpOk = KeepAliveManager.isLiveWallpaperActive(activity);
-            boolean batteryOk = KeepAliveManager.isIgnoringBatteryOptimizations(activity);
-            boolean adminOk = KeepAliveManager.isDeviceAdminActive(activity);
+            boolean usageOk = snap.usageOk();
+            boolean overlayOk = snap.overlayOk();
+            boolean notifOk = snap.notifOk();
+            boolean accOk = snap.accOk();
+            boolean wpOk = snap.wallpaperOk();
+            boolean batteryOk = snap.batteryOk();
+            boolean adminOk = snap.adminOk();
 
             topPerms.removeAllViews();
             topPerms.addView(permCheckRow(activity, "使用量数据访问权限",
@@ -580,6 +587,7 @@ final class FocusSheets {
             guardList.addView(toggleGuardRow(activity, "打开悬浮小球",
                     "显示小球可以防止 app 进程被杀", state.floatingBall, (sw, on) -> {
                         if (on && !KeepAliveManager.hasOverlayPermission(activity)) {
+                            haptic(sw, state.hapticFeedback, HapticKind.REJECT);
                             sw.setChecked(false, true);
                             Toast.makeText(activity, "请先授予「悬浮窗」权限后再开启悬浮小球", Toast.LENGTH_SHORT).show();
                             KeepAliveManager.openOverlaySettings(activity);
@@ -646,12 +654,22 @@ final class FocusSheets {
             guardList.addView(tipBox);
         };
 
-        rebuild.run();
+        state.recordHeartbeat(System.currentTimeMillis());
+        FocusStore.get(activity).save();
+
+        Runnable triggerRefresh = () -> KeepAliveManager.refreshStatusAsync(activity, snap -> {
+            if (sheetRef[0] != null && sheetRef[0].isShowing() && !snap.equals(lastRendered[0])) {
+                renderSnap.accept(snap);
+            }
+        });
+
+        renderSnap.accept(KeepAliveManager.cachedStatus(activity));
         sheetRef[0] = bottomSheet(activity, "强力防关闭设置", "保持后台权限就绪，确保锁定与统计稳定生效", body);
+        triggerRefresh.run();
 
         return new LiveRefresh() {
             @Override public void refresh() {
-                if (sheetRef[0] != null && sheetRef[0].isShowing()) rebuild.run();
+                if (sheetRef[0] != null && sheetRef[0].isShowing()) triggerRefresh.run();
             }
             @Override public boolean isShowing() {
                 return sheetRef[0] != null && sheetRef[0].isShowing();
@@ -711,6 +729,43 @@ final class FocusSheets {
         parent.addView(sep, -1, dp(parent.getContext(), 1));
     }
 
+    static void confirmPaidChange(MainActivity activity, FocusState state, String title,
+                                  String detail, int costMinutes, Runnable onApply) {
+        if (costMinutes <= 0) {
+            onApply.run();
+            return;
+        }
+        long costMs = costMinutes * FocusState.MINUTE;
+        long spendable = state.totalSpendableMs();
+        boolean affordable = state.canAfford(costMs);
+        String msg = detail
+                + "\n\n本次调整需消耗：" + costMinutes + " 分钟"
+                + "\n当前可支配时间（可用 + 储蓄罐）：" + duration(spendable);
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
+                .setTitle(affordable ? "确认消耗 " + costMinutes + " 分钟修改配置？" : "可用时间不足，无法修改")
+                .setMessage(affordable
+                        ? msg + "\n（优先扣除今日可用时长，不足部分自动从储蓄罐扣除）"
+                        : msg + "\n\n请先通过离线锁机、专注计时或正向行为赚取足够时间后再调整规则。");
+        if (!affordable) {
+            haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
+            builder.setPositiveButton("知道了", null);
+        } else {
+            builder.setNegativeButton("取消", null)
+                    .setPositiveButton("消耗 " + costMinutes + " 分钟并修改", (d, w) -> {
+                        long now = System.currentTimeMillis();
+                        if (!state.spendTime(costMs, "CONFIG", title, detail, now, ZoneId.systemDefault())) {
+                            haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
+                            Toast.makeText(activity, "可用与储蓄罐余额不足", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
+                        onApply.run();
+                        Toast.makeText(activity, "已消耗 " + costMinutes + " 分钟，配置已更新", Toast.LENGTH_SHORT).show();
+                    });
+        }
+        builder.show();
+    }
+
     static void showBudgetDetailSheet(MainActivity activity, FocusState state, Runnable onChanged, Runnable onOpenLimited) {
         LinearLayout body = column(activity);
         FocusState.Day day = state.days.getOrDefault(LocalDate.now().toString(), new FocusState.Day());
@@ -721,16 +776,18 @@ final class FocusSheets {
         LinearLayout sLeft = column(activity);
         sLeft.addView(text(activity, "今日可用时长", 12, BLUE, true));
         sLeft.addView(text(activity, duration(state.creditMs), 24, INK, true));
+        sLeft.addView(text(activity, "总可支配：" + duration(state.totalSpendableMs()), 11, INK_SUB, false));
         weight(summary, sLeft);
         LinearLayout sRight = column(activity);
         sRight.setGravity(Gravity.END);
         sRight.addView(text(activity, "储蓄罐：" + duration(state.vaultMs), 12, INK_SUB, true));
         sRight.addView(text(activity, "今日已用：" + duration(day.limitedMs), 12, MUTED, false));
+        sRight.addView(text(activity, "奖励消耗：" + duration(day.rewardSpentMs), 11, MUTED, false));
         summary.addView(sRight);
         body.addView(summary);
         gap(body, 14);
 
-        boolean usageOk = KeepAliveManager.hasUsageStatsPermission(activity);
+        boolean usageOk = KeepAliveManager.cachedStatus(activity).usageOk();
         TextView syncBtn = secondaryButton(activity, usageOk ? "立即校准系统使用记录" : "授权「使用量数据」以校准统计");
         Dialog[] sheetRef = new Dialog[1];
         syncBtn.setOnClickListener(v -> {
@@ -743,6 +800,14 @@ final class FocusSheets {
             Toast.makeText(activity, updated ? "已同步今日应用使用记录" : "当前应用记录已是最新", Toast.LENGTH_SHORT).show();
         });
         body.addView(syncBtn, -1, -2);
+        gap(body, 10);
+
+        TextView spendReward = secondaryButton(activity, "去奖励兑换主动消耗时间");
+        spendReward.setOnClickListener(v -> {
+            if (sheetRef[0] != null) sheetRef[0].dismiss();
+            showRewardsSheet(activity, state, onChanged);
+        });
+        body.addView(spendReward, -1, -2);
         gap(body, 10);
 
         TextView manageLimited = primaryButton(activity, "管理受限应用与免费额度");
@@ -759,13 +824,19 @@ final class FocusSheets {
         LinearLayout body = column(activity);
         final int[] rewardChoice = {5};
 
+        TextView capBanner = text(activity, "", 12, BLUE, true);
+        capBanner.setBackground(shape(activity, BLUE_SOFT, 12));
+        capBanner.setPadding(dp(activity, 12), dp(activity, 9), dp(activity, 12), dp(activity, 9));
+        body.addView(capBanner, -1, -2);
+        gap(body, 10);
+
         EditText titleInput = styledInput(activity, "输入待办内容，例如：整理英语笔记", "", InputType.TYPE_CLASS_TEXT);
         titleInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(48)});
         body.addView(titleInput, -1, -2);
         gap(body, 10);
 
         LinearLayout rewardRow = row(activity);
-        int[] rewards = {3, 5, 10};
+        int[] rewards = {2, 5, 8};
         LinearLayout chipsWrap = row(activity);
         Runnable[] rebuildRewardChips = new Runnable[1];
         rebuildRewardChips[0] = () -> {
@@ -776,7 +847,6 @@ final class FocusSheets {
                         active ? BLUE : INK_SUB, 10, 36);
                 if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
                 c.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
                     rewardChoice[0] = r;
                     rebuildRewardChips[0].run();
                 });
@@ -806,13 +876,18 @@ final class FocusSheets {
 
         Runnable[] rebuildList = new Runnable[1];
         rebuildList[0] = () -> {
+            LocalDate today = LocalDate.now();
+            long now = System.currentTimeMillis();
+            FocusState.Day day = state.day(today.toString());
+            capBanner.setText("今日待办已兑 " + duration(day.todoEarnedMs) + " / "
+                    + state.todoDailyCapMinutes + " 分钟上限 · 新建待办需冷静 10 分钟方可领取");
+
             listWrap.removeAllViews();
             boolean hasClaimed = false;
+            boolean hasUnclaimedDone = false;
             for (FocusState.Todo t : state.todos.values()) {
-                if (t.claimed) {
-                    hasClaimed = true;
-                    break;
-                }
+                if (t.claimed) hasClaimed = true;
+                else if (t.done) hasUnclaimedDone = true;
             }
             clearClaimedBtn.setVisibility(hasClaimed ? View.VISIBLE : View.GONE);
 
@@ -823,13 +898,13 @@ final class FocusSheets {
                 empty.setGravity(Gravity.CENTER);
                 empty.addView(text(activity, "还没有待办事项", 15, INK, true));
                 gap(empty, 4);
-                empty.addView(text(activity, "完成一项待办即可领取对应时间奖励", 12, MUTED, false));
+                empty.addView(text(activity, "新建后满 10 分钟并完成待办，即可领取时间奖励", 12, MUTED, false));
                 listWrap.addView(empty);
             } else {
-                LocalDate today = LocalDate.now();
                 for (var entry : new ArrayList<>(state.todos.entrySet())) {
                     String id = entry.getKey();
                     FocusState.Todo todo = entry.getValue();
+                    boolean mature = state.todoMature(todo, now);
                     LinearLayout item = row(activity);
                     item.setBackground(cardBg(activity, todo.done ? SURFACE_SUBTLE : CARD, BORDER, 14));
                     item.setPadding(dp(activity, 12), dp(activity, 11), dp(activity, 10), dp(activity, 11));
@@ -847,10 +922,15 @@ final class FocusSheets {
                     LinearLayout info = column(activity);
                     TextView label = text(activity, todo.title, 14, todo.done ? MUTED : INK, !todo.done);
                     info.addView(label);
+                    long waitMs = state.todoWaitRemainingMs(todo, now);
                     String statusText = todo.claimed ? "已领取 +" + todo.rewardMinutes + " 分钟"
-                            : todo.done ? "已完成 · 待领取 +" + todo.rewardMinutes + " 分钟"
+                            : todo.done && !mature ? "已完成 · 冷静期还剩 " + duration(waitMs)
+                            : todo.done ? "已完成 · 可领取 +" + todo.rewardMinutes + " 分钟"
+                            : !mature ? "冷静期还剩 " + duration(waitMs) + " · 完成可得 +" + todo.rewardMinutes + " 分"
                             : "完成可得 +" + todo.rewardMinutes + " 分钟";
-                    info.addView(text(activity, statusText, 11, todo.done && !todo.claimed ? BLUE : MUTED, false));
+                    int statusColor = todo.done && !todo.claimed
+                            ? (mature ? BLUE : AMBER) : MUTED;
+                    info.addView(text(activity, statusText, 11, statusColor, false));
                     weight(item, info);
 
                     FrameLayout del = iconBadge(activity, R.drawable.ic_close, SURFACE_SUBTLE, MUTED, 28, 13, 14);
@@ -863,7 +943,8 @@ final class FocusSheets {
                     item.addView(del);
 
                     item.setOnClickListener(v -> {
-                        haptic(v, state.hapticFeedback, false);
+                        if (todo.claimed) return;
+                        haptic(v, state.hapticFeedback, HapticKind.NAV);
                         state.toggleTodo(id, today);
                         onChanged.run();
                         rebuildList[0].run();
@@ -872,10 +953,20 @@ final class FocusSheets {
                     gap(listWrap, 8);
                 }
             }
-            long pendingMs = state.pendingTodoRewardMs();
+            long pendingMs = state.pendingTodoRewardMs(now, today);
+            long capLeft = state.remainingTodoCapMs(today);
             if (pendingMs > 0) {
                 claimBtn.setVisibility(View.VISIBLE);
                 claimBtn.setText("一键领取 +" + duration(pendingMs));
+                claimBtn.setBackground(touch(activity, BLUE, 14));
+                claimBtn.setTextColor(CARD);
+            } else if (hasUnclaimedDone) {
+                claimBtn.setVisibility(View.VISIBLE);
+                claimBtn.setText(capLeft <= 0L
+                        ? "今日待办已达 " + state.todoDailyCapMinutes + " 分钟上限"
+                        : "已完成待办冷静期中（满 10 分钟可领）");
+                claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
+                claimBtn.setTextColor(BLUE_DISABLED_TEXT);
             } else {
                 claimBtn.setVisibility(View.GONE);
             }
@@ -890,35 +981,44 @@ final class FocusSheets {
         addBtn.setOnClickListener(v -> {
             String title = titleInput.getText().toString().trim();
             if (title.isEmpty()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
                 titleInput.setError("请输入待办内容");
                 return;
             }
-            haptic(v, state.hapticFeedback, false);
-            state.addTodo(UUID.randomUUID().toString(), title, rewardChoice[0], LocalDate.now());
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            long now = System.currentTimeMillis();
+            state.addTodo(UUID.randomUUID().toString(), title, rewardChoice[0], LocalDate.now(), now);
             titleInput.setText("");
             onChanged.run();
             rebuildList[0].run();
         });
 
         claimBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, true);
-            long claimed = state.claimTodos(System.currentTimeMillis(), ZoneId.systemDefault());
-            if (claimed > 0) {
+            long now = System.currentTimeMillis();
+            long gained = state.claimTodos(now, ZoneId.systemDefault());
+            if (gained > 0) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 onChanged.run();
-                Toast.makeText(activity, "已领取 +" + duration(claimed), Toast.LENGTH_SHORT).show();
+                Toast.makeText(activity, "已领取 +" + duration(gained), Toast.LENGTH_SHORT).show();
                 rebuildList[0].run();
+            } else {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                LocalDate today = LocalDate.now();
+                String reason = state.remainingTodoCapMs(today) <= 0L
+                        ? "今日待办兑换已达 " + state.todoDailyCapMinutes + " 分钟上限"
+                        : "新建待办需经过 10 分钟冷静期后才可领取奖励";
+                Toast.makeText(activity, reason, Toast.LENGTH_SHORT).show();
             }
         });
 
         rebuildList[0].run();
-        bottomSheet(activity, "待办清单", "每完成一项任务，就能为自己兑换放松时长", body);
+        bottomSheet(activity, "待办清单", "每完成一项认真对待的任务，换取克制的休息时长", body);
     }
 
     static void showEarlySleep(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
         LocalDate today = LocalDate.now();
         boolean failedToday = state.earlySleepFailedOn(today);
-        boolean checkedToday = state.earlySleepChecked(today);
 
         FrameLayout hero = new FrameLayout(activity);
         hero.setBackground(cardBg(activity, 0xffebf2ff, BORDER, 18));
@@ -931,9 +1031,11 @@ final class FocusSheets {
         LinearLayout heroContent = row(activity);
         heroContent.setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 14), dp(activity, 14));
         LinearLayout heroText = column(activity);
-        heroText.addView(text(activity, "连续早睡 " + state.earlySleepStreak(today) + " 天", 18, CARD, true));
+        TextView heroTitle = text(activity, "连续早睡 " + state.earlySleepStreak(today) + " 天", 18, CARD, true);
+        heroText.addView(heroTitle);
         gap(heroText, 4);
-        heroText.addView(text(activity, "在 " + clock(state.sleepStart) + " 前放下手机并开启夜间锁屏", 12, PALE, false));
+        TextView heroSub = text(activity, "在 " + clock(state.sleepStart) + " 前放下手机并开启夜间锁屏", 12, PALE, false);
+        heroText.addView(heroSub);
         weight(heroContent, heroText);
         ImageView sleepMascot = new ImageView(activity);
         sleepMascot.setImageResource(R.drawable.mascot_sleep);
@@ -957,14 +1059,30 @@ final class FocusSheets {
         lockRow.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
         LinearLayout lockText = column(activity);
         lockText.addView(text(activity, "睡眠时段自动拦截受限应用", 14, INK, true));
-        lockText.addView(text(activity, "开启后该时段内无法打开限制列表里的应用", 11, MUTED, false));
+        lockText.addView(text(activity, "开启后该时段内将拦截受限应用，并启用早睡打卡", 11, MUTED, false));
         weight(lockRow, lockText);
         SwitchView sw = new SwitchView(activity, state.bedtime);
+        sw.setContentDescription("开关睡眠时段自动拦截");
+        Runnable[] refreshClaim = new Runnable[1];
         sw.setOnToggleListener(on -> {
-            state.bedtime = on;
-            onChanged.run();
+            if (on) {
+                state.bedtime = true;
+                onChanged.run();
+                if (refreshClaim[0] != null) refreshClaim[0].run();
+                return;
+            }
+            sw.setChecked(true, false);
+            int cost = state.earlySleepConfigCostMinutes(true, state.earlySleepRewardMinutes,
+                    state.earlySleepRewardMinutes, false);
+            confirmPaidChange(activity, state, "关闭夜间早睡锁", "关闭睡眠时段自动拦截与早睡限制", cost, () -> {
+                state.bedtime = false;
+                sw.setChecked(false, true);
+                onChanged.run();
+                if (refreshClaim[0] != null) refreshClaim[0].run();
+            });
         });
         lockRow.addView(sw);
+        lockRow.setOnClickListener(v -> sw.performClick());
         body.addView(lockRow);
         gap(body, 12);
 
@@ -972,14 +1090,28 @@ final class FocusSheets {
         TextView startBtn = secondaryButton(activity, "入睡 " + clock(state.sleepStart));
         TextView endBtn = secondaryButton(activity, "起床 " + clock(state.sleepEnd));
         startBtn.setOnClickListener(v -> pickClock(activity, state.sleepStart, state.sleepEnd, val -> {
-            state.sleepStart = val;
-            startBtn.setText("入睡 " + clock(val));
-            onChanged.run();
+            if (val == state.sleepStart) return;
+            int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
+                    state.earlySleepRewardMinutes, true);
+            confirmPaidChange(activity, state, "调整入睡时间",
+                    "入睡时间调整为 " + clock(val), cost, () -> {
+                        state.sleepStart = val;
+                        startBtn.setText("入睡 " + clock(val));
+                        onChanged.run();
+                        if (refreshClaim[0] != null) refreshClaim[0].run();
+                    });
         }));
         endBtn.setOnClickListener(v -> pickClock(activity, state.sleepEnd, state.sleepStart, val -> {
-            state.sleepEnd = val;
-            endBtn.setText("起床 " + clock(val));
-            onChanged.run();
+            if (val == state.sleepEnd) return;
+            int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
+                    state.earlySleepRewardMinutes, true);
+            confirmPaidChange(activity, state, "调整起床时间",
+                    "起床时间调整为 " + clock(val), cost, () -> {
+                        state.sleepEnd = val;
+                        endBtn.setText("起床 " + clock(val));
+                        onChanged.run();
+                        if (refreshClaim[0] != null) refreshClaim[0].run();
+                    });
         }));
         weight(timeRow, startBtn);
         space(timeRow, 10);
@@ -987,10 +1119,10 @@ final class FocusSheets {
         body.addView(timeRow);
         gap(body, 14);
 
-        body.addView(text(activity, "早睡打卡奖励", 13, INK_SUB, true));
+        body.addView(text(activity, "早睡打卡奖励（修改需消耗时间）", 13, INK_SUB, true));
         gap(body, 8);
         LinearLayout rewardRow = row(activity);
-        int[] options = {10, 15, 20, 30};
+        int[] options = {5, 10, 15, 20};
         Runnable[] rebuildRewards = new Runnable[1];
         rebuildRewards[0] = () -> {
             rewardRow.removeAllViews();
@@ -1001,10 +1133,15 @@ final class FocusSheets {
                         active ? BLUE : INK_SUB, 12, 38);
                 if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
                 c.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
-                    state.earlySleepRewardMinutes = mins;
-                    onChanged.run();
-                    rebuildRewards[0].run();
+                    if (mins == state.earlySleepRewardMinutes) return;
+                    int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes, mins, false);
+                    confirmPaidChange(activity, state, "调整早睡奖励时长",
+                            "早睡奖励从 " + state.earlySleepRewardMinutes + " 分钟改为 " + mins + " 分钟", cost, () -> {
+                                state.earlySleepRewardMinutes = mins;
+                                onChanged.run();
+                                rebuildRewards[0].run();
+                                if (refreshClaim[0] != null) refreshClaim[0].run();
+                            });
                 });
                 weight(rewardRow, c);
                 if (i + 1 < options.length) space(rewardRow, 8);
@@ -1014,30 +1151,61 @@ final class FocusSheets {
         body.addView(rewardRow);
         gap(body, 14);
 
-        body.addView(weekSleepStrip(activity, state, today));
+        LinearLayout weekWrap = column(activity);
+        weekWrap.addView(weekSleepStrip(activity, state, today));
+        body.addView(weekWrap);
         gap(body, 16);
 
-        TextView claimBtn = primaryButton(activity,
-                failedToday ? "今日早睡已失败"
-                        : checkedToday ? "今日已完成早睡打卡 ✓"
-                        : "完成早睡打卡 (+" + state.earlySleepRewardMinutes + " 分钟)");
-        if (failedToday) {
-            claimBtn.setBackground(shape(activity, RED_SOFT, 14));
-            claimBtn.setTextColor(RED);
-            claimBtn.setEnabled(false);
-        } else if (checkedToday) {
-            claimBtn.setBackground(shape(activity, GREEN_SOFT, 14));
-            claimBtn.setTextColor(GREEN);
-            claimBtn.setEnabled(false);
-        }
-        claimBtn.setOnClickListener(v -> {
-            if (state.claimEarlySleep(System.currentTimeMillis(), ZoneId.systemDefault())) {
-                haptic(v, state.hapticFeedback, true);
-                onChanged.run();
+        TextView claimBtn = primaryButton(activity, "");
+        refreshClaim[0] = () -> {
+            long now = System.currentTimeMillis();
+            boolean failed = state.earlySleepFailedOn(today);
+            boolean checked = state.earlySleepChecked(today);
+            boolean inWin = state.isEarlySleepClaimWindow(now, ZoneId.systemDefault());
+            heroTitle.setText("连续早睡 " + state.earlySleepStreak(today) + " 天");
+            heroSub.setText("在 " + clock(state.sleepStart) + " 前放下手机并开启夜间锁屏");
+            weekWrap.removeAllViews();
+            weekWrap.addView(weekSleepStrip(activity, state, today));
+            if (failed) {
+                claimBtn.setText("今日早睡已失败");
+                claimBtn.setBackground(shape(activity, RED_SOFT, 14));
+                claimBtn.setTextColor(RED);
+            } else if (checked) {
                 claimBtn.setText("今日已完成早睡打卡 ✓");
                 claimBtn.setBackground(shape(activity, GREEN_SOFT, 14));
                 claimBtn.setTextColor(GREEN);
-                claimBtn.setEnabled(false);
+            } else if (!state.bedtime) {
+                claimBtn.setText("请先开启上方睡眠时段自动拦截");
+                claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
+                claimBtn.setTextColor(BLUE_DISABLED_TEXT);
+            } else if (!inWin) {
+                claimBtn.setText("限睡前1小时或醒后4小时内打卡");
+                claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
+                claimBtn.setTextColor(BLUE_DISABLED_TEXT);
+            } else {
+                claimBtn.setText("完成早睡打卡 (+" + state.earlySleepRewardMinutes + " 分钟)");
+                claimBtn.setBackground(touch(activity, BLUE, 14));
+                claimBtn.setTextColor(CARD);
+            }
+        };
+        refreshClaim[0].run();
+        claimBtn.setOnClickListener(v -> {
+            long now = System.currentTimeMillis();
+            if (state.earlySleepFailedOn(today) || state.earlySleepChecked(today)) return;
+            if (!state.bedtime) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity, "需先开启「睡眠时段自动拦截」才可参与早睡打卡", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (!state.isEarlySleepClaimWindow(now, ZoneId.systemDefault())) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity, "仅可在入睡前 1 小时或起床后 4 小时内打卡", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (state.claimEarlySleep(now, ZoneId.systemDefault())) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                onChanged.run();
+                refreshClaim[0].run();
                 Toast.makeText(activity, "早睡打卡成功，+" + state.earlySleepRewardMinutes + " 分钟", Toast.LENGTH_SHORT).show();
             }
         });
@@ -1078,8 +1246,8 @@ final class FocusSheets {
         info.addView(iconBadge(activity, R.drawable.ic_snowflake, CARD, CYAN, 38, 20, 12));
         space(info, 12);
         LinearLayout infoText = column(activity);
-        infoText.addView(text(activity, "清醒模式 · 临时解锁", 14, INK, true));
-        infoText.addView(text(activity, "设定明确目的后短暂放行受限应用，到期自动恢复限制", 11, INK_SUB, false));
+        infoText.addView(text(activity, "清醒模式 · 付费临时解锁", 14, INK, true));
+        infoText.addView(text(activity, "可支配时间：" + duration(state.totalSpendableMs()) + "（将扣除等额解锁时长）", 11, INK_SUB, false));
         weight(info, infoText);
         body.addView(info);
         gap(body, 14);
@@ -1102,7 +1270,6 @@ final class FocusSheets {
                         active ? BLUE : INK_SUB, 10, 36);
                 if (!active) chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
                 chip.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
                     selP[0] = idx;
                     purposeInput.setText(purposes[idx]);
                     rebuildP[0].run();
@@ -1117,10 +1284,11 @@ final class FocusSheets {
         body.addView(purposeInput, -1, -2);
         gap(body, 14);
 
-        body.addView(text(activity, "解锁时长", 13, INK_SUB, true));
+        body.addView(text(activity, "解锁时长（消耗等额可用时间）", 13, INK_SUB, true));
         gap(body, 8);
         int[] durations = {5, 10, 15, 30};
         final int[] chosenMin = {10};
+        TextView confirm = primaryButton(activity, "消耗 10 分钟 · 开启清醒模式");
         LinearLayout dRow = row(activity);
         Runnable[] rebuildD = new Runnable[1];
         rebuildD[0] = () -> {
@@ -1132,8 +1300,8 @@ final class FocusSheets {
                         active ? CYAN : INK_SUB, 12, 38);
                 if (!active) chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
                 chip.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
                     chosenMin[0] = mins;
+                    confirm.setText("消耗 " + mins + " 分钟 · 开启清醒模式");
                     rebuildD[0].run();
                 });
                 weight(dRow, chip);
@@ -1144,13 +1312,17 @@ final class FocusSheets {
         body.addView(dRow);
         gap(body, 18);
 
-        TextView confirm = primaryButton(activity, "立即开启清醒模式");
         body.addView(confirm, -1, -2);
-        Dialog sheet = bottomSheet(activity, "开启清醒模式", "有目的、有限时地暂时解锁", body);
+        Dialog sheet = bottomSheet(activity, "开启清醒模式", "有目的、付费且有限时地暂时解锁", body);
         confirm.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, true);
             String p = purposeInput.getText().toString().trim();
-            state.startSober(p.isEmpty() ? "临时使用" : p, chosenMin[0], System.currentTimeMillis(), ZoneId.systemDefault());
+            if (!state.startSober(p.isEmpty() ? "临时使用" : p, chosenMin[0],
+                    System.currentTimeMillis(), ZoneId.systemDefault())) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity, "可支配时间不足 " + chosenMin[0] + " 分钟，请先锁机或专注赚取", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             onChanged.run();
             sheet.dismiss();
         });
@@ -1273,12 +1445,15 @@ final class FocusSheets {
         Dialog[] sheetRef = new Dialog[1];
         if (existing != null) {
             gap(body, 10);
-            TextView delBtn = dangerButton(activity, "移除此规则");
-            delBtn.setOnClickListener(v -> {
-                state.rules.remove(pkg);
-                onChanged.run();
-                if (sheetRef[0] != null) sheetRef[0].dismiss();
-            });
+            int delCost = state.removeRuleCostMinutes(existing);
+            TextView delBtn = dangerButton(activity, delCost > 0
+                    ? "消耗 " + delCost + " 分钟 · 移除此规则" : "移除此规则");
+            delBtn.setOnClickListener(v -> confirmPaidChange(activity, state, "移除应用规则 · " + label,
+                    "将「" + label + "」移出受限应用名单", delCost, () -> {
+                        state.rules.remove(pkg);
+                        onChanged.run();
+                        if (sheetRef[0] != null) sheetRef[0].dismiss();
+                    }));
             body.addView(delBtn, -1, -2);
         }
 
@@ -1292,15 +1467,21 @@ final class FocusSheets {
                     });
             typeWrap.addView(seg);
 
+            int cost = state.ruleChangeCostMinutes(existing, isLearning[0], minutes[0]);
+            saveBtn.setText(cost > 0 ? "消耗 " + cost + " 分钟 · 保存规则" : "保存规则");
+
             quotaArea.removeAllViews();
             if (isLearning[0]) {
                 LinearLayout tip = row(activity);
                 tip.setBackground(cardBg(activity, GREEN_SOFT, 0xffbcecd3, 14));
                 tip.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
-                tip.addView(text(activity, "使用此应用将按 " + state.learningPercent + "% 比例自动赚取可用时间", 13, GREEN, true));
+                tip.addView(text(activity,
+                        cost > 0 ? "使用此应用按 " + state.learningPercent + "% 比例赚取时间 · 新增/改型需消耗 " + cost + " 分钟"
+                                : "使用此应用将按 " + state.learningPercent + "% 比例自动赚取可用时间",
+                        13, GREEN, true));
                 quotaArea.addView(tip);
             } else {
-                quotaArea.addView(text(activity, "每日免费额度（超出后消耗可兑换时间）", 13, INK_SUB, true));
+                quotaArea.addView(text(activity, "每日免费额度（放宽额度需消耗可用时间）", 13, INK_SUB, true));
                 gap(quotaArea, 8);
                 int[] presets = {0, 5, 15, 30, 60};
                 LinearLayout qRow1 = row(activity);
@@ -1311,7 +1492,6 @@ final class FocusSheets {
                             active ? BLUE : INK_SUB, 12, 38);
                     if (!active) chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
                     chip.setOnClickListener(v -> {
-                        haptic(v, state.hapticFeedback, false);
                         minutes[0] = m;
                         rebuild[0].run();
                     });
@@ -1335,16 +1515,23 @@ final class FocusSheets {
         sheetRef[0] = sheet;
 
         saveBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, true);
-            if (isLearning[0]) {
-                state.rules.put(pkg, new FocusState.Rule(label, FocusState.Category.LEARNING, 0));
-                activity.setRuleCategory(0);
-            } else {
-                state.rules.put(pkg, new FocusState.Rule(label, FocusState.Category.LIMITED, minutes[0]));
-                activity.setRuleCategory(1);
-            }
-            onChanged.run();
-            sheet.dismiss();
+            int cost = state.ruleChangeCostMinutes(existing, isLearning[0], minutes[0]);
+            String actionTitle = (existing == null ? "新增应用规则 · " : "修改应用规则 · ") + label;
+            String actionDetail = isLearning[0]
+                    ? "将「" + label + "」设为正向学习应用"
+                    : "将「" + label + "」每日免费额度设为 " + minutes[0] + " 分钟";
+            confirmPaidChange(activity, state, actionTitle, actionDetail, cost, () -> {
+                if (cost == 0) haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                if (isLearning[0]) {
+                    state.putRule(pkg, new FocusState.Rule(label, FocusState.Category.LEARNING, 0));
+                    activity.setRuleCategory(0);
+                } else {
+                    state.putRule(pkg, new FocusState.Rule(label, FocusState.Category.LIMITED, minutes[0]));
+                    activity.setRuleCategory(1);
+                }
+                onChanged.run();
+                sheet.dismiss();
+            });
         });
     }
 
@@ -1376,10 +1563,13 @@ final class FocusSheets {
             gap(body, 12);
         }
 
-        body.addView(text(activity, "打卡奖励时长", 13, INK_SUB, true));
+        body.addView(text(activity, "打卡奖励时长（上限 15 分钟）", 13, INK_SUB, true));
+        gap(body, 4);
+        body.addView(text(activity, "新建习惯需冷静 10 分钟后才可首次打卡 · 每日习惯上限 " + state.habitDailyCapMinutes + " 分钟", 11, MUTED, false));
         gap(body, 8);
         LinearLayout rRow = row(activity);
-        int[] presets = {3, 5, 10, 15};
+        int[] presets = {2, 5, 8, 10};
+        TextView saveBtn = primaryButton(activity, habit == null ? "创建习惯" : "保存修改");
         Runnable[] rebuildRewards = new Runnable[1];
         rebuildRewards[0] = () -> {
             rRow.removeAllViews();
@@ -1389,29 +1579,31 @@ final class FocusSheets {
                         active ? BLUE : INK_SUB, 12, 38);
                 if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
                 c.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
                     reward[0] = m;
                     rebuildRewards[0].run();
                 });
                 weight(rRow, c);
                 space(rRow, 6);
             }
-            boolean isCustom = reward[0] != 3 && reward[0] != 5 && reward[0] != 10 && reward[0] != 15;
+            boolean isCustom = reward[0] != 2 && reward[0] != 5 && reward[0] != 8 && reward[0] != 10;
             TextView custom = pillButton(activity, isCustom ? "+" + reward[0] + "分" : "自定义",
                     isCustom ? BLUE_SOFT : SURFACE_SUBTLE, isCustom ? BLUE : INK_SUB, 12, 38);
             if (!isCustom) custom.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
-            custom.setOnClickListener(v -> askNumberSheet(activity, "打卡奖励（分钟）", "0 到 120 分钟",
-                    reward[0], 0, 120, n -> {
+            custom.setOnClickListener(v -> askNumberSheet(activity, "打卡奖励（分钟）", "1 到 15 分钟",
+                    Math.min(15, Math.max(1, reward[0])), 1, 15, n -> {
                         reward[0] = n;
                         rebuildRewards[0].run();
                     }));
             weight(rRow, custom);
+
+            int cost = state.habitChangeCostMinutes(habit, reward[0]);
+            String baseLabel = habit == null ? "创建习惯" : "保存修改";
+            saveBtn.setText(cost > 0 ? "消耗 " + cost + " 分钟 · " + baseLabel : baseLabel);
         };
         rebuildRewards[0].run();
         body.addView(rRow);
         gap(body, 18);
 
-        TextView saveBtn = primaryButton(activity, habit == null ? "创建习惯" : "保存修改");
         body.addView(saveBtn, -1, -2);
 
         Dialog[] sheetRef = new Dialog[1];
@@ -1430,24 +1622,33 @@ final class FocusSheets {
         }
 
         Dialog sheet = bottomSheet(activity, habit == null ? "新建习惯" : "编辑习惯",
-                "每日打卡可自动累积可用时间", body);
+                "每日认真打卡可换取对应自由时间", body);
         sheetRef[0] = sheet;
 
         saveBtn.setOnClickListener(v -> {
             String nameValue = nameInput.getText().toString().trim();
             if (nameValue.isEmpty()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
                 nameInput.setError("请输入习惯名称");
                 return;
             }
-            haptic(v, state.hapticFeedback, true);
-            if (habit == null) {
-                state.habits.put(UUID.randomUUID().toString(), new FocusState.Habit(nameValue, reward[0], ""));
-            } else {
-                habit.name = nameValue;
-                habit.rewardMinutes = reward[0];
-            }
-            onChanged.run();
-            sheet.dismiss();
+            int cost = state.habitChangeCostMinutes(habit, reward[0]);
+            String actionTitle = habit == null ? "新增习惯 · " + nameValue : "调整习惯奖励 · " + nameValue;
+            String actionDetail = habit == null
+                    ? "新增习惯「" + nameValue + "」（+" + reward[0] + " 分钟）"
+                    : "将习惯「" + nameValue + "」奖励改为 +" + reward[0] + " 分钟";
+            confirmPaidChange(activity, state, actionTitle, actionDetail, cost, () -> {
+                if (cost == 0) haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                if (habit == null) {
+                    state.addHabit(UUID.randomUUID().toString(),
+                            new FocusState.Habit(nameValue, reward[0], "", System.currentTimeMillis()));
+                } else {
+                    habit.name = nameValue;
+                    habit.rewardMinutes = reward[0];
+                }
+                onChanged.run();
+                sheet.dismiss();
+            });
         });
     }
 
@@ -1488,7 +1689,7 @@ final class FocusSheets {
         }
 
         // Step rate configuration
-        body.addView(text(activity, "兑换门槛与奖励", 13, INK_SUB, true));
+        body.addView(text(activity, "兑换门槛与奖励（修改需消耗时间）", 13, INK_SUB, true));
         gap(body, 8);
         LinearLayout cfgRow = row(activity);
         LinearLayout thresholdWrap = row(activity);
@@ -1499,9 +1700,10 @@ final class FocusSheets {
         weight(cfgRow, rewardWrap);
         gap(body, 14);
 
-        body.addView(text(activity, "快速记录今日步数", 13, INK_SUB, true));
+        TextView manualHead = text(activity, "快速记录今日步数", 13, INK_SUB, true);
+        body.addView(manualHead);
         gap(body, 8);
-        int[] deltas = {500, 1000, 2000, 5000};
+        int[] deltas = {500, 1000, 2000};
         LinearLayout addRow = row(activity);
         TextView claimBtn = primaryButton(activity, "");
 
@@ -1509,21 +1711,30 @@ final class FocusSheets {
         Runnable refresh = () -> {
             FocusState.Day d = state.days.get(today.toString());
             int cur = d == null ? 0 : d.steps;
+            long earned = d == null ? 0L : d.stepsEarnedMs;
+            int manualLeft = state.remainingManualSteps(today);
             bigSteps.setText(cur + " 步");
-            subSteps.setText("每 " + state.stepsPerReward + " 步可兑换 " + state.stepRewardMinutes + " 分钟");
+            subSteps.setText("每 " + state.stepsPerReward + " 步兑 " + state.stepRewardMinutes
+                    + " 分钟 · 今日已兑 " + duration(earned) + " / " + state.stepDailyCapMinutes + " 分钟");
+            manualHead.setText("快速记录今日步数（手动今日还剩 " + manualLeft + " / "
+                    + FocusState.MANUAL_STEP_DAILY_LIMIT + " 步）");
+
+            long capLeft = state.remainingStepCapMs(today);
             int units = state.claimableStepUnits(today);
             int mins = units * state.stepRewardMinutes;
-            if (units > 0) {
+            if (capLeft < state.stepRewardMinutes * FocusState.MINUTE) {
+                claimBtn.setText("今日步数兑换已达 " + state.stepDailyCapMinutes + " 分钟上限");
+                claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
+                claimBtn.setTextColor(BLUE_DISABLED_TEXT);
+            } else if (units > 0) {
                 claimBtn.setText("兑换 +" + mins + " 分钟 (" + (units * state.stepsPerReward) + " 步)");
                 claimBtn.setBackground(touch(activity, BLUE, 14));
                 claimBtn.setTextColor(CARD);
-                claimBtn.setEnabled(true);
             } else {
                 int rem = state.pendingStepsRemainder(today);
                 claimBtn.setText("还差 " + Math.max(0, state.stepsPerReward - rem) + " 步可兑换");
                 claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
                 claimBtn.setTextColor(BLUE_DISABLED_TEXT);
-                claimBtn.setEnabled(false);
             }
         };
 
@@ -1537,11 +1748,16 @@ final class FocusSheets {
                         active ? BLUE : INK_SUB, 10, 36);
                 if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
                 c.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
-                    state.stepsPerReward = th;
-                    onChanged.run();
-                    rebuildCfg[0].run();
-                    refresh.run();
+                    if (th == state.stepsPerReward) return;
+                    int cost = state.stepConfigChangeCostMinutes(state.stepsPerReward, state.stepRewardMinutes,
+                            th, state.stepRewardMinutes);
+                    confirmPaidChange(activity, state, "修改步数兑换门槛",
+                            "步数门槛从 " + state.stepsPerReward + " 步改为 " + th + " 步", cost, () -> {
+                                state.stepsPerReward = th;
+                                onChanged.run();
+                                rebuildCfg[0].run();
+                                refresh.run();
+                            });
                 });
                 weight(thresholdWrap, c);
                 if (i == 0) space(thresholdWrap, 6);
@@ -1556,11 +1772,16 @@ final class FocusSheets {
                         active ? CYAN : INK_SUB, 10, 36);
                 if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
                 c.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
-                    state.stepRewardMinutes = rw;
-                    onChanged.run();
-                    rebuildCfg[0].run();
-                    refresh.run();
+                    if (rw == state.stepRewardMinutes) return;
+                    int cost = state.stepConfigChangeCostMinutes(state.stepsPerReward, state.stepRewardMinutes,
+                            state.stepsPerReward, rw);
+                    confirmPaidChange(activity, state, "修改步数单次奖励",
+                            "每次步数奖励从 " + state.stepRewardMinutes + " 分钟改为 " + rw + " 分钟", cost, () -> {
+                                state.stepRewardMinutes = rw;
+                                onChanged.run();
+                                rebuildCfg[0].run();
+                                refresh.run();
+                            });
                 });
                 weight(rewardWrap, c);
                 if (i == 0) space(rewardWrap, 6);
@@ -1573,10 +1794,18 @@ final class FocusSheets {
             TextView chip = pillButton(activity, "+" + delta, SURFACE_SUBTLE, INK, 12, 38);
             chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
             chip.setOnClickListener(v -> {
-                haptic(v, state.hapticFeedback, false);
-                state.addManualSteps(delta, today);
+                int added = state.addManualSteps(delta, today);
+                if (added <= 0) {
+                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                    Toast.makeText(activity, "今日手动补录已达 " + FocusState.MANUAL_STEP_DAILY_LIMIT + " 步上限", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                haptic(v, state.hapticFeedback, HapticKind.NAV);
                 onChanged.run();
                 refresh.run();
+                if (added < delta) {
+                    Toast.makeText(activity, "已计入最后 " + added + " 步手动额度", Toast.LENGTH_SHORT).show();
+                }
             });
             weight(addRow, chip);
             if (i + 1 < deltas.length) space(addRow, 6);
@@ -1585,12 +1814,19 @@ final class FocusSheets {
         gap(body, 16);
 
         claimBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, true);
+            if (state.remainingStepCapMs(today) < state.stepRewardMinutes * FocusState.MINUTE) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity, "今日步数兑换已达 " + state.stepDailyCapMinutes + " 分钟上限", Toast.LENGTH_SHORT).show();
+                return;
+            }
             long gained = state.claimSteps(System.currentTimeMillis(), ZoneId.systemDefault());
             if (gained > 0) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 onChanged.run();
                 refresh.run();
                 Toast.makeText(activity, "步数兑换成功，+" + duration(gained), Toast.LENGTH_SHORT).show();
+            } else {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
             }
         });
         refresh.run();
@@ -1602,32 +1838,89 @@ final class FocusSheets {
     static void showRateSettings(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
 
+        LinearLayout notice = row(activity);
+        notice.setBackground(cardBg(activity, BLUE_SOFT, 0xffcfe0ff, 14));
+        notice.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+        notice.addView(text(activity, "调高或修改激励比例与每日上限均需消耗已赚取的时间", 12, BLUE, true));
+        body.addView(notice);
+        gap(body, 12);
+
         LinearLayout ratios = column(activity);
         Runnable[] rebuildRatios = new Runnable[1];
         rebuildRatios[0] = () -> {
             ratios.removeAllViews();
-            ratios.addView(rateRow(activity, "离线锁机兑换比例", "离线锁机期间积累时长转化率",
+            ratios.addView(rateRow(activity, "离线锁机兑换比例", "离线锁机累计满 5 分钟后按此转化",
                     state.offlinePercent + "%", () -> askNumberSheet(activity, "离线锁机比例（%）", "0 到 100%",
                             state.offlinePercent, 0, 100, n -> {
-                                state.offlinePercent = n;
-                                onChanged.run();
-                                rebuildRatios[0].run();
+                                int cost = state.rateChangeCostMinutes(state.offlinePercent, n);
+                                confirmPaidChange(activity, state, "修改离线兑换比例",
+                                        "离线兑换比例由 " + state.offlinePercent + "% 改为 " + n + "%", cost, () -> {
+                                            state.offlinePercent = n;
+                                            onChanged.run();
+                                            rebuildRatios[0].run();
+                                        });
                             })));
             gap(ratios, 10);
-            ratios.addView(rateRow(activity, "学习应用兑换比例", "使用学习应用 10 分钟可赚取时间",
+            ratios.addView(rateRow(activity, "学习应用兑换比例", "使用学习应用时长转化为娱乐时间",
                     state.learningPercent + "%", () -> askNumberSheet(activity, "学习奖励比例（%）", "0 到 100%",
                             state.learningPercent, 0, 100, n -> {
-                                state.learningPercent = n;
-                                onChanged.run();
-                                rebuildRatios[0].run();
+                                int cost = state.rateChangeCostMinutes(state.learningPercent, n);
+                                confirmPaidChange(activity, state, "修改学习兑换比例",
+                                        "学习兑换比例由 " + state.learningPercent + "% 改为 " + n + "%", cost, () -> {
+                                            state.learningPercent = n;
+                                            onChanged.run();
+                                            rebuildRatios[0].run();
+                                        });
                             })));
             gap(ratios, 10);
             ratios.addView(rateRow(activity, "专注计时兑换比例", "完成单次或番茄专注的奖励转化率",
                     state.focusPercent + "%", () -> askNumberSheet(activity, "专注奖励比例（%）", "0 到 100%",
                             state.focusPercent, 0, 100, n -> {
-                                state.focusPercent = n;
-                                onChanged.run();
-                                rebuildRatios[0].run();
+                                int cost = state.rateChangeCostMinutes(state.focusPercent, n);
+                                confirmPaidChange(activity, state, "修改专注兑换比例",
+                                        "专注兑换比例由 " + state.focusPercent + "% 改为 " + n + "%", cost, () -> {
+                                            state.focusPercent = n;
+                                            onChanged.run();
+                                            rebuildRatios[0].run();
+                                        });
+                            })));
+            gap(ratios, 14);
+            ratios.addView(text(activity, "每日获取上限（防止轻率刷取时间）", 13, INK_SUB, true));
+            gap(ratios, 8);
+            ratios.addView(rateRow(activity, "待办每日上限", "每天通过待办最多可领取的分钟数",
+                    state.todoDailyCapMinutes + " 分", () -> askNumberSheet(activity, "待办每日上限（分钟）", "5 到 120 分钟",
+                            state.todoDailyCapMinutes, 5, 120, n -> {
+                                int cost = state.dailyCapChangeCostMinutes(state.todoDailyCapMinutes, n);
+                                confirmPaidChange(activity, state, "调整待办每日上限",
+                                        "待办每日上限由 " + state.todoDailyCapMinutes + " 分改为 " + n + " 分", cost, () -> {
+                                            state.todoDailyCapMinutes = n;
+                                            onChanged.run();
+                                            rebuildRatios[0].run();
+                                        });
+                            })));
+            gap(ratios, 10);
+            ratios.addView(rateRow(activity, "习惯每日上限", "每天通过习惯打卡最多可领取的分钟数",
+                    state.habitDailyCapMinutes + " 分", () -> askNumberSheet(activity, "习惯每日上限（分钟）", "5 到 120 分钟",
+                            state.habitDailyCapMinutes, 5, 120, n -> {
+                                int cost = state.dailyCapChangeCostMinutes(state.habitDailyCapMinutes, n);
+                                confirmPaidChange(activity, state, "调整习惯每日上限",
+                                        "习惯每日上限由 " + state.habitDailyCapMinutes + " 分改为 " + n + " 分", cost, () -> {
+                                            state.habitDailyCapMinutes = n;
+                                            onChanged.run();
+                                            rebuildRatios[0].run();
+                                        });
+                            })));
+            gap(ratios, 10);
+            ratios.addView(rateRow(activity, "步数每日上限", "每天通过步数最多可领取的分钟数",
+                    state.stepDailyCapMinutes + " 分", () -> askNumberSheet(activity, "步数每日上限（分钟）", "5 到 120 分钟",
+                            state.stepDailyCapMinutes, 5, 120, n -> {
+                                int cost = state.dailyCapChangeCostMinutes(state.stepDailyCapMinutes, n);
+                                confirmPaidChange(activity, state, "调整步数每日上限",
+                                        "步数每日上限由 " + state.stepDailyCapMinutes + " 分改为 " + n + " 分", cost, () -> {
+                                            state.stepDailyCapMinutes = n;
+                                            onChanged.run();
+                                            rebuildRatios[0].run();
+                                        });
                             })));
         };
         rebuildRatios[0].run();
@@ -1648,7 +1941,6 @@ final class FocusSheets {
                         active ? BLUE : INK_SUB, 12, 38);
                 if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
                 c.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
                     state.vaultStepMinutes = s;
                     onChanged.run();
                     rebuild[0].run();
@@ -1660,7 +1952,7 @@ final class FocusSheets {
         rebuild[0].run();
         body.addView(stepRow);
 
-        bottomSheet(activity, "兑换比例与储蓄配置", "调整各途径的时间激励倍率", body);
+        bottomSheet(activity, "兑换比例与上限配置", "变更时间获取规则需消耗可用时间作为承诺成本", body);
     }
 
     private static LinearLayout rateRow(Activity activity, String title, String sub, String val, Runnable onTap) {
@@ -1692,11 +1984,13 @@ final class FocusSheets {
         barCopy.addView(text(activity, "使用受限应用时在屏幕顶部展示剩余时间进度条", 12, MUTED, false));
         weight(barRow, barCopy);
         SwitchView sw = new SwitchView(activity, state.timeAwarenessBar);
+        sw.setContentDescription("开关时间感知条");
         sw.setOnToggleListener(on -> {
             state.timeAwarenessBar = on;
             onChanged.run();
         });
         barRow.addView(sw);
+        barRow.setOnClickListener(v -> sw.performClick());
         body.addView(barRow);
         gap(body, 16);
 
@@ -1721,7 +2015,6 @@ final class FocusSheets {
                 weight(card, t);
                 if (active) card.addView(iconView(activity, R.drawable.ic_check, 18, BLUE));
                 card.setOnClickListener(v -> {
-                    haptic(v, state.hapticFeedback, false);
                     state.blockTheme = idx;
                     onChanged.run();
                     rebuildThemes[0].run();
@@ -1736,11 +2029,236 @@ final class FocusSheets {
         bottomSheet(activity, "实验室功能", "探索提升专注感知的新体验", body);
     }
 
+    static void showRewardsSheet(MainActivity activity, FocusState state, Runnable onChanged) {
+        LinearLayout body = column(activity);
+        state.seedDefaultRewardsIfNeeded();
+
+        LinearLayout summary = row(activity);
+        summary.setBackground(cardBg(activity, AMBER_SOFT, 0xfff5dcb1, 16));
+        summary.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+        LinearLayout sLeft = column(activity);
+        sLeft.addView(text(activity, "当前可支配时间", 12, AMBER, true));
+        TextView bigSpendable = text(activity, "", 22, INK, true);
+        TextView subBreakdown = text(activity, "", 11, INK_SUB, false);
+        sLeft.addView(bigSpendable);
+        sLeft.addView(subBreakdown);
+        weight(summary, sLeft);
+        TextView spentTodayPill = text(activity, "", 11, AMBER, true);
+        spentTodayPill.setBackground(shape(activity, CARD, 9));
+        spentTodayPill.setPadding(dp(activity, 9), dp(activity, 5), dp(activity, 9), dp(activity, 5));
+        summary.addView(spentTodayPill);
+        body.addView(summary);
+        gap(body, 14);
+
+        body.addView(text(activity, "添加自定义奖励", 13, INK_SUB, true));
+        gap(body, 6);
+        EditText titleInput = styledInput(activity, "自定义奖励名称，例如：喝一杯冰美式", "", InputType.TYPE_CLASS_TEXT);
+        titleInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
+        body.addView(titleInput, -1, -2);
+        gap(body, 8);
+
+        LinearLayout tplRow = row(activity);
+        String[] templates = {"喝一杯饮品", "看一集剧", "加餐犒劳", "自由放空"};
+        for (int i = 0; i < templates.length; i++) {
+            String tpl = templates[i];
+            TextView c = pillButton(activity, tpl, SURFACE_SUBTLE, INK_SUB, 10, 32);
+            c.setTextSize(11);
+            c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            c.setOnClickListener(v -> titleInput.setText(tpl));
+            weight(tplRow, c);
+            if (i + 1 < templates.length) space(tplRow, 6);
+        }
+        body.addView(tplRow);
+        gap(body, 10);
+
+        final int[] costChoice = {30};
+        body.addView(rewardCostChips(activity, costChoice));
+        gap(body, 10);
+
+        TextView addBtn = primaryButton(activity, "添加奖励");
+        body.addView(addBtn, -1, -2);
+        gap(body, 16);
+
+        body.addView(text(activity, "我的奖励列表", 13, INK_SUB, true));
+        gap(body, 8);
+        LinearLayout listWrap = column(activity);
+        body.addView(listWrap, -1, -2);
+
+        Runnable[] rebuild = new Runnable[1];
+        rebuild[0] = () -> {
+            FocusState.Day day = state.days.getOrDefault(LocalDate.now().toString(), new FocusState.Day());
+            bigSpendable.setText(duration(state.totalSpendableMs()));
+            subBreakdown.setText("今日可用 " + duration(state.creditMs) + " + 储蓄罐 " + duration(state.vaultMs));
+            spentTodayPill.setText("今日已兑 " + duration(day.rewardSpentMs));
+
+            listWrap.removeAllViews();
+            if (state.rewards.isEmpty()) {
+                LinearLayout empty = column(activity);
+                empty.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+                empty.setPadding(dp(activity, 16), dp(activity, 18), dp(activity, 16), dp(activity, 18));
+                empty.setGravity(Gravity.CENTER);
+                empty.addView(text(activity, "还没有奖励项目", 15, INK, true));
+                gap(empty, 4);
+                empty.addView(text(activity, "添加一个现实小奖励，让赚取的时间更有价值", 12, MUTED, false));
+                listWrap.addView(empty);
+                return;
+            }
+            for (var entry : new ArrayList<>(state.rewards.entrySet())) {
+                String id = entry.getKey();
+                FocusState.Reward reward = entry.getValue();
+                boolean affordable = state.canAfford(reward.costMinutes * FocusState.MINUTE);
+
+                LinearLayout row = row(activity);
+                row.setBackground(touchCard(activity, CARD, BORDER, 15));
+                row.setPadding(dp(activity, 13), dp(activity, 11), dp(activity, 12), dp(activity, 11));
+                row.addView(iconBadge(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER, 36, 18, 10));
+                space(row, 10);
+
+                LinearLayout info = column(activity);
+                info.addView(text(activity, reward.title, 15, INK, true));
+                info.addView(text(activity, "消耗 " + reward.costMinutes + " 分钟 · 已兑 " + reward.redeemedCount + " 次",
+                        11, MUTED, false));
+                weight(row, info);
+                space(row, 6);
+
+                TextView redeemBtn = pillButton(activity, "兑换", affordable ? BLUE : BLUE_DISABLED_BG,
+                        affordable ? CARD : BLUE_DISABLED_TEXT, 10, 34);
+                redeemBtn.setOnClickListener(v -> {
+                    long need = reward.costMinutes * FocusState.MINUTE;
+                    if (!state.canAfford(need)) {
+                        haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                        Toast.makeText(activity, "还差 " + duration(need - state.totalSpendableMs())
+                                + " 才可兑换「" + reward.title + "」", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    new AlertDialog.Builder(activity)
+                            .setTitle("兑换「" + reward.title + "」？")
+                            .setMessage("将消耗 " + reward.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）。")
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("确认兑换", (d, w) -> {
+                                if (state.redeemReward(id, System.currentTimeMillis(), ZoneId.systemDefault())) {
+                                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                                    onChanged.run();
+                                    rebuild[0].run();
+                                    Toast.makeText(activity, "已兑换「" + reward.title + "」，消耗 "
+                                            + reward.costMinutes + " 分钟", Toast.LENGTH_SHORT).show();
+                                } else {
+                                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                                    Toast.makeText(activity, "可支配时间不足", Toast.LENGTH_SHORT).show();
+                                }
+                            }).show();
+                });
+                row.addView(redeemBtn);
+                space(row, 6);
+
+                FrameLayout delBtn = iconBadge(activity, R.drawable.ic_close, SURFACE_SUBTLE, MUTED, 28, 13, 14);
+                delBtn.setContentDescription("删除奖励");
+                delBtn.setOnClickListener(v -> {
+                    state.removeReward(id);
+                    onChanged.run();
+                    rebuild[0].run();
+                });
+                row.addView(delBtn);
+                row.setOnClickListener(v -> showRewardEditor(activity, state, id, reward, () -> {
+                    onChanged.run();
+                    rebuild[0].run();
+                }));
+
+                listWrap.addView(row);
+                gap(listWrap, 8);
+            }
+        };
+
+        addBtn.setOnClickListener(v -> {
+            String title = titleInput.getText().toString().trim();
+            if (title.isEmpty()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                titleInput.setError("请输入奖励名称");
+                return;
+            }
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            state.addReward(UUID.randomUUID().toString(), title, costChoice[0]);
+            titleInput.setText("");
+            onChanged.run();
+            rebuild[0].run();
+        });
+
+        rebuild[0].run();
+        bottomSheet(activity, "奖励兑换", "用专注赚取的自由时间兑换真实奖励 · 点按项目可编辑", body);
+    }
+
+    private static LinearLayout rewardCostChips(Activity activity, int[] costChoice) {
+        LinearLayout costChips = row(activity);
+        Runnable[] rebuildCosts = new Runnable[1];
+        rebuildCosts[0] = () -> {
+            costChips.removeAllViews();
+            int[] presets = {15, 30, 45, 60};
+            for (int cVal : presets) {
+                boolean active = costChoice[0] == cVal;
+                TextView chip = pillButton(activity, cVal + "分", active ? AMBER_SOFT : SURFACE_SUBTLE,
+                        active ? AMBER : INK_SUB, 10, 36);
+                if (!active) chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+                chip.setOnClickListener(v -> {
+                    costChoice[0] = cVal;
+                    rebuildCosts[0].run();
+                });
+                weight(costChips, chip);
+                space(costChips, 5);
+            }
+            boolean isCustom = costChoice[0] != 15 && costChoice[0] != 30 && costChoice[0] != 45 && costChoice[0] != 60;
+            TextView custom = pillButton(activity, isCustom ? costChoice[0] + "分" : "自定",
+                    isCustom ? AMBER_SOFT : SURFACE_SUBTLE, isCustom ? AMBER : INK_SUB, 10, 36);
+            if (!isCustom) custom.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            custom.setOnClickListener(v -> askNumberSheet(activity, "设定奖励消耗时长（分钟）", "5 到 480 分钟",
+                    costChoice[0], 5, 480, n -> {
+                        costChoice[0] = n;
+                        rebuildCosts[0].run();
+                    }));
+            weight(costChips, custom);
+        };
+        rebuildCosts[0].run();
+        return costChips;
+    }
+
+    private static void showRewardEditor(MainActivity activity, FocusState state, String id,
+                                         FocusState.Reward reward, Runnable onSaved) {
+        LinearLayout body = column(activity);
+        EditText titleInput = styledInput(activity, "输入奖励名称", reward.title, InputType.TYPE_CLASS_TEXT);
+        titleInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
+        body.addView(titleInput, -1, -2);
+        gap(body, 12);
+
+        body.addView(text(activity, "消耗可用时间（分钟）", 13, INK_SUB, true));
+        gap(body, 8);
+        int[] costChoice = {reward.costMinutes};
+        body.addView(rewardCostChips(activity, costChoice));
+        gap(body, 16);
+
+        TextView saveBtn = primaryButton(activity, "保存修改");
+        body.addView(saveBtn, -1, -2);
+
+        Dialog sheet = bottomSheet(activity, "编辑奖励", "调整奖励名称与需要消耗的自由时长", body);
+        saveBtn.setOnClickListener(v -> {
+            String title = titleInput.getText().toString().trim();
+            if (title.isEmpty()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                titleInput.setError("请输入奖励名称");
+                return;
+            }
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            state.updateReward(id, title, costChoice[0]);
+            onSaved.run();
+            sheet.dismiss();
+            Toast.makeText(activity, "已更新奖励「" + title + "」", Toast.LENGTH_SHORT).show();
+        });
+    }
+
     static void showCardManager(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
         String[][] defs = {
                 {"apps", "学习应用", "统计正向应用并自动赚取时间"},
                 {"timer", "锁机与专注计时", "离线锁机、倒计时与番茄钟控制"},
+                {"rewards", "奖励兑换", "设置现实奖励并主动消耗可用时间"},
                 {"sleep", "早睡挑战", "晚间锁屏与早睡连续打卡"},
                 {"todos", "待办清单", "完成日常任务兑换时间奖励"},
                 {"habits", "习惯快打", "快速完成每日习惯打卡"},
@@ -1760,20 +2278,22 @@ final class FocusSheets {
             copy.addView(text(activity, sub, 12, MUTED, false));
             weight(row, copy);
             SwitchView sw = new SwitchView(activity, visible);
+            sw.setContentDescription("开关" + title);
             sw.setOnToggleListener(on -> {
                 if (on) state.hiddenCards.remove(key);
                 else state.hiddenCards.add(key);
                 onChanged.run();
             });
             row.addView(sw);
+            row.setOnClickListener(v -> sw.performClick());
             body.addView(row);
             if (i + 1 < defs.length) gap(body, 8);
         }
         bottomSheet(activity, "添加和编辑卡片", "自定义首页「兑换」区域展示的功能卡片", body);
     }
 
-    static void showSettings(MainActivity activity, FocusState state, boolean serviceEnabled,
-                             Runnable onKeepAlive, Runnable onUpdates, Runnable onNotify, Runnable onWidget,
+    static void showSettings(MainActivity activity, FocusState state, KeepAliveManager.StatusSnapshot initialSnap,
+                             Runnable onKeepAlive, Runnable onRewards, Runnable onUpdates, Runnable onNotify, Runnable onWidget,
                              Runnable onTile, Runnable onAccessibility, Runnable onLab,
                              Runnable onRates, Runnable onCards, Runnable onChanged) {
         LinearLayout body = column(activity);
@@ -1781,20 +2301,24 @@ final class FocusSheets {
 
         body.addView(text(activity, "强力守护与系统", 12, MUTED, true));
         gap(body, 6);
-        int ready = KeepAliveManager.readyCount(activity);
+        int ready = initialSnap.readyCount();
         int total = KeepAliveManager.totalChecks();
+        TextView[] keepAlivePillRef = new TextView[1];
         body.addView(settingRow(activity, R.drawable.ic_power, ready >= 4 ? GREEN_SOFT : BLUE_SOFT,
                 ready >= 4 ? GREEN : BLUE, "强力防关闭与后台保活",
                 "使用量权限、悬浮球、保活壁纸、电池优化与自启动",
-                ready + "/" + total + " 已就绪", () -> {
+                ready + "/" + total + " 已就绪", keepAlivePillRef, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onKeepAlive.run();
                 }));
         gap(body, 6);
+        boolean serviceEnabled = initialSnap.accOk();
+        TextView[] accPillRef = new TextView[1];
+        TextView[] accSubRef = new TextView[1];
         body.addView(settingRow(activity, R.drawable.ic_shield, serviceEnabled ? GREEN_SOFT : AMBER_SOFT,
                 serviceEnabled ? GREEN : AMBER, "无障碍应用监测",
                 serviceEnabled ? "运行正常 · 实时统计与拦截" : "未开启 · 点击授权无障碍服务",
-                serviceEnabled ? "已开启" : "去开启", () -> {
+                serviceEnabled ? "已开启" : "去开启", accPillRef, accSubRef, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onAccessibility.run();
                 }));
@@ -1821,6 +2345,13 @@ final class FocusSheets {
         body.addView(text(activity, "规则与体验", 12, MUTED, true));
         gap(body, 6);
 
+        body.addView(settingRow(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
+                "奖励兑换商店", "设置自定义现实奖励并主动消耗可用时间", null, () -> {
+                    if (sheetRef[0] != null) sheetRef[0].dismiss();
+                    onRewards.run();
+                }));
+        gap(body, 6);
+
         LinearLayout hapticRow = row(activity);
         hapticRow.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 15));
         hapticRow.setPadding(dp(activity, 13), dp(activity, 11), dp(activity, 12), dp(activity, 11));
@@ -1828,7 +2359,7 @@ final class FocusSheets {
         space(hapticRow, 12);
         LinearLayout hapticCopy = column(activity);
         hapticCopy.addView(text(activity, "切页与操作震动反馈", 15, INK, true));
-        hapticCopy.addView(text(activity, "切换底栏标签、点击兑换与打卡时提供轻微触感", 11, MUTED, false));
+        hapticCopy.addView(text(activity, "切页、开关、确认兑换与余额不足时提供克制触感", 11, MUTED, false));
         weight(hapticRow, hapticCopy);
         SwitchView hapticSw = new SwitchView(activity, state.hapticFeedback);
         hapticSw.setContentDescription("开关震动反馈");
@@ -1842,7 +2373,7 @@ final class FocusSheets {
         gap(body, 6);
 
         body.addView(settingRow(activity, R.drawable.ic_tune, BLUE_SOFT, BLUE,
-                "兑换比例与储蓄步长", "离线 " + state.offlinePercent + "% · 学习 " + state.learningPercent + "% · 专注 " + state.focusPercent + "%", null, () -> {
+                "兑换比例与每日上限", "调整各途径转化率与每日获取上限（修改需耗时）", null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onRates.run();
                 }));
@@ -1854,7 +2385,7 @@ final class FocusSheets {
                 }));
         gap(body, 6);
         body.addView(settingRow(activity, R.drawable.ic_edit, AMBER_SOFT, AMBER,
-                "管理首页卡片", "显示或隐藏兑换卡片模块", null, () -> {
+                "管理首页卡片", "显示或隐藏兑换与奖励卡片模块", null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onCards.run();
                 }));
@@ -1872,10 +2403,40 @@ final class FocusSheets {
                 }));
 
         sheetRef[0] = bottomSheet(activity, "设置", "留白专注 · 数字健康与自律工具", body);
+        KeepAliveManager.refreshStatusAsync(activity, snap -> {
+            if (sheetRef[0] == null || !sheetRef[0].isShowing()) return;
+            int r = snap.readyCount();
+            if (keepAlivePillRef[0] != null) {
+                keepAlivePillRef[0].setText(r + "/" + total + " 已就绪");
+                keepAlivePillRef[0].setTextColor(r >= 4 ? GREEN : BLUE);
+                keepAlivePillRef[0].setBackground(shape(activity, r >= 4 ? GREEN_SOFT : BLUE_SOFT, 8));
+            }
+            if (accPillRef[0] != null) {
+                boolean acc = snap.accOk();
+                accPillRef[0].setText(acc ? "已开启" : "去开启");
+                accPillRef[0].setTextColor(acc ? GREEN : AMBER);
+                accPillRef[0].setBackground(shape(activity, acc ? GREEN_SOFT : AMBER_SOFT, 8));
+            }
+            if (accSubRef[0] != null) {
+                accSubRef[0].setText(snap.accOk() ? "运行正常 · 实时统计与拦截" : "未开启 · 点击授权无障碍服务");
+            }
+        });
     }
 
     private static LinearLayout settingRow(Activity activity, int iconRes, int badgeBg, int badgeTint,
                                          String title, String sub, String statusChip, Runnable onClick) {
+        return settingRow(activity, iconRes, badgeBg, badgeTint, title, sub, statusChip, null, null, onClick);
+    }
+
+    private static LinearLayout settingRow(Activity activity, int iconRes, int badgeBg, int badgeTint,
+                                         String title, String sub, String statusChip,
+                                         TextView[] pillOut, Runnable onClick) {
+        return settingRow(activity, iconRes, badgeBg, badgeTint, title, sub, statusChip, pillOut, null, onClick);
+    }
+
+    private static LinearLayout settingRow(Activity activity, int iconRes, int badgeBg, int badgeTint,
+                                         String title, String sub, String statusChip,
+                                         TextView[] pillOut, TextView[] subOut, Runnable onClick) {
         LinearLayout row = row(activity);
         row.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 15));
         row.setPadding(dp(activity, 13), dp(activity, 11), dp(activity, 12), dp(activity, 11));
@@ -1884,13 +2445,16 @@ final class FocusSheets {
 
         LinearLayout copy = column(activity);
         copy.addView(text(activity, title, 15, INK, true));
-        copy.addView(text(activity, sub, 11, MUTED, false));
+        TextView subView = text(activity, sub, 11, MUTED, false);
+        if (subOut != null) subOut[0] = subView;
+        copy.addView(subView);
         weight(row, copy);
 
         if (statusChip != null) {
             TextView pill = text(activity, statusChip, 11, badgeTint, true);
             pill.setBackground(shape(activity, badgeBg, 8));
             pill.setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 8), dp(activity, 4));
+            if (pillOut != null) pillOut[0] = pill;
             row.addView(pill);
             space(row, 4);
         }
@@ -1909,6 +2473,12 @@ final class FocusSheets {
         TextView save = primaryButton(activity, "确认保存");
         body.addView(save, -1, -2);
         Dialog sheet = bottomSheet(activity, title, subtitle, body);
+        Window win = sheet.getWindow();
+        if (win != null) {
+            win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
+                    | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+        input.requestFocus();
         save.setOnClickListener(v -> {
             try {
                 int n = Integer.parseInt(input.getText().toString().trim());
@@ -1918,6 +2488,7 @@ final class FocusSheets {
                     return;
                 }
             } catch (NumberFormatException ignored) {}
+            haptic(v, FocusStore.get(activity).state.hapticFeedback, HapticKind.REJECT);
             input.setError("请输入 " + min + " 到 " + max + " 之间的整数");
         });
     }

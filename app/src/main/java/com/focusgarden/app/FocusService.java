@@ -117,7 +117,7 @@ public final class FocusService extends AccessibilityService {
         }
         if (now - lastUsageSync >= 60_000L) {
             lastUsageSync = now;
-            KeepAliveManager.syncUsageStats(this, store.state);
+            KeepAliveManager.syncUsageStatsAsync(this, null);
         }
         if (!screenUsable()) foreground = null;
 

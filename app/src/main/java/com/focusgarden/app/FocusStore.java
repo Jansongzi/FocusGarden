@@ -36,13 +36,16 @@ final class FocusStore {
         state.vaultMs = root.optLong("vaultMs");
         state.vaultStepMinutes = root.optInt("vaultStepMinutes", 10);
 
-        state.learningPercent = root.optInt("learningPercent", 50);
-        state.focusPercent = root.optInt("focusPercent", 20);
-        state.offlinePercent = root.optInt("offlinePercent", 50);
+        state.learningPercent = root.optInt("learningPercent", 30);
+        state.focusPercent = root.optInt("focusPercent", 25);
+        state.offlinePercent = root.optInt("offlinePercent", 35);
         state.bedtime = root.optBoolean("bedtime");
         state.sleepStart = root.optInt("sleepStart", 1380);
         state.sleepEnd = root.optInt("sleepEnd", 420);
-        state.earlySleepRewardMinutes = root.optInt("earlySleepRewardMinutes", 15);
+        state.earlySleepRewardMinutes = root.optInt("earlySleepRewardMinutes", 10);
+        state.todoDailyCapMinutes = root.optInt("todoDailyCapMinutes", 30);
+        state.habitDailyCapMinutes = root.optInt("habitDailyCapMinutes", 25);
+        state.stepDailyCapMinutes = root.optInt("stepDailyCapMinutes", 30);
 
         state.presetWork = root.optInt("presetWork", 25);
         state.pomodoroWork = root.optInt("pomodoroWork", 25);
@@ -63,7 +66,7 @@ final class FocusStore {
         state.soberUntil = root.optLong("soberUntil");
         state.soberPurpose = root.optString("soberPurpose", "");
 
-        state.stepsPerReward = root.optInt("stepsPerReward", 1000);
+        state.stepsPerReward = root.optInt("stepsPerReward", 2000);
         state.stepRewardMinutes = root.optInt("stepRewardMinutes", 5);
         state.stepBaselineDate = root.optString("stepBaselineDate", "");
         state.stepLastCounter = (float) root.optDouble("stepLastCounter", -1.0);
@@ -73,6 +76,13 @@ final class FocusStore {
         state.excludeFromRecents = root.optBoolean("excludeFromRecents");
         state.guardSettingsDuringFocus = root.optBoolean("guardSettingsDuringFocus");
         state.hapticFeedback = root.optBoolean("hapticFeedback", true);
+        if (root.has("rewardsSeeded")) {
+            state.rewardsSeeded = root.optBoolean("rewardsSeeded", true);
+        } else if (!root.has("credit")) {
+            state.rewardsSeeded = false;
+        }
+        state.freeLearningSlotUsed = root.optBoolean("freeLearningSlotUsed", false);
+        state.freeHabitSlotUsed = root.optBoolean("freeHabitSlotUsed", false);
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
         state.blockTheme = root.optInt("blockTheme", 0);
@@ -122,7 +132,11 @@ final class FocusStore {
         for (Iterator<String> i = keys(habits); i.hasNext();) {
             String id = i.next();
             JSONObject row = habits.getJSONObject(id);
-            FocusState.Habit habit = new FocusState.Habit(row.getString("name"), row.optInt("reward"), row.optString("checkedOn"));
+            FocusState.Habit habit = new FocusState.Habit(
+                    row.getString("name"),
+                    row.optInt("reward"),
+                    row.optString("checkedOn"),
+                    row.optLong("createdMs", 0L));
             JSONArray checkIns = row.optJSONArray("checkIns");
             if (checkIns != null) {
                 for (int index = 0; index < checkIns.length(); index++) {
@@ -132,6 +146,8 @@ final class FocusStore {
             }
             state.habits.put(id, habit);
         }
+        if (state.learningRuleCount() > 0) state.freeLearningSlotUsed = true;
+        if (!state.habits.isEmpty()) state.freeHabitSlotUsed = true;
 
         JSONObject todos = root.optJSONObject("todos");
         for (Iterator<String> i = keys(todos); i.hasNext();) {
@@ -144,9 +160,27 @@ final class FocusStore {
                     row.optBoolean("done"),
                     row.optBoolean("claimed"),
                     row.optString("createdDate", ""),
-                    row.optString("doneDate", "")
+                    row.optString("doneDate", ""),
+                    row.optLong("createdMs", 0L)
             ));
         }
+
+        if (root.has("rewards")) {
+            state.rewards.clear();
+            JSONObject rewardsObj = root.optJSONObject("rewards");
+            for (Iterator<String> i = keys(rewardsObj); i.hasNext();) {
+                String id = i.next();
+                JSONObject row = rewardsObj.getJSONObject(id);
+                state.rewards.put(id, new FocusState.Reward(
+                        id,
+                        row.optString("title", ""),
+                        row.optInt("costMinutes", 30),
+                        row.optInt("redeemedCount", 0),
+                        row.optLong("lastRedeemedMs", 0L)
+                ));
+            }
+        }
+        state.seedDefaultRewardsIfNeeded();
 
         JSONObject days = root.optJSONObject("days");
         for (Iterator<String> i = keys(days); i.hasNext();) {
@@ -164,9 +198,13 @@ final class FocusStore {
             day.focusEarnedMs = row.optLong("focusEarned");
             day.offlineEarnedMs = row.optLong("offlineEarned");
             day.todoEarnedMs = row.optLong("todoEarned");
+            day.habitEarnedMs = row.optLong("habitEarned");
             day.steps = row.optInt("steps");
+            day.manualSteps = row.optInt("manualSteps");
             day.stepsClaimed = row.optInt("stepsClaimed");
             day.stepsEarnedMs = row.optLong("stepsEarned");
+            day.rewardSpentMs = row.optLong("rewardSpent");
+            day.configSpentMs = row.optLong("configSpent");
 
             JSONObject usage = row.optJSONObject("usage");
             for (Iterator<String> p = keys(usage); p.hasNext();) {
@@ -214,6 +252,9 @@ final class FocusStore {
                     .put("sleepStart", state.sleepStart)
                     .put("sleepEnd", state.sleepEnd)
                     .put("earlySleepRewardMinutes", state.earlySleepRewardMinutes)
+                    .put("todoDailyCapMinutes", state.todoDailyCapMinutes)
+                    .put("habitDailyCapMinutes", state.habitDailyCapMinutes)
+                    .put("stepDailyCapMinutes", state.stepDailyCapMinutes)
                     .put("presetWork", state.presetWork)
                     .put("pomodoroWork", state.pomodoroWork)
                     .put("pomodoroRest", state.pomodoroRest)
@@ -239,6 +280,9 @@ final class FocusStore {
                     .put("excludeFromRecents", state.excludeFromRecents)
                     .put("guardSettingsDuringFocus", state.guardSettingsDuringFocus)
                     .put("hapticFeedback", state.hapticFeedback)
+                    .put("rewardsSeeded", state.rewardsSeeded)
+                    .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
+                    .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
                     .put("blockTheme", state.blockTheme)
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
@@ -261,6 +305,7 @@ final class FocusStore {
                 habits.put(entry.getKey(), new JSONObject()
                         .put("name", habit.name)
                         .put("reward", habit.rewardMinutes)
+                        .put("createdMs", habit.createdMs)
                         .put("checkIns", new JSONArray(habit.checkIns)));
             }
 
@@ -273,7 +318,18 @@ final class FocusStore {
                         .put("done", todo.done)
                         .put("claimed", todo.claimed)
                         .put("createdDate", todo.createdDate)
-                        .put("doneDate", todo.doneDate));
+                        .put("doneDate", todo.doneDate)
+                        .put("createdMs", todo.createdMs));
+            }
+
+            JSONObject rewards = new JSONObject();
+            for (var entry : state.rewards.entrySet()) {
+                FocusState.Reward r = entry.getValue();
+                rewards.put(entry.getKey(), new JSONObject()
+                        .put("title", r.title)
+                        .put("costMinutes", r.costMinutes)
+                        .put("redeemedCount", r.redeemedCount)
+                        .put("lastRedeemedMs", r.lastRedeemedMs));
             }
 
             JSONObject days = new JSONObject();
@@ -300,14 +356,19 @@ final class FocusStore {
                         .put("focusEarned", day.focusEarnedMs)
                         .put("offlineEarned", day.offlineEarnedMs)
                         .put("todoEarned", day.todoEarnedMs)
+                        .put("habitEarned", day.habitEarnedMs)
                         .put("steps", day.steps)
+                        .put("manualSteps", day.manualSteps)
                         .put("stepsClaimed", day.stepsClaimed)
                         .put("stepsEarned", day.stepsEarnedMs)
+                        .put("rewardSpent", day.rewardSpentMs)
+                        .put("configSpent", day.configSpentMs)
                         .put("usage", new JSONObject(day.usage))
                         .put("events", events));
             }
 
-            root.put("rules", rules).put("habits", habits).put("todos", todos).put("days", days);
+            root.put("rules", rules).put("habits", habits).put("todos", todos)
+                    .put("rewards", rewards).put("days", days);
             preferences.edit().putString("state", root.toString()).apply();
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not save state", e);

@@ -37,13 +37,17 @@ final class GitHubUpdates {
     private static final long MAX_APK = 150L * 1024 * 1024;
     private static final Set<String> DOWNLOAD_HOSTS = new HashSet<>(Arrays.asList("github.com",
             "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"));
+    private static volatile PackageInfo cachedInstalled;
 
     record Asset(String name, URL url, long size, String sha) {}
     record Release(String version, String notes, List<Asset> assets) {}
 
     static PackageInfo installed(Context context) {
+        if (cachedInstalled != null) return cachedInstalled;
         try {
-            return context.getPackageManager().getPackageInfo(context.getPackageName(), flags());
+            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), flags());
+            cachedInstalled = info;
+            return info;
         } catch (PackageManager.NameNotFoundException impossible) {
             throw new IllegalStateException("找不到已安装版本", impossible);
         }

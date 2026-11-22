@@ -18,6 +18,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.Process;
 import android.provider.Settings;
@@ -31,8 +33,18 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 final class KeepAliveManager {
+    record StatusSnapshot(boolean usageOk, boolean overlayOk, boolean notifOk, boolean accOk,
+                          boolean batteryOk, boolean wallpaperOk, boolean adminOk, int readyCount) {}
+
+    private static final ExecutorService STATUS_IO = Executors.newSingleThreadExecutor();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static volatile StatusSnapshot cached;
+
     private static final String[][] AUTOSTART_TARGETS = {
             {"com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"},
             {"com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"},
@@ -253,15 +265,14 @@ final class KeepAliveManager {
         }
     }
 
-    static boolean syncUsageStats(Context context, FocusState state) {
-        if (!hasUsageStatsPermission(context) || state.rules.isEmpty()) return false;
+    private static Map<String, Long> queryTodayUsageTotals(Context context, java.util.Set<String> trackedPkgs) {
         UsageStatsManager usm = context.getSystemService(UsageStatsManager.class);
-        if (usm == null) return false;
+        if (usm == null || trackedPkgs.isEmpty()) return java.util.Collections.emptyMap();
         long now = System.currentTimeMillis();
         ZoneId zone = ZoneId.systemDefault();
         long dayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli();
         UsageEvents events = usm.queryEvents(dayStart, now);
-        if (events == null) return false;
+        if (events == null) return java.util.Collections.emptyMap();
 
         Map<String, Long> totals = new HashMap<>();
         Map<String, Long> activeStart = new HashMap<>();
@@ -269,7 +280,7 @@ final class KeepAliveManager {
         while (events.hasNextEvent()) {
             events.getNextEvent(ev);
             String pkg = ev.getPackageName();
-            if (pkg == null || !state.rules.containsKey(pkg)) continue;
+            if (pkg == null || !trackedPkgs.contains(pkg)) continue;
             int type = ev.getEventType();
             if (type == UsageEvents.Event.ACTIVITY_RESUMED) {
                 activeStart.putIfAbsent(pkg, ev.getTimeStamp());
@@ -281,7 +292,34 @@ final class KeepAliveManager {
                 }
             }
         }
+        return totals;
+    }
 
+    static boolean syncUsageStats(Context context, FocusState state) {
+        if (!hasUsageStatsPermission(context) || state.rules.isEmpty()) return false;
+        Map<String, Long> totals = queryTodayUsageTotals(context, state.rules.keySet());
+        return applyUsageTotals(context, state, totals);
+    }
+
+    static void syncUsageStatsAsync(Context context, Runnable onUpdated) {
+        Context app = context.getApplicationContext();
+        FocusState state = FocusStore.get(app).state;
+        if (state.rules.isEmpty()) return;
+        java.util.Set<String> tracked = new java.util.HashSet<>(state.rules.keySet());
+        STATUS_IO.execute(() -> {
+            if (!hasUsageStatsPermission(app)) return;
+            Map<String, Long> totals = queryTodayUsageTotals(app, tracked);
+            if (totals.isEmpty()) return;
+            MAIN.post(() -> {
+                if (applyUsageTotals(app, state, totals) && onUpdated != null) onUpdated.run();
+            });
+        });
+    }
+
+    private static boolean applyUsageTotals(Context context, FocusState state, Map<String, Long> totals) {
+        if (totals.isEmpty()) return false;
+        long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
         long synced = 0L;
         for (var entry : totals.entrySet()) {
             synced += state.syncUsageTotal(entry.getKey(), entry.getValue(), now, zone);
@@ -307,15 +345,45 @@ final class KeepAliveManager {
         }
     }
 
-    static int readyCount(Context context) {
+    static StatusSnapshot queryStatus(Context context) {
+        Context app = context.getApplicationContext();
+        boolean usageOk = hasUsageStatsPermission(app);
+        boolean overlayOk = hasOverlayPermission(app);
+        boolean notifOk = hasNotificationPermission(app);
+        boolean accOk = hasAccessibilityPermission(app);
+        boolean batteryOk = isIgnoringBatteryOptimizations(app);
+        boolean wallpaperOk = isLiveWallpaperActive(app);
+        boolean adminOk = isDeviceAdminActive(app);
         int count = 0;
-        if (hasUsageStatsPermission(context)) count++;
-        if (hasOverlayPermission(context)) count++;
-        if (hasNotificationPermission(context)) count++;
-        if (hasAccessibilityPermission(context)) count++;
-        if (isIgnoringBatteryOptimizations(context)) count++;
-        if (isLiveWallpaperActive(context)) count++;
-        return count;
+        if (usageOk) count++;
+        if (overlayOk) count++;
+        if (notifOk) count++;
+        if (accOk) count++;
+        if (batteryOk) count++;
+        if (wallpaperOk) count++;
+        StatusSnapshot snap = new StatusSnapshot(usageOk, overlayOk, notifOk, accOk,
+                batteryOk, wallpaperOk, adminOk, count);
+        cached = snap;
+        return snap;
+    }
+
+    static StatusSnapshot cachedStatus(Context context) {
+        StatusSnapshot snap = cached;
+        if (snap != null) return snap;
+        refreshStatusAsync(context, null);
+        return new StatusSnapshot(false, false, false, false, false, false, false, 0);
+    }
+
+    static void refreshStatusAsync(Context context, Consumer<StatusSnapshot> onReady) {
+        Context app = context.getApplicationContext();
+        STATUS_IO.execute(() -> {
+            StatusSnapshot snap = queryStatus(app);
+            if (onReady != null) MAIN.post(() -> onReady.accept(snap));
+        });
+    }
+
+    static int readyCount(Context context) {
+        return queryStatus(context).readyCount();
     }
 
     static int totalChecks() {

@@ -16,10 +16,17 @@ import java.util.TreeSet;
 
 final class FocusState {
     static final long MINUTE = 60_000L;
+    static final long MIN_OFFLINE_CLAIM_MS = 5 * MINUTE;
+    static final long TODO_MATURE_MS = 10 * MINUTE;
+    static final long HABIT_MATURE_MS = 10 * MINUTE;
+    static final int MANUAL_STEP_DAILY_LIMIT = 4000;
+    static final int EARLY_SLEEP_PRE_WINDOW_MIN = 60;
+    static final int EARLY_SLEEP_POST_WINDOW_MIN = 240;
 
     enum Category { LEARNING, LIMITED }
     enum Restriction { NONE, FOCUS, BEDTIME, BUDGET }
     enum Transition { NONE, BREAK, WORK, FINISHED }
+    enum CheckInResult { OK, OK_CAPPED, ALREADY_DONE, COOLING_DOWN, NOT_FOUND }
 
     record Rule(String label, Category category, int dailyMinutes) {}
     record Event(long timeMs, String type, String title, String detail, long deltaMs) {}
@@ -27,11 +34,17 @@ final class FocusState {
     static final class Habit {
         String name;
         int rewardMinutes;
+        long createdMs;
         final TreeSet<String> checkIns = new TreeSet<>();
 
         Habit(String name, int rewardMinutes, String checkedOn) {
+            this(name, rewardMinutes, checkedOn, 0L);
+        }
+
+        Habit(String name, int rewardMinutes, String checkedOn, long createdMs) {
             this.name = name;
             this.rewardMinutes = rewardMinutes;
+            this.createdMs = createdMs;
             if (checkedOn != null && !checkedOn.isEmpty()) checkIns.add(checkedOn);
         }
 
@@ -58,8 +71,15 @@ final class FocusState {
         boolean claimed;
         String createdDate;
         String doneDate;
+        long createdMs;
 
-        Todo(String id, String title, int rewardMinutes, boolean done, boolean claimed, String createdDate, String doneDate) {
+        Todo(String id, String title, int rewardMinutes, boolean done, boolean claimed,
+             String createdDate, String doneDate) {
+            this(id, title, rewardMinutes, done, claimed, createdDate, doneDate, 0L);
+        }
+
+        Todo(String id, String title, int rewardMinutes, boolean done, boolean claimed,
+             String createdDate, String doneDate, long createdMs) {
             this.id = id;
             this.title = title;
             this.rewardMinutes = rewardMinutes;
@@ -67,6 +87,23 @@ final class FocusState {
             this.claimed = claimed;
             this.createdDate = createdDate == null ? "" : createdDate;
             this.doneDate = doneDate == null ? "" : doneDate;
+            this.createdMs = createdMs;
+        }
+    }
+
+    static final class Reward {
+        String id;
+        String title;
+        int costMinutes;
+        int redeemedCount;
+        long lastRedeemedMs;
+
+        Reward(String id, String title, int costMinutes, int redeemedCount, long lastRedeemedMs) {
+            this.id = id;
+            this.title = title;
+            this.costMinutes = Math.max(5, Math.min(480, costMinutes));
+            this.redeemedCount = Math.max(0, redeemedCount);
+            this.lastRedeemedMs = lastRedeemedMs;
         }
     }
 
@@ -83,9 +120,13 @@ final class FocusState {
         long focusEarnedMs;
         long offlineEarnedMs;
         long todoEarnedMs;
+        long habitEarnedMs;
         int steps;
+        int manualSteps;
         int stepsClaimed;
         long stepsEarnedMs;
+        long rewardSpentMs;
+        long configSpentMs;
         final List<Event> events = new ArrayList<>();
     }
 
@@ -93,6 +134,7 @@ final class FocusState {
     final Map<String, Habit> habits = new LinkedHashMap<>();
     final Map<String, Day> days = new LinkedHashMap<>();
     final Map<String, Todo> todos = new LinkedHashMap<>();
+    final Map<String, Reward> rewards = new LinkedHashMap<>();
     final TreeSet<String> earlySleepDays = new TreeSet<>();
     final TreeSet<String> earlySleepFailed = new TreeSet<>();
     final TreeSet<Long> heartbeats = new TreeSet<>();
@@ -103,13 +145,16 @@ final class FocusState {
     long vaultMs;
     int vaultStepMinutes = 10;
 
-    int learningPercent = 50;
-    int focusPercent = 20;
-    int offlinePercent = 50;
+    int learningPercent = 30;
+    int focusPercent = 25;
+    int offlinePercent = 35;
     boolean bedtime;
     int sleepStart = 23 * 60;
     int sleepEnd = 7 * 60;
-    int earlySleepRewardMinutes = 15;
+    int earlySleepRewardMinutes = 10;
+    int todoDailyCapMinutes = 30;
+    int habitDailyCapMinutes = 25;
+    int stepDailyCapMinutes = 30;
 
     int presetWork = 25;
     int pomodoroWork = 25;
@@ -130,7 +175,7 @@ final class FocusState {
     long soberUntil;
     String soberPurpose = "";
 
-    int stepsPerReward = 1000;
+    int stepsPerReward = 2000;
     int stepRewardMinutes = 5;
     String stepBaselineDate = "";
     float stepLastCounter = -1f;
@@ -140,9 +185,27 @@ final class FocusState {
     boolean excludeFromRecents;
     boolean guardSettingsDuringFocus;
     boolean hapticFeedback = true;
+    boolean rewardsSeeded;
+    boolean freeLearningSlotUsed;
+    boolean freeHabitSlotUsed;
 
     boolean timeAwarenessBar = true;
     int blockTheme = 0;
+
+    FocusState() {
+        seedDefaultRewardsIfNeeded();
+    }
+
+    void seedDefaultRewardsIfNeeded() {
+        if (rewardsSeeded || !rewards.isEmpty()) {
+            rewardsSeeded = true;
+            return;
+        }
+        rewards.put("default_drink", new Reward("default_drink", "奖励自己一杯饮品", 30, 0, 0L));
+        rewards.put("default_show", new Reward("default_show", "安心看一集剧 / 打一局游戏", 45, 0, 0L));
+        rewards.put("default_treat", new Reward("default_treat", "买一件心愿小物 / 加餐", 90, 0, 0L));
+        rewardsSeeded = true;
+    }
 
     static String date(long now, ZoneId zone) {
         return Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString();
@@ -174,17 +237,152 @@ final class FocusState {
         return Math.max(0L, soberUntil - now);
     }
 
-    void startSober(String purpose, int minutes, long now, ZoneId zone) {
-        if (minutes <= 0) return;
-        soberPurpose = purpose == null ? "" : purpose.trim();
+    boolean startSober(String purpose, int minutes, long now, ZoneId zone) {
+        if (minutes <= 0) return false;
+        long costMs = soberUnlockCostMinutes(minutes) * MINUTE;
+        String cleanPurpose = purpose == null ? "" : purpose.trim();
+        String detail = (cleanPurpose.isEmpty() ? "临时解锁" : cleanPurpose) + " · " + minutes + " 分钟";
+        if (!spendTime(costMs, "SOBER", "开启清醒模式", detail, now, zone)) return false;
+        soberPurpose = cleanPurpose;
         soberUntil = now + minutes * MINUTE;
-        String detail = (soberPurpose.isEmpty() ? "临时解锁" : soberPurpose) + " · " + minutes + " 分钟";
-        logEvent(date(now, zone), now, "SOBER", "开启清醒模式", detail, 0L);
+        return true;
     }
 
     void stopSober() {
         soberUntil = 0L;
         soberPurpose = "";
+    }
+
+    long totalSpendableMs() {
+        return creditMs + vaultMs;
+    }
+
+    boolean canAfford(long costMs) {
+        return costMs <= 0L || totalSpendableMs() >= costMs;
+    }
+
+    boolean spendTime(long costMs, String eventType, String title, String detail, long now, ZoneId zone) {
+        if (costMs <= 0L) return true;
+        if (totalSpendableMs() < costMs) return false;
+        long fromCredit = Math.min(creditMs, costMs);
+        creditMs -= fromCredit;
+        long rem = costMs - fromCredit;
+        vaultMs = Math.max(0L, vaultMs - rem);
+        String d = date(now, zone);
+        Day stats = day(d);
+        stats.spentMs += costMs;
+        if ("REWARD".equals(eventType)) stats.rewardSpentMs += costMs;
+        else if ("CONFIG".equals(eventType)) stats.configSpentMs += costMs;
+        logEvent(d, now, eventType, title, detail, -costMs);
+        return true;
+    }
+
+    void addReward(String id, String title, int costMinutes) {
+        if (id == null || title == null) return;
+        String trimmed = title.trim();
+        if (trimmed.isEmpty()) return;
+        rewards.put(id, new Reward(id, trimmed, costMinutes, 0, 0L));
+        rewardsSeeded = true;
+    }
+
+    void updateReward(String id, String title, int costMinutes) {
+        Reward r = rewards.get(id);
+        if (r == null || title == null) return;
+        String trimmed = title.trim();
+        if (trimmed.isEmpty()) return;
+        r.title = trimmed;
+        r.costMinutes = Math.max(5, Math.min(480, costMinutes));
+    }
+
+    void removeReward(String id) {
+        rewards.remove(id);
+    }
+
+    boolean redeemReward(String id, long now, ZoneId zone) {
+        Reward r = rewards.get(id);
+        if (r == null) return false;
+        long costMs = r.costMinutes * MINUTE;
+        if (!spendTime(costMs, "REWARD", "兑换奖励 · " + r.title,
+                "累计第 " + (r.redeemedCount + 1) + " 次", now, zone)) {
+            return false;
+        }
+        r.redeemedCount++;
+        r.lastRedeemedMs = now;
+        return true;
+    }
+
+    int learningRuleCount() {
+        int count = 0;
+        for (Rule r : rules.values()) if (r.category == Category.LEARNING) count++;
+        return count;
+    }
+
+    void putRule(String pkg, Rule rule) {
+        if (pkg == null || rule == null) return;
+        rules.put(pkg, rule);
+        if (rule.category == Category.LEARNING) freeLearningSlotUsed = true;
+    }
+
+    void addHabit(String id, Habit habit) {
+        if (id == null || habit == null) return;
+        habits.put(id, habit);
+        freeHabitSlotUsed = true;
+    }
+
+    int rateChangeCostMinutes(int oldPercent, int newPercent) {
+        if (oldPercent == newPercent) return 0;
+        if (newPercent > oldPercent) {
+            return 10 + Math.min(20, ((newPercent - oldPercent + 9) / 10) * 5);
+        }
+        return 10;
+    }
+
+    int stepConfigChangeCostMinutes(int oldSteps, int oldReward, int newSteps, int newReward) {
+        if (oldSteps == newSteps && oldReward == newReward) return 0;
+        return (newSteps < oldSteps || newReward > oldReward) ? 15 : 10;
+    }
+
+    int earlySleepConfigCostMinutes(boolean turningOffBedtime, int oldReward, int newReward, boolean clockChanged) {
+        if (turningOffBedtime || clockChanged) return Math.max(15, Math.max(oldReward, newReward) + 5);
+        if (newReward > oldReward) return Math.max(15, newReward);
+        if (newReward < oldReward) return 10;
+        return 0;
+    }
+
+    int ruleChangeCostMinutes(Rule existing, boolean newIsLearning, int newLimit) {
+        if (existing == null) {
+            if (!newIsLearning) return 0;
+            return (!freeLearningSlotUsed && learningRuleCount() == 0) ? 0 : 10;
+        }
+        boolean wasLearning = existing.category == Category.LEARNING;
+        if (wasLearning == newIsLearning && (wasLearning || existing.dailyMinutes == newLimit)) return 0;
+        if (!wasLearning && newIsLearning) return 15;
+        if (!wasLearning && !newIsLearning) {
+            if (newLimit > existing.dailyMinutes) {
+                return Math.min(30, 15 + ((newLimit - existing.dailyMinutes) / 15) * 5);
+            }
+            return 0;
+        }
+        return 0;
+    }
+
+    int removeRuleCostMinutes(Rule existing) {
+        return existing != null && existing.category == Category.LIMITED ? 15 : 0;
+    }
+
+    int habitChangeCostMinutes(Habit existing, int newReward) {
+        if (existing == null) return (!freeHabitSlotUsed && habits.isEmpty()) ? 0 : 10;
+        if (existing.rewardMinutes == newReward) return 0;
+        return newReward > existing.rewardMinutes ? 15 : 10;
+    }
+
+    int dailyCapChangeCostMinutes(int oldCap, int newCap) {
+        if (oldCap == newCap) return 0;
+        return newCap > oldCap ? 15 : 10;
+    }
+
+    int soberUnlockCostMinutes(int minutes) {
+        return Math.max(5, minutes);
     }
 
     boolean offlineRunning() {
@@ -228,6 +426,11 @@ final class FocusState {
         return elapsed;
     }
 
+    boolean canClaimOffline(long now) {
+        long total = offlineUnredeemedMs + offlineElapsed(now);
+        return total >= MIN_OFFLINE_CLAIM_MS && claimableOfflineMs(now) >= MINUTE;
+    }
+
     long claimableOfflineMs(long now) {
         long total = offlineUnredeemedMs + offlineElapsed(now);
         return (total * Math.max(0, offlinePercent)) / 100L;
@@ -235,6 +438,12 @@ final class FocusState {
 
     long claimOffline(long now, ZoneId zone) {
         long live = offlineElapsed(now);
+        int pct = Math.max(0, offlinePercent);
+        long totalRaw = offlineUnredeemedMs + live;
+        if (pct == 0 || totalRaw < MIN_OFFLINE_CLAIM_MS) return 0L;
+        long rewardMs = (totalRaw * pct) / 100L;
+        long granted = (rewardMs / MINUTE) * MINUTE;
+        if (granted <= 0L) return 0L;
         String d = date(now, zone);
         if (live > 0L) {
             day(d).offlineMs += live;
@@ -242,12 +451,7 @@ final class FocusState {
             if (offlineStartMs > 0L) offlineStartMs = now;
             offlineAccumulatedMs = 0L;
         }
-        int pct = Math.max(0, offlinePercent);
-        if (pct == 0 || offlineUnredeemedMs <= 0L) return 0L;
-        long rewardMs = (offlineUnredeemedMs * pct) / 100L;
-        long granted = (rewardMs / MINUTE) * MINUTE;
-        if (granted <= 0L) return 0L;
-        long consumed = Math.min(offlineUnredeemedMs, (granted * 100L) / pct);
+        long consumed = Math.min(offlineUnredeemedMs, (granted * 100L + pct - 1) / pct);
         offlineUnredeemedMs = Math.max(0L, offlineUnredeemedMs - consumed);
         Day stats = day(d);
         stats.offlineEarnedMs += granted;
@@ -342,17 +546,44 @@ final class FocusState {
         return moved;
     }
 
-    boolean checkIn(String id, long now, ZoneId zone) {
+    boolean habitMature(Habit habit, long now) {
+        return habit != null && (habit.createdMs <= 0L || now - habit.createdMs >= HABIT_MATURE_MS);
+    }
+
+    long habitWaitRemainingMs(Habit habit, long now) {
+        if (habit == null || habitMature(habit, now)) return 0L;
+        return Math.max(0L, HABIT_MATURE_MS - (now - habit.createdMs));
+    }
+
+    long remainingHabitCapMs(LocalDate today) {
+        Day d = days.get(today.toString());
+        long earned = d == null ? 0L : d.habitEarnedMs;
+        return Math.max(0L, Math.max(0, habitDailyCapMinutes) * MINUTE - earned);
+    }
+
+    CheckInResult checkInWithResult(String id, long now, ZoneId zone) {
         Habit habit = habits.get(id);
+        if (habit == null) return CheckInResult.NOT_FOUND;
         String date = date(now, zone);
-        if (habit == null || !habit.checkIns.add(date)) return false;
+        if (habit.checkIns.contains(date)) return CheckInResult.ALREADY_DONE;
+        if (!habitMature(habit, now)) return CheckInResult.COOLING_DOWN;
+        habit.checkIns.add(date);
         Day day = day(date);
         day.checkIns++;
-        long reward = Math.max(0, habit.rewardMinutes) * MINUTE;
-        grant(day, reward);
         LocalDate today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
-        logEvent(date, now, "HABIT", "习惯打卡 · " + habit.name, "连续 " + habit.streak(today) + " 天", reward);
-        return true;
+        long capLeft = remainingHabitCapMs(today);
+        long raw = Math.max(0, habit.rewardMinutes) * MINUTE;
+        long reward = Math.min(raw, capLeft);
+        day.habitEarnedMs += reward;
+        if (reward > 0L) grant(day, reward);
+        String detail = "连续 " + habit.streak(today) + " 天" + (reward < raw ? " · 今日习惯已达上限" : "");
+        logEvent(date, now, "HABIT", "习惯打卡 · " + habit.name, detail, reward);
+        return reward < raw ? CheckInResult.OK_CAPPED : CheckInResult.OK;
+    }
+
+    boolean checkIn(String id, long now, ZoneId zone) {
+        CheckInResult res = checkInWithResult(id, now, zone);
+        return res == CheckInResult.OK || res == CheckInResult.OK_CAPPED;
     }
 
     boolean earlySleepChecked(LocalDate date) {
@@ -361,6 +592,15 @@ final class FocusState {
 
     boolean earlySleepFailedOn(LocalDate date) {
         return earlySleepFailed.contains(date.toString());
+    }
+
+    boolean isEarlySleepClaimWindow(long now, ZoneId zone) {
+        if (!bedtime || sleepStart == sleepEnd) return false;
+        LocalTime clock = Instant.ofEpochMilli(now).atZone(zone).toLocalTime();
+        int minute = clock.getHour() * 60 + clock.getMinute();
+        int beforeStart = (sleepStart - minute + 1440) % 1440;
+        int afterEnd = (minute - sleepEnd + 1440) % 1440;
+        return beforeStart <= EARLY_SLEEP_PRE_WINDOW_MIN || afterEnd <= EARLY_SLEEP_POST_WINDOW_MIN;
     }
 
     boolean markEarlySleepFailed(long now, ZoneId zone) {
@@ -384,6 +624,7 @@ final class FocusState {
     }
 
     boolean claimEarlySleep(long now, ZoneId zone) {
+        if (!isEarlySleepClaimWindow(now, zone)) return false;
         String date = date(now, zone);
         if (earlySleepFailed.contains(date) || !earlySleepDays.add(date)) return false;
         long reward = Math.max(0, earlySleepRewardMinutes) * MINUTE;
@@ -394,26 +635,43 @@ final class FocusState {
         return true;
     }
 
-    void addTodo(String id, String title, int rewardMinutes, LocalDate date) {
+    void addTodo(String id, String title, int rewardMinutes, LocalDate date, long now) {
         if (id == null || title == null) return;
         String trimmed = title.trim();
         if (trimmed.isEmpty()) return;
-        todos.put(id, new Todo(id, trimmed, Math.max(0, rewardMinutes), false, false, date.toString(), ""));
+        todos.put(id, new Todo(id, trimmed, Math.max(0, rewardMinutes), false, false, date.toString(), "", now));
+    }
+
+    boolean todoMature(Todo todo, long now) {
+        return todo != null && (todo.createdMs <= 0L || now - todo.createdMs >= TODO_MATURE_MS);
+    }
+
+    long todoWaitRemainingMs(Todo todo, long now) {
+        if (todo == null || todoMature(todo, now)) return 0L;
+        return Math.max(0L, TODO_MATURE_MS - (now - todo.createdMs));
+    }
+
+    long remainingTodoCapMs(LocalDate today) {
+        Day d = days.get(today.toString());
+        long earned = d == null ? 0L : d.todoEarnedMs;
+        return Math.max(0L, Math.max(0, todoDailyCapMinutes) * MINUTE - earned);
     }
 
     void toggleTodo(String id, LocalDate date) {
         Todo todo = todos.get(id);
-        if (todo == null) return;
+        if (todo == null || todo.claimed) return;
         todo.done = !todo.done;
         todo.doneDate = todo.done ? date.toString() : "";
     }
 
-    long pendingTodoRewardMs() {
+    long pendingTodoRewardMs(long now, LocalDate today) {
         long sum = 0L;
         for (Todo todo : todos.values()) {
-            if (todo.done && !todo.claimed) sum += Math.max(0, todo.rewardMinutes) * MINUTE;
+            if (todo.done && !todo.claimed && todoMature(todo, now)) {
+                sum += Math.max(0, todo.rewardMinutes) * MINUTE;
+            }
         }
-        return sum;
+        return Math.min(sum, remainingTodoCapMs(today));
     }
 
     int pendingTodoCount() {
@@ -423,14 +681,20 @@ final class FocusState {
     }
 
     long claimTodos(long now, ZoneId zone) {
+        LocalDate today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
+        long capLeft = remainingTodoCapMs(today);
+        if (capLeft <= 0L) return 0L;
         long total = 0L;
         int count = 0;
         for (Todo todo : todos.values()) {
-            if (todo.done && !todo.claimed) {
-                todo.claimed = true;
-                total += Math.max(0, todo.rewardMinutes) * MINUTE;
-                count++;
-            }
+            if (!todo.done || todo.claimed || !todoMature(todo, now)) continue;
+            if (capLeft <= 0L) break;
+            long raw = Math.max(0, todo.rewardMinutes) * MINUTE;
+            long give = Math.min(raw, capLeft);
+            todo.claimed = true;
+            total += give;
+            capLeft -= give;
+            count++;
         }
         if (count == 0 || total <= 0L) return 0L;
         String d = date(now, zone);
@@ -456,17 +720,37 @@ final class FocusState {
         return true;
     }
 
-    void addManualSteps(int deltaSteps, LocalDate today) {
-        if (deltaSteps <= 0) return;
+    int remainingManualSteps(LocalDate today) {
+        Day d = days.get(today.toString());
+        int used = d == null ? 0 : d.manualSteps;
+        return Math.max(0, MANUAL_STEP_DAILY_LIMIT - used);
+    }
+
+    int addManualSteps(int deltaSteps, LocalDate today) {
+        if (deltaSteps <= 0) return 0;
+        int allowed = remainingManualSteps(today);
+        int actual = Math.min(deltaSteps, allowed);
+        if (actual <= 0) return 0;
         Day day = day(today.toString());
-        day.steps += deltaSteps;
+        day.steps += actual;
+        day.manualSteps += actual;
+        return actual;
+    }
+
+    long remainingStepCapMs(LocalDate today) {
+        Day d = days.get(today.toString());
+        long earned = d == null ? 0L : d.stepsEarnedMs;
+        return Math.max(0L, Math.max(0, stepDailyCapMinutes) * MINUTE - earned);
     }
 
     int claimableStepUnits(LocalDate today) {
         Day day = days.get(today.toString());
         if (day == null || stepsPerReward <= 0) return 0;
         int unredeemed = Math.max(0, day.steps - day.stepsClaimed);
-        return unredeemed / stepsPerReward;
+        int bySteps = unredeemed / stepsPerReward;
+        if (stepRewardMinutes <= 0) return 0;
+        int byCap = (int) (remainingStepCapMs(today) / (stepRewardMinutes * MINUTE));
+        return Math.min(bySteps, Math.max(0, byCap));
     }
 
     int pendingStepsRemainder(LocalDate today) {
@@ -481,9 +765,10 @@ final class FocusState {
         if (units <= 0) return 0L;
         Day day = day(today.toString());
         int consumed = units * stepsPerReward;
-        day.stepsClaimed += consumed;
-        long reward = (long) units * Math.max(0, stepRewardMinutes) * MINUTE;
+        long rawReward = (long) units * Math.max(0, stepRewardMinutes) * MINUTE;
+        long reward = Math.min(rawReward, remainingStepCapMs(today));
         if (reward <= 0L) return 0L;
+        day.stepsClaimed += consumed;
         day.stepsEarnedMs += reward;
         grant(day, reward);
         logEvent(today.toString(), now, "STEPS", "兑换步数奖励", "兑换 " + consumed + " 步", reward);

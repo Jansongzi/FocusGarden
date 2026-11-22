@@ -16,8 +16,10 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
@@ -320,14 +322,15 @@ final class GardenUi {
         sep.setBackgroundColor(LINE);
         sheet.addView(sep, -1, dp(activity, 1));
 
-        ScrollView scroller = new ScrollView(activity);
+        int maxH = Math.round(activity.getResources().getDisplayMetrics().heightPixels * 0.88f);
+        int maxScrollH = Math.max(dp(activity, 200), maxH - dp(activity, 92));
+        ScrollView scroller = new MaxHeightScrollView(activity, maxScrollH);
         scroller.setVerticalScrollBarEnabled(false);
         LinearLayout wrap = column(activity);
         wrap.setPadding(dp(activity, 20), dp(activity, 16), dp(activity, 20), dp(activity, 24));
         wrap.addView(body, -1, -2);
         scroller.addView(wrap, -1, -2);
 
-        int maxH = Math.round(activity.getResources().getDisplayMetrics().heightPixels * 0.88f);
         sheet.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
         dialog.setContentView(sheet);
 
@@ -339,14 +342,32 @@ final class GardenUi {
             win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             win.setDimAmount(0.42f);
         }
-        sheet.post(() -> {
-            if (sheet.getHeight() > maxH) {
-                scroller.getLayoutParams().height = maxH - dp(activity, 88);
-                scroller.requestLayout();
-            }
-        });
+        sheet.setTranslationY(dp(activity, 20));
+        sheet.setAlpha(0.92f);
+        sheet.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(150)
+                .setInterpolator(new DecelerateInterpolator())
+                .start();
         dialog.show();
         return dialog;
+    }
+
+    private static final class MaxHeightScrollView extends ScrollView {
+        private final int maxHeightPx;
+
+        MaxHeightScrollView(Context context, int maxHeightPx) {
+            super(context);
+            this.maxHeightPx = maxHeightPx;
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            int mode = MeasureSpec.getMode(heightMeasureSpec);
+            int size = MeasureSpec.getSize(heightMeasureSpec);
+            int cap = (mode == MeasureSpec.UNSPECIFIED) ? maxHeightPx : Math.min(size, maxHeightPx);
+            super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(cap, MeasureSpec.AT_MOST));
+        }
     }
 
     static void gap(LinearLayout parent, int height) {
@@ -380,15 +401,57 @@ final class GardenUi {
         return String.format(Locale.ROOT, "%02d:%02d", minutes / 60, minutes % 60);
     }
 
-    static void haptic(View view, boolean enabled, boolean strong) {
-        if (!enabled || view == null) return;
+    enum HapticKind { NAV, SWITCH, CONFIRM, REJECT }
+
+    private static long lastHapticMs;
+    private static HapticKind lastHapticKind;
+
+    private static int hapticPriority(HapticKind kind) {
+        if (kind == null) return 0;
+        return (kind == HapticKind.CONFIRM || kind == HapticKind.REJECT) ? 2 : 1;
+    }
+
+    static void haptic(View view, boolean enabled, HapticKind kind) {
+        if (!enabled || view == null || kind == null) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastHapticMs < 45L && hapticPriority(kind) <= hapticPriority(lastHapticKind)) return;
+        lastHapticMs = now;
+        lastHapticKind = kind;
         try {
-            view.performHapticFeedback(strong ? HapticFeedbackConstants.CONTEXT_CLICK
-                    : HapticFeedbackConstants.CLOCK_TICK);
-            Vibrator vib = view.getContext().getSystemService(Vibrator.class);
-            if (vib != null && vib.hasVibrator()) {
-                vib.vibrate(VibrationEffect.createOneShot(strong ? 16L : 9L, strong ? 95 : 48));
+            Context ctx = view.getContext();
+            Vibrator vib = null;
+            if (Build.VERSION.SDK_INT >= 31) {
+                VibratorManager vm = ctx.getSystemService(VibratorManager.class);
+                if (vm != null) vib = vm.getDefaultVibrator();
+            } else {
+                vib = ctx.getSystemService(Vibrator.class);
             }
+            if (vib != null && vib.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    int effectId = switch (kind) {
+                        case CONFIRM -> VibrationEffect.EFFECT_CLICK;
+                        case REJECT -> VibrationEffect.EFFECT_DOUBLE_CLICK;
+                        case NAV, SWITCH -> VibrationEffect.EFFECT_TICK;
+                    };
+                    vib.vibrate(VibrationEffect.createPredefined(effectId));
+                } else {
+                    long ms = switch (kind) {
+                        case CONFIRM -> 14L;
+                        case REJECT -> 22L;
+                        case NAV, SWITCH -> 8L;
+                    };
+                    int amp = switch (kind) {
+                        case CONFIRM -> 80;
+                        case REJECT -> 110;
+                        case NAV, SWITCH -> 40;
+                    };
+                    vib.vibrate(VibrationEffect.createOneShot(ms, amp));
+                }
+                return;
+            }
+            view.performHapticFeedback(kind == HapticKind.CONFIRM
+                    ? HapticFeedbackConstants.CONTEXT_CLICK
+                    : HapticFeedbackConstants.CLOCK_TICK);
         } catch (Exception ignored) {}
     }
 
@@ -407,9 +470,12 @@ final class GardenUi {
             setClickable(true);
             setFocusable(true);
             setOnClickListener(v -> {
-                haptic(this, FocusStore.get(getContext()).state.hapticFeedback, false);
-                setChecked(!checked, true);
-                if (listener != null) listener.accept(checked);
+                boolean target = !checked;
+                setChecked(target, true);
+                if (listener != null) listener.accept(target);
+                if (checked == target) {
+                    haptic(this, FocusStore.get(getContext()).state.hapticFeedback, HapticKind.SWITCH);
+                }
             });
         }
 
