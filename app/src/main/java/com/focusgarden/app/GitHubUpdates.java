@@ -33,6 +33,7 @@ import javax.net.ssl.HttpsURLConnection;
 
 final class GitHubUpdates {
     static final String MIME = "application/vnd.android.package-archive";
+    private static final String DEFAULT_REPOSITORY = "Jansongzi/FocusGarden";
     private static final long MAX_APK = 150L * 1024 * 1024;
     private static final Set<String> DOWNLOAD_HOSTS = new HashSet<>(Arrays.asList("github.com",
             "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"));
@@ -57,7 +58,8 @@ final class GitHubUpdates {
     }
 
     static String repository(Context context) {
-        return context.getSharedPreferences("github_updates", Context.MODE_PRIVATE).getString("repository", "");
+        return context.getSharedPreferences("github_updates", Context.MODE_PRIVATE)
+                .getString("repository", DEFAULT_REPOSITORY);
     }
 
     static void setRepository(Context context, String repository) throws IOException {

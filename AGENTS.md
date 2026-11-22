@@ -21,6 +21,6 @@
 
 计时、兑换和日规则集中在 `FocusState`，持久化由 `FocusStore` 管理。前端改动可沿用现有回调并保留旧数据兼容性。GitHub 更新的下载、校验与安装授权入口分别位于 `GitHubUpdates`、`UpdateProvider` 和 `UpdatePanel`。
 
-界面联调可以覆盖倒计时与番茄钟切换、暂停续计、学习和限制规则、编辑后保留打卡记录、统计日期切换、拦截页返回桌面，以及空更新源的配置入口。现有 JVM 检查位于 `checks/`。
+界面联调可以覆盖倒计时与番茄钟切换、暂停续计、学习和限制规则、编辑后保留打卡记录、统计日期切换、拦截页返回桌面，以及默认和自定义更新源。现有 JVM 检查位于 `checks/`。
 
 使用 JDK 17 或 21、Android SDK Platform 35 和 Build Tools 35.0.0。设置 `JAVA_HOME` 与 `ANDROID_SDK_ROOT` 后，运行 `sh ./build-local-apk.sh` 可直接生成预览 APK。覆盖安装要沿用原签名，新签名的测试包可安装到独立模拟器。

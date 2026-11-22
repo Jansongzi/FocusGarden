@@ -22,7 +22,7 @@ Android 本地专注工具，支持 Android 8.1 及更高版本。
 
 ## GitHub 更新
 
-1. 从右上角「设置」进入「GitHub 更新」，填写公开仓库名 `owner/repo` 或 GitHub 仓库链接。出厂时更新源为空。
+1. 从右上角「设置」进入「GitHub 更新」。默认使用 [Jansongzi/FocusGarden](https://github.com/Jansongzi/FocusGarden/releases)，也可以填写其他公开仓库名 `owner/repo` 或 GitHub 仓库链接。
 2. 点击「检查更新」。应用读取最近一个正式 Release，显示版本和发布说明。
 3. 选择 APK 附件。应用检查字节数、GitHub 提供的 SHA-256、应用包名、签名和构建号。首次需要在系统设置中允许留白专注请求安装，再返回软件更新页发起安装。
 
