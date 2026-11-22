@@ -1,0 +1,10 @@
+<resources>
+    <item type="drawable" name="banner_state_light">@drawable/pond_at_dusk</item>
+    <item type="drawable" name="banner_state_peak">@drawable/pond_at_dusk</item>
+    <item type="drawable" name="banner_state_low">@drawable/pond_overcast</item>
+    <item type="drawable" name="banner_state_busy">@drawable/bg_sleep_stars</item>
+    <item type="drawable" name="mascot_plead">@drawable/mascot_calm</item>
+    <item type="drawable" name="mascot_point">@drawable/mascot_calm</item>
+    <item type="drawable" name="mascot_shock">@drawable/mascot_calm</item>
+    <item type="drawable" name="mascot_stern">@drawable/mascot_strong</item>
+</resources>

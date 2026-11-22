@@ -1,0 +1,24 @@
+plugins {
+    id 'com.android.application'
+}
+
+def releaseVersion = new Properties()
+rootProject.file('version.properties').withInputStream { releaseVersion.load(it) }
+
+android {
+    namespace 'com.focusgarden.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.focusgarden.app'
+        minSdk 27
+        targetSdk 35
+        versionCode releaseVersion.getProperty('versionCode').toInteger()
+        versionName releaseVersion.getProperty('versionName')
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

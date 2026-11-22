@@ -1,0 +1,166 @@
+package com.focusgarden.app;
+
+import java.time.Instant;
+import java.time.ZoneId;
+
+import static com.focusgarden.app.FocusState.MINUTE;
+import static com.focusgarden.app.FocusState.Category.*;
+import static com.focusgarden.app.FocusState.Restriction.*;
+
+final class FocusStateCheck {
+    private static final String STUDY = "test.reading";
+    private static final String VIDEO = "test.video";
+    private static final ZoneId UTC = ZoneId.of("UTC");
+
+    public static void main(String[] args) {
+        long noon = at("2026-11-22T12:00:00Z");
+        var state = new FocusState();
+        state.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING, 0));
+        state.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 1));
+
+        state.addUsage(STUDY, noon, noon + 2 * MINUTE, UTC);
+        equal(1 * MINUTE, state.creditMs);
+        state.addUsage(VIDEO, noon, noon + 90_000, UTC);
+        equal(30_000L, state.creditMs);
+        state.addUsage(VIDEO, noon + 90_000, noon + 150_000, UTC);
+        equal(0L, state.creditMs);
+        equal(120_000L, state.used(VIDEO, "2026-11-22"));
+        equal(BUDGET, state.restriction(VIDEO, noon + 150_000, UTC));
+
+        long midnight = at("2026-11-23T00:00:00Z");
+        state.addUsage(VIDEO, midnight - 500, midnight + 500, UTC);
+        equal(500L, state.used(VIDEO, "2026-11-23"));
+        equal(NONE, state.restriction(VIDEO, midnight + 500, UTC));
+
+        state.bedtime = true;
+        equal(BEDTIME, state.restriction(VIDEO, at("2026-11-22T23:00:00Z"), UTC));
+        equal(BEDTIME, state.restriction(VIDEO, midnight + 1, UTC));
+        equal(NONE, state.restriction(VIDEO, at("2026-11-23T07:00:00Z"), UTC));
+        equal(NONE, state.restriction(STUDY, midnight + 1, UTC));
+
+        var pomo = new FocusState();
+        pomo.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 10));
+        pomo.start(25, 5, 4, noon);
+        equal(FOCUS, pomo.restriction(VIDEO, noon + 1, UTC));
+        equal(FocusState.Transition.BREAK, pomo.advance(noon + 25 * MINUTE, UTC));
+        equal(NONE, pomo.restriction(VIDEO, noon + 26 * MINUTE, UTC));
+        equal(5 * MINUTE, pomo.creditMs);
+        equal(FocusState.Transition.WORK, pomo.advance(noon + 30 * MINUTE, UTC));
+        equal(FocusState.Transition.FINISHED, pomo.advance(noon + 120 * MINUTE, UTC));
+        equal(20 * MINUTE, pomo.creditMs);
+        equal(100 * MINUTE, pomo.days.get("2026-11-22").focusMs);
+        equal(FocusState.Transition.NONE, pomo.advance(noon + 120 * MINUTE, UTC));
+        pomo.start(10, 0, 1, noon + 130 * MINUTE);
+        pomo.cancel();
+        equal(20 * MINUTE, pomo.creditMs);
+
+        pomo.habits.put("reading", new FocusState.Habit("Reading", 5, ""));
+        equal(true, pomo.checkIn("reading", noon, UTC));
+        equal(false, pomo.checkIn("reading", noon + 20 * MINUTE, UTC));
+        equal(true, pomo.checkIn("reading", midnight, UTC));
+        equal(30 * MINUTE, pomo.creditMs);
+        equal(2, pomo.habits.get("reading").streak(java.time.LocalDate.parse("2026-11-23")));
+        equal(false, pomo.checkIn("reading", noon, UTC));
+
+        var paused = new FocusState();
+        paused.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 30));
+        paused.start(20, 5, 2, noon);
+        paused.togglePause(noon + 2 * MINUTE);
+        equal(true, paused.paused());
+        equal(18 * MINUTE, paused.remaining(noon + 100 * MINUTE));
+        equal(FOCUS, paused.restriction(VIDEO, noon + 100 * MINUTE, UTC));
+        equal(FocusState.Transition.NONE, paused.advance(noon + 100 * MINUTE, UTC));
+        equal(0L, paused.creditMs);
+        paused.togglePause(noon + 100 * MINUTE);
+        equal(false, paused.paused());
+        equal(FocusState.Transition.BREAK, paused.advance(noon + 118 * MINUTE, UTC));
+        equal(4 * MINUTE, paused.creditMs);
+
+        // Vault deposit/withdraw
+        var extra = new FocusState();
+        extra.creditMs = 25 * MINUTE;
+        equal(10 * MINUTE, extra.depositToVault(10 * MINUTE, noon, UTC));
+        equal(15 * MINUTE, extra.creditMs);
+        equal(10 * MINUTE, extra.vaultMs);
+        equal(15 * MINUTE, extra.depositToVault(30 * MINUTE, noon + 1_000, UTC));
+        equal(0L, extra.creditMs);
+        equal(25 * MINUTE, extra.vaultMs);
+        equal(10 * MINUTE, extra.withdrawFromVault(10 * MINUTE, noon + 2_000, UTC));
+        equal(10 * MINUTE, extra.creditMs);
+        equal(15 * MINUTE, extra.vaultMs);
+
+        // Sober mode temporarily overrides restrictions
+        extra.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        extra.creditMs = 0L;
+        equal(BUDGET, extra.restriction(VIDEO, noon, UTC));
+        extra.startSober("Reply message", 10, noon, UTC);
+        equal(true, extra.soberActive(noon + 5 * MINUTE));
+        equal(NONE, extra.restriction(VIDEO, noon + 5 * MINUTE, UTC));
+        extra.addUsage(VIDEO, noon + 9 * MINUTE, noon + 11 * MINUTE, UTC);
+        equal(MINUTE, extra.used(VIDEO, "2026-11-22"));
+        equal(0L, extra.creditMs);
+        equal(false, extra.soberActive(noon + 10 * MINUTE));
+        equal(BUDGET, extra.restriction(VIDEO, noon + 10 * MINUTE, UTC));
+
+        // Early sleep challenge
+        equal(true, extra.claimEarlySleep(noon, UTC));
+        equal(false, extra.claimEarlySleep(noon + 1_000, UTC));
+        equal(true, extra.claimEarlySleep(midnight, UTC));
+        equal(2, extra.earlySleepStreak(java.time.LocalDate.parse("2026-11-23")));
+        equal(30 * MINUTE, extra.creditMs);
+
+        // Todos add / toggle / claim
+        var day1 = java.time.LocalDate.parse("2026-11-22");
+        extra.addTodo("t1", "Finish essay", 5, day1);
+        extra.addTodo("t2", "Clean desk", 3, day1);
+        equal(2, extra.pendingTodoCount());
+        extra.toggleTodo("t1", day1);
+        equal(1, extra.pendingTodoCount());
+        equal(5 * MINUTE, extra.pendingTodoRewardMs());
+        equal(5 * MINUTE, extra.claimTodos(noon, UTC));
+        equal(0L, extra.pendingTodoRewardMs());
+        equal(0L, extra.claimTodos(noon + 1_000, UTC));
+        equal(35 * MINUTE, extra.creditMs);
+
+        // Flashcards
+        for (int i = 0; i < 4; i++) equal(false, extra.recordFlashcardWord(true, noon, UTC));
+        equal(true, extra.recordFlashcardWord(true, noon, UTC));
+        equal(1, extra.flashcardPendingRounds);
+        equal(5 * MINUTE, extra.claimFlashcards(noon, UTC));
+        equal(0, extra.flashcardPendingRounds);
+        equal(40 * MINUTE, extra.creditMs);
+
+        // Steps
+        extra.addManualSteps(2500, day1);
+        equal(2, extra.claimableStepUnits(day1));
+        equal(2500, extra.pendingStepsRemainder(day1));
+        equal(10 * MINUTE, extra.claimSteps(noon, UTC));
+        equal(0, extra.claimableStepUnits(day1));
+        equal(500, extra.pendingStepsRemainder(day1));
+        equal(50 * MINUTE, extra.creditMs);
+
+        var counter = new FocusState();
+        equal(true, counter.recordStepCounter(400, day1));
+        equal(true, counter.recordStepCounter(480, day1));
+        equal(false, counter.recordStepCounter(480, day1));
+        counter.addManualSteps(500, day1);
+        equal(true, counter.recordStepCounter(490, day1));
+        equal(true, counter.recordStepCounter(5, day1));
+        equal(595, counter.day(day1.toString()).steps);
+        equal(true, counter.recordStepCounter(70, day1.plusDays(1)));
+        equal(true, counter.recordStepCounter(72, day1.plusDays(1)));
+        equal(2, counter.day(day1.plusDays(1).toString()).steps);
+
+        // Timeline events recorded
+        equal(true, extra.day("2026-11-22").events.size() >= 6);
+        System.out.println("PASS: learning rewards, per-app limit and credit spending, midnight split, bedtime, Pomodoro, check-ins, vault, sober, sleep, todos, flashcards and steps");
+    }
+
+    private static long at(String instant) {
+        return Instant.parse(instant).toEpochMilli();
+    }
+
+    private static void equal(Object expected, Object actual) {
+        if (!expected.equals(actual)) throw new AssertionError("Expected " + expected + ", got " + actual);
+    }
+}

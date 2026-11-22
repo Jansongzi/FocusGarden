@@ -1,0 +1,8 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <bitmap android:src="@drawable/pond_at_dusk" android:gravity="fill" />
+    </item>
+    <item>
+        <shape><solid android:color="#605A6774" /></shape>
+    </item>
+</layer-list>

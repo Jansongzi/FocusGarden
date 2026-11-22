@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">留白专注</string>
+    <string name="accessibility_label">留白专注 · 应用限制</string>
+    <string name="accessibility_description">只使用窗口变化事件的来源应用来统计你选中的学习或限制应用，并在达到限制时显示提醒。事件中的屏幕内容不会被读取。可随时在系统设置中关闭。</string>
+    <string name="focus_tile">留白专注</string>
+    <string name="focus_widget">专注与结余</string>
+</resources>
