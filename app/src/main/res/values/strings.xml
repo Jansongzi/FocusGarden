@@ -4,4 +4,8 @@
     <string name="accessibility_description">只使用窗口变化事件的来源应用来统计你选中的学习或限制应用，并在达到限制时显示提醒。事件中的屏幕内容不会被读取。可随时在系统设置中关闭。</string>
     <string name="focus_tile">留白专注</string>
     <string name="focus_widget">专注与结余</string>
+    <string name="wallpaper_label">留白专注保活壁纸</string>
+    <string name="wallpaper_description">展示自选桌面壁纸并辅助留白专注在后台稳定守护，降低被系统查杀概率。</string>
+    <string name="admin_label">留白专注 · 防卸载保护</string>
+    <string name="admin_description">开启后可防止误操作或冲动卸载留白专注，需要时可在本页面或系统设备管理器中取消激活。</string>
 </resources>

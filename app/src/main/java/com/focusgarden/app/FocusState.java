@@ -75,14 +75,14 @@ final class FocusState {
         long learningMs;
         long limitedMs;
         long focusMs;
+        long offlineMs;
         long earnedMs;
         long spentMs;
         int checkIns;
         long learningEarnedMs;
         long focusEarnedMs;
+        long offlineEarnedMs;
         long todoEarnedMs;
-        int flashcardCount;
-        long flashcardEarnedMs;
         int steps;
         int stepsClaimed;
         long stepsEarnedMs;
@@ -94,6 +94,8 @@ final class FocusState {
     final Map<String, Day> days = new LinkedHashMap<>();
     final Map<String, Todo> todos = new LinkedHashMap<>();
     final TreeSet<String> earlySleepDays = new TreeSet<>();
+    final TreeSet<String> earlySleepFailed = new TreeSet<>();
+    final TreeSet<Long> heartbeats = new TreeSet<>();
     final Set<String> hiddenCards = new LinkedHashSet<>();
 
     long creditMs;
@@ -103,6 +105,7 @@ final class FocusState {
 
     int learningPercent = 50;
     int focusPercent = 20;
+    int offlinePercent = 50;
     boolean bedtime;
     int sleepStart = 23 * 60;
     int sleepEnd = 7 * 60;
@@ -120,20 +123,23 @@ final class FocusState {
     int roundsLeft;
     boolean inBreak;
 
+    long offlineStartMs;
+    long offlineAccumulatedMs;
+    long offlineUnredeemedMs;
+
     long soberUntil;
     String soberPurpose = "";
-
-    String flashcardDeck = "CET4";
-    int flashcardRewardMinutes = 5;
-    int flashcardWordsPerRound = 5;
-    int flashcardPendingRounds;
-    int flashcardProgressInRound;
-    int flashcardTotalLearned;
 
     int stepsPerReward = 1000;
     int stepRewardMinutes = 5;
     String stepBaselineDate = "";
     float stepLastCounter = -1f;
+
+    long firstSeenMs;
+    boolean floatingBall;
+    boolean excludeFromRecents;
+    boolean guardSettingsDuringFocus;
+    boolean hapticFeedback = true;
 
     boolean timeAwarenessBar = true;
     int blockTheme = 0;
@@ -181,14 +187,99 @@ final class FocusState {
         soberPurpose = "";
     }
 
+    boolean offlineRunning() {
+        return offlineStartMs > 0L;
+    }
+
+    boolean offlinePaused() {
+        return offlineStartMs == 0L && offlineAccumulatedMs > 0L;
+    }
+
+    boolean offlineActive() {
+        return offlineRunning() || offlinePaused();
+    }
+
+    long offlineElapsed(long now) {
+        return offlineAccumulatedMs + (offlineStartMs > 0L ? Math.max(0L, now - offlineStartMs) : 0L);
+    }
+
+    void startOffline(long now) {
+        if (offlineStartMs == 0L) offlineStartMs = now;
+    }
+
+    void pauseOffline(long now) {
+        if (offlineStartMs > 0L) {
+            offlineAccumulatedMs += Math.max(0L, now - offlineStartMs);
+            offlineStartMs = 0L;
+        }
+    }
+
+    long stopOffline(long now, ZoneId zone) {
+        long elapsed = offlineElapsed(now);
+        offlineStartMs = 0L;
+        offlineAccumulatedMs = 0L;
+        if (elapsed <= 0L) return 0L;
+        String d = date(now, zone);
+        day(d).offlineMs += elapsed;
+        offlineUnredeemedMs += elapsed;
+        if (elapsed >= MINUTE) {
+            logEvent(d, now, "OFFLINE", "完成离线锁机", "累计离线 " + (elapsed / MINUTE) + " 分钟", 0L);
+        }
+        return elapsed;
+    }
+
+    long claimableOfflineMs(long now) {
+        long total = offlineUnredeemedMs + offlineElapsed(now);
+        return (total * Math.max(0, offlinePercent)) / 100L;
+    }
+
+    long claimOffline(long now, ZoneId zone) {
+        long live = offlineElapsed(now);
+        String d = date(now, zone);
+        if (live > 0L) {
+            day(d).offlineMs += live;
+            offlineUnredeemedMs += live;
+            if (offlineStartMs > 0L) offlineStartMs = now;
+            offlineAccumulatedMs = 0L;
+        }
+        int pct = Math.max(0, offlinePercent);
+        if (pct == 0 || offlineUnredeemedMs <= 0L) return 0L;
+        long rewardMs = (offlineUnredeemedMs * pct) / 100L;
+        long granted = (rewardMs / MINUTE) * MINUTE;
+        if (granted <= 0L) return 0L;
+        long consumed = Math.min(offlineUnredeemedMs, (granted * 100L) / pct);
+        offlineUnredeemedMs = Math.max(0L, offlineUnredeemedMs - consumed);
+        Day stats = day(d);
+        stats.offlineEarnedMs += granted;
+        grant(stats, granted);
+        logEvent(d, now, "OFFLINE", "兑换离线锁机奖励", "结算 " + (consumed / MINUTE) + " 分钟离线", granted);
+        return granted;
+    }
+
     Restriction restriction(String pkg, long now, ZoneId zone) {
         Rule rule = rules.get(pkg);
         if (rule == null || rule.category != Category.LIMITED) return Restriction.NONE;
         if (soberActive(now)) return Restriction.NONE;
         if (bedtimeAt(now, zone)) return Restriction.BEDTIME;
-        if ((phaseEnd > now || paused()) && !inBreak) return Restriction.FOCUS;
+        if (((phaseEnd > now || paused()) && !inBreak) || offlineRunning()) return Restriction.FOCUS;
         long free = rule.dailyMinutes * MINUTE - used(pkg, date(now, zone));
         return free <= 0 && creditMs == 0 ? Restriction.BUDGET : Restriction.NONE;
+    }
+
+    long syncUsageTotal(String pkg, long reportedTotalMs, long now, ZoneId zone) {
+        Rule rule = rules.get(pkg);
+        if (rule == null || reportedTotalMs <= 0L) return 0L;
+        String d = date(now, zone);
+        long recorded = used(pkg, d);
+        long delta = reportedTotalMs - recorded;
+        if (delta < 5_000L) return 0L;
+        long dayStart = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+                .atStartOfDay(zone).toInstant().toEpochMilli();
+        long start = Math.max(dayStart, now - delta);
+        long actual = Math.max(0L, now - start);
+        if (actual <= 0L) return 0L;
+        addUsage(pkg, start, now, zone);
+        return actual;
     }
 
     void addUsage(String pkg, long start, long end, ZoneId zone) {
@@ -268,6 +359,20 @@ final class FocusState {
         return earlySleepDays.contains(date.toString());
     }
 
+    boolean earlySleepFailedOn(LocalDate date) {
+        return earlySleepFailed.contains(date.toString());
+    }
+
+    boolean markEarlySleepFailed(long now, ZoneId zone) {
+        String date = date(now, zone);
+        if (earlySleepDays.contains(date)) return false;
+        if (earlySleepFailed.add(date)) {
+            logEvent(date, now, "SLEEP", "早睡挑战未达标", "睡眠时段打开了受限应用", 0L);
+            return true;
+        }
+        return false;
+    }
+
     int earlySleepStreak(LocalDate today) {
         LocalDate day = earlySleepChecked(today) ? today : today.minusDays(1);
         int count = 0;
@@ -280,7 +385,7 @@ final class FocusState {
 
     boolean claimEarlySleep(long now, ZoneId zone) {
         String date = date(now, zone);
-        if (!earlySleepDays.add(date)) return false;
+        if (earlySleepFailed.contains(date) || !earlySleepDays.add(date)) return false;
         long reward = Math.max(0, earlySleepRewardMinutes) * MINUTE;
         Day day = day(date);
         grant(day, reward);
@@ -336,35 +441,6 @@ final class FocusState {
         return total;
     }
 
-    boolean recordFlashcardWord(boolean known, long now, ZoneId zone) {
-        String d = date(now, zone);
-        day(d).flashcardCount++;
-        if (!known) return false;
-        flashcardTotalLearned++;
-        flashcardProgressInRound++;
-        int target = Math.max(1, flashcardWordsPerRound);
-        if (flashcardProgressInRound >= target) {
-            flashcardProgressInRound = 0;
-            flashcardPendingRounds++;
-            return true;
-        }
-        return false;
-    }
-
-    long claimFlashcards(long now, ZoneId zone) {
-        if (flashcardPendingRounds <= 0) return 0L;
-        int rounds = flashcardPendingRounds;
-        long reward = (long) rounds * Math.max(0, flashcardRewardMinutes) * MINUTE;
-        flashcardPendingRounds = 0;
-        if (reward <= 0L) return 0L;
-        String d = date(now, zone);
-        Day day = day(d);
-        day.flashcardEarnedMs += reward;
-        grant(day, reward);
-        logEvent(d, now, "FLASHCARD", "兑换闪卡奖励", "完成 " + rounds + " 轮背词", reward);
-        return reward;
-    }
-
     boolean recordStepCounter(float counter, LocalDate today) {
         if (!Float.isFinite(counter) || counter < 0) return false;
         String date = today.toString();
@@ -374,7 +450,6 @@ final class FocusState {
             return true;
         }
         if (counter == stepLastCounter) return false;
-        // The device counter starts over at zero after a reboot.
         float delta = counter < stepLastCounter ? counter : counter - stepLastCounter;
         stepLastCounter = counter;
         day(date).steps += Math.round(delta);
@@ -415,6 +490,28 @@ final class FocusState {
         return reward;
     }
 
+    void recordHeartbeat(long now) {
+        if (now <= 0L) return;
+        if (firstSeenMs == 0L || now < firstSeenMs) firstSeenMs = now;
+        long bucket = now / (30L * MINUTE);
+        heartbeats.add(bucket);
+        long minKeep = bucket - 96L;
+        heartbeats.removeIf(b -> b < minKeep);
+    }
+
+    int[] heartbeatBuckets24h(long now) {
+        int[] out = new int[48];
+        long curBucket = now / (30L * MINUTE);
+        long firstBucket = firstSeenMs > 0L ? firstSeenMs / (30L * MINUTE) : curBucket + 1L;
+        for (int i = 0; i < 48; i++) {
+            long b = curBucket - 47L + i;
+            if (heartbeats.contains(b)) out[i] = 2;
+            else if (b >= firstBucket) out[i] = 1;
+            else out[i] = 0;
+        }
+        return out;
+    }
+
     void logEvent(String date, long timeMs, String type, String title, String detail, long deltaMs) {
         Day day = day(date);
         day.events.add(new Event(timeMs, type, title, detail == null ? "" : detail, deltaMs));
@@ -427,9 +524,10 @@ final class FocusState {
         int checked = 0;
         for (Habit h : habits.values()) if (h.checked(today)) checked++;
         int score = 78;
-        score += (int) Math.min(14, (d.focusMs + d.learningMs) / (10 * MINUTE) * 3);
-        score += Math.min(8, checked * 3 + (d.flashcardCount / 5) * 2);
+        score += (int) Math.min(14, (d.focusMs + d.learningMs + d.offlineMs) / (10 * MINUTE) * 3);
+        score += Math.min(8, checked * 3);
         if (earlySleepChecked(today)) score += 4;
+        if (earlySleepFailedOn(today)) score -= 6;
         if (d.steps >= 3000) score += 2;
         score -= (int) Math.min(48, d.limitedMs / (5 * MINUTE) * 3);
         return Math.max(0, Math.min(100, score));

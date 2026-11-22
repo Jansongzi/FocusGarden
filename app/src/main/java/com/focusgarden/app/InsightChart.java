@@ -18,7 +18,7 @@ final class InsightChart extends View {
     InsightChart(Context context, FocusState.Day day, long max) {
         super(context);
         long denom = Math.max(1L, max);
-        focus = Math.min(1f, (float) day.focusMs / denom);
+        focus = Math.min(1f, (float) (day.focusMs + day.offlineMs) / denom);
         study = Math.min(1f - focus, (float) day.learningMs / denom);
         entertainment = Math.min(1f - focus - study, (float) day.limitedMs / denom);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);

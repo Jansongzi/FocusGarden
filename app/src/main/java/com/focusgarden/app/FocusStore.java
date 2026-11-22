@@ -38,6 +38,7 @@ final class FocusStore {
 
         state.learningPercent = root.optInt("learningPercent", 50);
         state.focusPercent = root.optInt("focusPercent", 20);
+        state.offlinePercent = root.optInt("offlinePercent", 50);
         state.bedtime = root.optBoolean("bedtime");
         state.sleepStart = root.optInt("sleepStart", 1380);
         state.sleepEnd = root.optInt("sleepEnd", 420);
@@ -55,20 +56,23 @@ final class FocusStore {
         state.roundsLeft = root.optInt("roundsLeft");
         state.inBreak = root.optBoolean("inBreak");
 
+        state.offlineStartMs = root.optLong("offlineStartMs");
+        state.offlineAccumulatedMs = root.optLong("offlineAccumulatedMs");
+        state.offlineUnredeemedMs = root.optLong("offlineUnredeemedMs");
+
         state.soberUntil = root.optLong("soberUntil");
         state.soberPurpose = root.optString("soberPurpose", "");
-
-        state.flashcardDeck = root.optString("flashcardDeck", "CET4");
-        state.flashcardRewardMinutes = root.optInt("flashcardRewardMinutes", 5);
-        state.flashcardWordsPerRound = root.optInt("flashcardWordsPerRound", 5);
-        state.flashcardPendingRounds = root.optInt("flashcardPendingRounds");
-        state.flashcardProgressInRound = root.optInt("flashcardProgressInRound");
-        state.flashcardTotalLearned = root.optInt("flashcardTotalLearned");
 
         state.stepsPerReward = root.optInt("stepsPerReward", 1000);
         state.stepRewardMinutes = root.optInt("stepRewardMinutes", 5);
         state.stepBaselineDate = root.optString("stepBaselineDate", "");
         state.stepLastCounter = (float) root.optDouble("stepLastCounter", -1.0);
+
+        state.firstSeenMs = root.optLong("firstSeenMs");
+        state.floatingBall = root.optBoolean("floatingBall");
+        state.excludeFromRecents = root.optBoolean("excludeFromRecents");
+        state.guardSettingsDuringFocus = root.optBoolean("guardSettingsDuringFocus");
+        state.hapticFeedback = root.optBoolean("hapticFeedback", true);
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
         state.blockTheme = root.optInt("blockTheme", 0);
@@ -81,11 +85,27 @@ final class FocusStore {
             }
         }
 
+        JSONArray earlyFailed = root.optJSONArray("earlySleepFailed");
+        if (earlyFailed != null) {
+            for (int i = 0; i < earlyFailed.length(); i++) {
+                String d = earlyFailed.optString(i);
+                if (!d.isEmpty()) state.earlySleepFailed.add(d);
+            }
+        }
+
+        JSONArray beats = root.optJSONArray("heartbeats");
+        if (beats != null) {
+            for (int i = 0; i < beats.length(); i++) {
+                long b = beats.optLong(i, -1L);
+                if (b >= 0L) state.heartbeats.add(b);
+            }
+        }
+
         JSONArray hidden = root.optJSONArray("hiddenCards");
         if (hidden != null) {
             for (int i = 0; i < hidden.length(); i++) {
                 String key = hidden.optString(i);
-                if (!key.isEmpty()) state.hiddenCards.add(key);
+                if (!key.isEmpty() && !"flashcards".equals(key)) state.hiddenCards.add(key);
             }
         }
 
@@ -136,14 +156,14 @@ final class FocusStore {
             day.learningMs = row.optLong("learning");
             day.limitedMs = row.optLong("limited");
             day.focusMs = row.optLong("focus");
+            day.offlineMs = row.optLong("offline");
             day.earnedMs = row.optLong("earned");
             day.spentMs = row.optLong("spent");
             day.checkIns = row.optInt("checkIns");
             day.learningEarnedMs = row.optLong("learningEarned");
             day.focusEarnedMs = row.optLong("focusEarned");
+            day.offlineEarnedMs = row.optLong("offlineEarned");
             day.todoEarnedMs = row.optLong("todoEarned");
-            day.flashcardCount = row.optInt("flashcardCount");
-            day.flashcardEarnedMs = row.optLong("flashcardEarned");
             day.steps = row.optInt("steps");
             day.stepsClaimed = row.optInt("stepsClaimed");
             day.stepsEarnedMs = row.optLong("stepsEarned");
@@ -180,6 +200,7 @@ final class FocusStore {
             String cutoff = LocalDate.now().minusDays(90).toString();
             state.days.keySet().removeIf(date -> date.compareTo(cutoff) < 0);
             state.earlySleepDays.removeIf(date -> date.compareTo(cutoff) < 0);
+            state.earlySleepFailed.removeIf(date -> date.compareTo(cutoff) < 0);
 
             JSONObject root = new JSONObject()
                     .put("credit", state.creditMs)
@@ -188,6 +209,7 @@ final class FocusStore {
                     .put("vaultStepMinutes", state.vaultStepMinutes)
                     .put("learningPercent", state.learningPercent)
                     .put("focusPercent", state.focusPercent)
+                    .put("offlinePercent", state.offlinePercent)
                     .put("bedtime", state.bedtime)
                     .put("sleepStart", state.sleepStart)
                     .put("sleepEnd", state.sleepEnd)
@@ -203,21 +225,25 @@ final class FocusStore {
                     .put("restMinutes", state.restMinutes)
                     .put("roundsLeft", state.roundsLeft)
                     .put("inBreak", state.inBreak)
+                    .put("offlineStartMs", state.offlineStartMs)
+                    .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
+                    .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
                     .put("soberUntil", state.soberUntil)
                     .put("soberPurpose", state.soberPurpose)
-                    .put("flashcardDeck", state.flashcardDeck)
-                    .put("flashcardRewardMinutes", state.flashcardRewardMinutes)
-                    .put("flashcardWordsPerRound", state.flashcardWordsPerRound)
-                    .put("flashcardPendingRounds", state.flashcardPendingRounds)
-                    .put("flashcardProgressInRound", state.flashcardProgressInRound)
-                    .put("flashcardTotalLearned", state.flashcardTotalLearned)
                     .put("stepsPerReward", state.stepsPerReward)
                     .put("stepRewardMinutes", state.stepRewardMinutes)
                     .put("stepBaselineDate", state.stepBaselineDate)
                     .put("stepLastCounter", state.stepLastCounter)
+                    .put("firstSeenMs", state.firstSeenMs)
+                    .put("floatingBall", state.floatingBall)
+                    .put("excludeFromRecents", state.excludeFromRecents)
+                    .put("guardSettingsDuringFocus", state.guardSettingsDuringFocus)
+                    .put("hapticFeedback", state.hapticFeedback)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
                     .put("blockTheme", state.blockTheme)
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
+                    .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
+                    .put("heartbeats", new JSONArray(state.heartbeats))
                     .put("hiddenCards", new JSONArray(state.hiddenCards));
 
             JSONObject rules = new JSONObject();
@@ -266,14 +292,14 @@ final class FocusStore {
                         .put("learning", day.learningMs)
                         .put("limited", day.limitedMs)
                         .put("focus", day.focusMs)
+                        .put("offline", day.offlineMs)
                         .put("earned", day.earnedMs)
                         .put("spent", day.spentMs)
                         .put("checkIns", day.checkIns)
                         .put("learningEarned", day.learningEarnedMs)
                         .put("focusEarned", day.focusEarnedMs)
+                        .put("offlineEarned", day.offlineEarnedMs)
                         .put("todoEarned", day.todoEarnedMs)
-                        .put("flashcardCount", day.flashcardCount)
-                        .put("flashcardEarned", day.flashcardEarnedMs)
                         .put("steps", day.steps)
                         .put("stepsClaimed", day.stepsClaimed)
                         .put("stepsEarned", day.stepsEarnedMs)

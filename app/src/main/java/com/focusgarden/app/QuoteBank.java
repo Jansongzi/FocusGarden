@@ -11,16 +11,12 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 final class QuoteBank {
     record Quote(String text, String author) {}
-    record Word(String en, String zh) {}
 
     private static List<Quote> cachedQuotes;
-    private static final Map<String, List<Word>> cachedDecks = new HashMap<>();
 
     static List<Quote> quotes(Context context) {
         if (cachedQuotes != null) return cachedQuotes;
@@ -43,7 +39,7 @@ final class QuoteBank {
         } catch (Exception ignored) {}
         if (list.isEmpty()) {
             list.add(new Quote("给眼前这件事留一小段时间。", "留白专注"));
-            list.add(new Quote("把下一步写下来，让注意力回到手边。", "留白专注"));
+            list.add(new Quote("完成一个小目标，就记下这次进展。", "留白专注"));
         }
         cachedQuotes = list;
         return cachedQuotes;
@@ -54,36 +50,5 @@ final class QuoteBank {
         int daySeed = LocalDate.now().getDayOfYear();
         int idx = Math.floorMod(daySeed + offset, list.size());
         return list.get(idx);
-    }
-
-    static List<Word> deck(Context context, String key) {
-        String normalized = key == null ? "CET4" : key;
-        List<Word> existing = cachedDecks.get(normalized);
-        if (existing != null) return existing;
-        int rawRes = switch (normalized) {
-            case "CET6" -> R.raw.words_cet6;
-            case "HS" -> R.raw.words_highschool;
-            default -> R.raw.words_cet4;
-        };
-        List<Word> words = new ArrayList<>();
-        try (InputStream in = context.getResources().openRawResource(rawRes);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) continue;
-                int tab = trimmed.indexOf('\t');
-                if (tab <= 0 || tab + 1 >= trimmed.length()) continue;
-                String en = trimmed.substring(0, tab).trim();
-                String zh = trimmed.substring(tab + 1).trim();
-                if (!en.isEmpty() && !zh.isEmpty()) words.add(new Word(en, zh));
-            }
-        } catch (Exception ignored) {}
-        if (words.isEmpty()) {
-            words.add(new Word("focus", "n. 焦点；中心 v. 集中注意力"));
-            words.add(new Word("serene", "adj. 平静的，安详的"));
-        }
-        cachedDecks.put(normalized, words);
-        return words;
     }
 }

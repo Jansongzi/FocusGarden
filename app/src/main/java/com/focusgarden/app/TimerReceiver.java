@@ -18,7 +18,12 @@ public final class TimerReceiver extends BroadcastReceiver {
     private static final String CHANNEL = "focus_timer";
 
     @Override public void onReceive(Context context, Intent intent) {
-        advance(context, System.currentTimeMillis());
+        long now = System.currentTimeMillis();
+        advance(context, now);
+        FocusStore store = FocusStore.get(context);
+        store.state.recordHeartbeat(now);
+        store.save();
+        KeepAliveManager.syncServiceState(context);
         schedule(context);
         FocusWidget.refresh(context);
     }
@@ -28,22 +33,30 @@ public final class TimerReceiver extends BroadcastReceiver {
         FocusState.Transition transition = store.state.advance(now, ZoneId.systemDefault());
         if (transition == FocusState.Transition.NONE) return;
         store.save();
+        KeepAliveManager.syncServiceState(context);
         schedule(context);
         FocusWidget.refresh(context);
         notify(context, transition);
     }
 
     static void schedule(Context context) {
-        long end = FocusStore.get(context).state.phaseEnd;
+        FocusState state = FocusStore.get(context).state;
+        long now = System.currentTimeMillis();
+        long next = 0L;
+        if (state.phaseEnd > now) next = state.phaseEnd;
+        if (state.soberUntil > now && (next == 0L || state.soberUntil < next)) {
+            next = state.soberUntil;
+        }
         PendingIntent pending = PendingIntent.getBroadcast(context, 0, new Intent(context, TimerReceiver.class),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
-        if (end > 0) alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, end, pending);
+        if (next > 0L) alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pending);
         else alarms.cancel(pending);
     }
 
     static void changed(Context context) {
         FocusStore.get(context).save();
+        KeepAliveManager.syncServiceState(context);
         schedule(context);
         FocusWidget.refresh(context);
     }

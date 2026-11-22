@@ -29,21 +29,40 @@ public final class FocusWidget extends AppWidgetProvider {
     private static RemoteViews render(Context context) {
         FocusState state = FocusStore.get(context).state;
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.focus_widget);
-        long remaining = state.remaining(System.currentTimeMillis());
-        boolean counting = !state.paused() && remaining > 0;
+        long now = System.currentTimeMillis();
+        long remaining = state.remaining(now);
+        boolean countingDown = !state.paused() && remaining > 0;
+        boolean offlineUp = state.offlineRunning();
+
         String credit = "可用 " + GardenUi.duration(state.creditMs)
                 + (state.vaultMs > 0 ? " · 存 " + GardenUi.shortMinutes(state.vaultMs) + "分" : "");
-        views.setTextViewText(R.id.widget_value, state.paused()
-                ? GardenUi.countdown(remaining) : credit);
-        views.setViewVisibility(R.id.widget_clock, counting ? View.VISIBLE : View.GONE);
-        views.setViewVisibility(R.id.widget_value, counting ? View.GONE : View.VISIBLE);
-        if (counting) {
+        if (countingDown) {
+            views.setViewVisibility(R.id.widget_clock, View.VISIBLE);
+            views.setViewVisibility(R.id.widget_value, View.GONE);
             views.setTextViewText(R.id.widget_title, state.inBreak ? "休息中" : "专注进行中");
             views.setChronometer(R.id.widget_clock, SystemClock.elapsedRealtime() + remaining, null, true);
             views.setChronometerCountDown(R.id.widget_clock, true);
+        } else if (offlineUp) {
+            long elapsed = state.offlineElapsed(now);
+            views.setViewVisibility(R.id.widget_clock, View.VISIBLE);
+            views.setViewVisibility(R.id.widget_value, View.GONE);
+            views.setTextViewText(R.id.widget_title, "离线锁机中");
+            views.setChronometer(R.id.widget_clock, SystemClock.elapsedRealtime() - elapsed, null, true);
+            views.setChronometerCountDown(R.id.widget_clock, false);
         } else {
-            views.setTextViewText(R.id.widget_title, state.paused() ? "计时已暂停" : "留白专注");
+            views.setViewVisibility(R.id.widget_clock, View.GONE);
+            views.setViewVisibility(R.id.widget_value, View.VISIBLE);
             views.setChronometer(R.id.widget_clock, 0, null, false);
+            if (state.paused()) {
+                views.setTextViewText(R.id.widget_title, "计时已暂停");
+                views.setTextViewText(R.id.widget_value, GardenUi.countdown(remaining));
+            } else if (state.offlinePaused()) {
+                views.setTextViewText(R.id.widget_title, "离线已暂停");
+                views.setTextViewText(R.id.widget_value, GardenUi.countdown(state.offlineElapsed(now)));
+            } else {
+                views.setTextViewText(R.id.widget_title, "留白专注");
+                views.setTextViewText(R.id.widget_value, credit);
+            }
         }
         views.setOnClickPendingIntent(R.id.widget_root, openApp(context));
         return views;

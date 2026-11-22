@@ -89,7 +89,7 @@ final class FocusStateCheck {
         equal(10 * MINUTE, extra.creditMs);
         equal(15 * MINUTE, extra.vaultMs);
 
-        // Sober mode temporarily overrides restrictions
+        // Sober mode temporarily overrides restrictions without consuming limited budget
         extra.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
         extra.creditMs = 0L;
         equal(BUDGET, extra.restriction(VIDEO, noon, UTC));
@@ -102,12 +102,14 @@ final class FocusStateCheck {
         equal(false, extra.soberActive(noon + 10 * MINUTE));
         equal(BUDGET, extra.restriction(VIDEO, noon + 10 * MINUTE, UTC));
 
-        // Early sleep challenge
+        // Early sleep challenge & violation blocking same-day claim
         equal(true, extra.claimEarlySleep(noon, UTC));
         equal(false, extra.claimEarlySleep(noon + 1_000, UTC));
-        equal(true, extra.claimEarlySleep(midnight, UTC));
-        equal(2, extra.earlySleepStreak(java.time.LocalDate.parse("2026-11-23")));
-        equal(30 * MINUTE, extra.creditMs);
+        equal(true, extra.markEarlySleepFailed(midnight, UTC));
+        equal(false, extra.claimEarlySleep(midnight + 1_000, UTC));
+        equal(true, extra.earlySleepFailedOn(java.time.LocalDate.parse("2026-11-23")));
+        equal(1, extra.earlySleepStreak(java.time.LocalDate.parse("2026-11-23")));
+        equal(15 * MINUTE, extra.creditMs);
 
         // Todos add / toggle / claim
         var day1 = java.time.LocalDate.parse("2026-11-22");
@@ -120,24 +122,49 @@ final class FocusStateCheck {
         equal(5 * MINUTE, extra.claimTodos(noon, UTC));
         equal(0L, extra.pendingTodoRewardMs());
         equal(0L, extra.claimTodos(noon + 1_000, UTC));
-        equal(35 * MINUTE, extra.creditMs);
+        equal(20 * MINUTE, extra.creditMs);
 
-        // Flashcards
-        for (int i = 0; i < 4; i++) equal(false, extra.recordFlashcardWord(true, noon, UTC));
-        equal(true, extra.recordFlashcardWord(true, noon, UTC));
-        equal(1, extra.flashcardPendingRounds);
-        equal(5 * MINUTE, extra.claimFlashcards(noon, UTC));
-        equal(0, extra.flashcardPendingRounds);
-        equal(40 * MINUTE, extra.creditMs);
+        // Offline lock-phone timer start / pause / restriction / claim / stop
+        var offline = new FocusState();
+        offline.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 10));
+        offline.startOffline(noon);
+        equal(true, offline.offlineRunning());
+        equal(FOCUS, offline.restriction(VIDEO, noon + MINUTE, UTC));
+        equal(4 * MINUTE, offline.offlineElapsed(noon + 4 * MINUTE));
+        offline.pauseOffline(noon + 4 * MINUTE);
+        equal(false, offline.offlineRunning());
+        equal(true, offline.offlinePaused());
+        equal(NONE, offline.restriction(VIDEO, noon + 5 * MINUTE, UTC));
+        offline.startOffline(noon + 5 * MINUTE);
+        equal(6 * MINUTE, offline.offlineElapsed(noon + 7 * MINUTE));
+        equal(3 * MINUTE, offline.claimableOfflineMs(noon + 7 * MINUTE));
+        equal(3 * MINUTE, offline.claimOffline(noon + 7 * MINUTE, UTC));
+        equal(3 * MINUTE, offline.creditMs);
+        equal(true, offline.offlineRunning());
+        equal(2 * MINUTE, offline.stopOffline(noon + 9 * MINUTE, UTC));
+        equal(false, offline.offlineActive());
+        equal(8 * MINUTE, offline.days.get("2026-11-22").offlineMs);
+        equal(1 * MINUTE, offline.claimOffline(noon + 9 * MINUTE, UTC));
+        equal(4 * MINUTE, offline.creditMs);
 
-        // Steps
+        // UsageStats sync reconciliation
+        var sync = new FocusState();
+        sync.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING, 0));
+        sync.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 2));
+        equal(4 * MINUTE, sync.syncUsageTotal(STUDY, 4 * MINUTE, noon + 10 * MINUTE, UTC));
+        equal(2 * MINUTE, sync.creditMs);
+        equal(0L, sync.syncUsageTotal(STUDY, 4 * MINUTE, noon + 11 * MINUTE, UTC));
+        equal(3 * MINUTE, sync.syncUsageTotal(VIDEO, 3 * MINUTE, noon + 12 * MINUTE, UTC));
+        equal(1 * MINUTE, sync.creditMs);
+
+        // Steps & hardware step counter reboot handling
         extra.addManualSteps(2500, day1);
         equal(2, extra.claimableStepUnits(day1));
         equal(2500, extra.pendingStepsRemainder(day1));
         equal(10 * MINUTE, extra.claimSteps(noon, UTC));
         equal(0, extra.claimableStepUnits(day1));
         equal(500, extra.pendingStepsRemainder(day1));
-        equal(50 * MINUTE, extra.creditMs);
+        equal(30 * MINUTE, extra.creditMs);
 
         var counter = new FocusState();
         equal(true, counter.recordStepCounter(400, day1));
@@ -151,9 +178,21 @@ final class FocusStateCheck {
         equal(true, counter.recordStepCounter(72, day1.plusDays(1)));
         equal(2, counter.day(day1.plusDays(1).toString()).steps);
 
+        // 24h keep-alive heartbeat buckets
+        var hb = new FocusState();
+        long hbStart = noon - 2 * 30 * MINUTE;
+        hb.recordHeartbeat(hbStart);
+        hb.recordHeartbeat(noon);
+        int[] strip = hb.heartbeatBuckets24h(noon);
+        equal(48, strip.length);
+        equal(0, strip[44]);
+        equal(2, strip[45]);
+        equal(1, strip[46]);
+        equal(2, strip[47]);
+
         // Timeline events recorded
-        equal(true, extra.day("2026-11-22").events.size() >= 6);
-        System.out.println("PASS: learning rewards, per-app limit and credit spending, midnight split, bedtime, Pomodoro, check-ins, vault, sober, sleep, todos, flashcards and steps");
+        equal(true, extra.day("2026-11-22").events.size() >= 4);
+        System.out.println("PASS: learning rewards, per-app limit and credit spending, midnight split, bedtime, Pomodoro, check-ins, vault, sober, sleep, todos, offline, sync, heartbeats and steps");
     }
 
     private static long at(String instant) {

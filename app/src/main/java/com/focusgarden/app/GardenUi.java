@@ -16,8 +16,11 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewOutlineProvider;
 import android.view.Window;
@@ -377,6 +380,18 @@ final class GardenUi {
         return String.format(Locale.ROOT, "%02d:%02d", minutes / 60, minutes % 60);
     }
 
+    static void haptic(View view, boolean enabled, boolean strong) {
+        if (!enabled || view == null) return;
+        try {
+            view.performHapticFeedback(strong ? HapticFeedbackConstants.CONTEXT_CLICK
+                    : HapticFeedbackConstants.CLOCK_TICK);
+            Vibrator vib = view.getContext().getSystemService(Vibrator.class);
+            if (vib != null && vib.hasVibrator()) {
+                vib.vibrate(VibrationEffect.createOneShot(strong ? 16L : 9L, strong ? 95 : 48));
+            }
+        } catch (Exception ignored) {}
+    }
+
     static final class SwitchView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF track = new RectF();
@@ -392,6 +407,7 @@ final class GardenUi {
             setClickable(true);
             setFocusable(true);
             setOnClickListener(v -> {
+                haptic(this, FocusStore.get(getContext()).state.hapticFeedback, false);
                 setChecked(!checked, true);
                 if (listener != null) listener.accept(checked);
             });
@@ -494,6 +510,42 @@ final class GardenUi {
                 paint.setColor(fillColor);
                 rect.set(0, 0, Math.min(w, fillW), h);
                 canvas.drawRoundRect(rect, r, r, paint);
+            }
+        }
+    }
+
+    static final class HeartbeatStripView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF slot = new RectF();
+        private int[] buckets = new int[48];
+
+        HeartbeatStripView(Context context) {
+            super(context);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void setBuckets(int[] data) {
+            if (data != null && data.length == 48) {
+                this.buckets = data;
+                invalidate();
+            }
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            float w = getWidth();
+            float h = getHeight();
+            if (w <= 0 || h <= 0 || buckets.length == 0) return;
+            int n = buckets.length;
+            float step = w / n;
+            float barW = Math.max(2f, step * 0.54f);
+            float offset = (step - barW) * 0.5f;
+            float radius = barW * 0.45f;
+            for (int i = 0; i < n; i++) {
+                int state = buckets[i];
+                paint.setColor(state == 2 ? BLUE : state == 1 ? 0xfff5c52c : 0xffe4ebf4);
+                float left = i * step + offset;
+                slot.set(left, 0, left + barW, h);
+                canvas.drawRoundRect(slot, radius, radius, paint);
             }
         }
     }
