@@ -130,19 +130,18 @@ public final class KeepAliveService extends Service implements SensorEventListen
         }
         if (floatingBall != null) return;
 
-        int size = GardenUi.dp(this, 42);
+        int size = GardenUi.dp(this, 24);
         FrameLayout orb = new FrameLayout(this);
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0xe61a6bff);
-        bg.setStroke(GardenUi.dp(this, 2), 0xccffffff);
+        bg.setColor(GardenUi.BLUE);
+        bg.setStroke(GardenUi.dp(this, 1), 0xccffffff);
         orb.setBackground(bg);
-        orb.setElevation(GardenUi.dp(this, 5));
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_bubble);
         icon.setColorFilter(GardenUi.CARD);
-        int iconPx = GardenUi.dp(this, 20);
+        int iconPx = GardenUi.dp(this, 12);
         orb.addView(icon, new FrameLayout.LayoutParams(iconPx, iconPx, Gravity.CENTER));
 
         int screenW = getResources().getDisplayMetrics().widthPixels;
@@ -154,6 +153,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         ballParams.gravity = Gravity.TOP | Gravity.START;
+        ballParams.alpha = 0.16f;
         ballParams.x = GardenUi.dp(this, 10);
         ballParams.y = Math.round(screenH * 0.48f);
         ballParams.setTitle("留白悬浮保活球");

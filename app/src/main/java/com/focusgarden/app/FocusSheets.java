@@ -153,9 +153,13 @@ final class FocusSheets {
         gap(body, 12);
 
         // Controls
-        LinearLayout idleBtns = row(activity);
+        LinearLayout idleBtns = column(activity);
         TextView startBtn = primaryButton(activity, "开启自律模式");
-        weight(idleBtns, startBtn);
+        idleBtns.addView(startBtn, -1, -2);
+        gap(idleBtns, 4);
+        TextView startHint = text(activity, "", 12, INK_SUB, false);
+        startHint.setGravity(Gravity.CENTER);
+        idleBtns.addView(startHint, -1, -2);
         root.addView(idleBtns);
 
         LinearLayout runningCol = column(activity);
@@ -281,6 +285,8 @@ final class FocusSheets {
                 lastModeTab[0] = effectiveMode;
             }
 
+            String stopHint = MainActivity.disciplineStopHint(effectiveMode);
+            if (!stopHint.contentEquals(startHint.getText())) startHint.setText(stopHint);
             if (effectiveMode == 0) {
                 boolean running = state.offlineRunning();
                 boolean paused = state.offlinePaused();
@@ -424,13 +430,8 @@ final class FocusSheets {
         tabCount.setOnClickListener(modeClick);
 
         startBtn.setOnClickListener(v -> {
-            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-            long now = System.currentTimeMillis();
-            TimerReceiver.advance(activity, now);
-            if (mode[0] == 0) state.startOffline(now);
-            else state.start(state.presetWork, 0, 1, now);
-            onChanged.run();
-            refresh.run();
+            tapHaptic(v);
+            activity.confirmDisciplineStart(mode[0], refresh);
         });
         pauseBtn.setOnClickListener(v -> {
             if (!state.offlineActive()) return;
@@ -2305,7 +2306,7 @@ final class FocusSheets {
         body.addView(text(activity, "应用拦截页视觉风格", 13, INK_SUB, true));
         gap(body, 8);
         String[] themes = {"活泼新芽", "沉稳新芽", "留白池塘"};
-        String[] descs = {"生动神态与晴空护盾卡片", "克制沉稳的提示风格", "经典晚霞荷塘静谧插画"};
+        String[] descs = {"醒目的新芽插画", "沉稳的新芽插画", "留白专注的晚霞池塘插画"};
         LinearLayout themeWrap = column(activity);
         Runnable[] rebuildThemes = new Runnable[1];
         rebuildThemes[0] = () -> {
@@ -2334,6 +2335,10 @@ final class FocusSheets {
         };
         rebuildThemes[0].run();
         body.addView(themeWrap);
+        gap(body, 8);
+        body.addView(settingRow(activity, R.drawable.ic_edit, BLUE_SOFT, BLUE,
+                "自定义拦截提示", "更换全屏提示页的图片和文字", null,
+                () -> showBlockAppearance(activity, state, onChanged)));
         gap(body, 16);
 
         body.addView(text(activity, "首页与储蓄罐", 13, MUTED, true));
@@ -2374,6 +2379,51 @@ final class FocusSheets {
                 }));
 
         sheetRef[0] = bottomSheet(activity, "通用设置", "触感反馈、视觉感知、储蓄罐步长与首页模块", body);
+    }
+
+    private static void showBlockAppearance(MainActivity activity, FocusState state, Runnable onChanged) {
+        LinearLayout body = column(activity);
+        body.addView(text(activity, "提示图片", 14, INK, true));
+        gap(body, 8);
+        TextView photo = secondaryButton(activity, "");
+        TextView reset = secondaryButton(activity, "恢复内置图片");
+        Runnable refreshPhoto = () -> {
+            boolean custom = BlockImage.hasCustom(activity);
+            photo.setText(custom ? "更换自定义图片" : "选择自定义图片");
+            photo.setEnabled(true);
+            reset.setEnabled(true);
+            reset.setVisibility(custom ? View.VISIBLE : View.GONE);
+        };
+        photo.setOnClickListener(v -> {
+            photo.setEnabled(false);
+            reset.setEnabled(false);
+            activity.pickBlockImage(refreshPhoto);
+        });
+        reset.setOnClickListener(v -> activity.resetBlockImage(refreshPhoto));
+        body.addView(photo, -1, -2);
+        LinearLayout.LayoutParams resetLp = new LinearLayout.LayoutParams(-1, -2);
+        resetLp.topMargin = dp(activity, 8);
+        body.addView(reset, resetLp);
+        refreshPhoto.run();
+        gap(body, 18);
+
+        body.addView(text(activity, "提示文字", 14, INK, true));
+        gap(body, 8);
+        EditText message = styledInput(activity, "留空时显示默认提示", state.blockMessage,
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        message.setSingleLine(false);
+        message.setMinLines(2);
+        message.setFilters(new InputFilter[]{new InputFilter.LengthFilter(120)});
+        body.addView(message, -1, -2);
+        gap(body, 12);
+        TextView save = primaryButton(activity, "保存提示文字");
+        body.addView(save, -1, -2);
+        Dialog sheet = bottomSheet(activity, "自定义拦截提示", null, body);
+        save.setOnClickListener(v -> {
+            state.blockMessage = message.getText().toString().trim();
+            onChanged.run();
+            sheet.dismiss();
+        });
     }
 
     static void showRewardsSheet(MainActivity activity, FocusState state, Runnable onChanged) {
@@ -2647,7 +2697,7 @@ final class FocusSheets {
             body.addView(row);
             if (i + 1 < defs.length) gap(body, 8);
         }
-        bottomSheet(activity, "添加和编辑卡片", "自定义首页「兑换」区域展示的功能卡片", body);
+        bottomSheet(activity, "添加和编辑卡片", "选择首页展示的功能卡片", body);
     }
 
     static void showSettings(MainActivity activity, FocusState state, KeepAliveManager.StatusSnapshot initialSnap,

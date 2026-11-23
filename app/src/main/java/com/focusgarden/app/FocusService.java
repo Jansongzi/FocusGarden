@@ -24,6 +24,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.time.ZoneId;
@@ -31,6 +32,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 public final class FocusService extends AccessibilityService {
+    private static final int BLOCK_BACKGROUND = 0xff10352c;
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager windows;
     private FocusStore store;
@@ -396,100 +398,55 @@ public final class FocusService extends AccessibilityService {
         boolean isStopwatch = reason == FocusState.Restriction.FOCUS && store.state.offlineRunning();
 
         LinearLayout background = GardenUi.column(this);
-        background.setBackgroundColor(GardenUi.PAPER);
-        int inset = GardenUi.dp(this, 22);
-        background.setPadding(inset, inset, inset, inset);
-        background.setGravity(Gravity.CENTER);
+        background.setBackgroundColor(BLOCK_BACKGROUND);
+        int inset = GardenUi.dp(this, 24);
+        background.setPadding(inset, GardenUi.dp(this, 12), inset, GardenUi.dp(this, 24));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout content = GardenUi.column(this);
+        content.setGravity(Gravity.CENTER);
+        scroll.addView(content, -1, -2);
+        background.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        ImageView hero = new ImageView(this);
+        hero.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        hero.setBackground(GardenUi.shape(this, 0xff1d483c, 20));
+        hero.setClipToOutline(true);
+        android.graphics.Bitmap customImage = BlockImage.load(this);
+        int theme = store.state.blockTheme;
+        if (customImage != null) {
+            hero.setImageBitmap(customImage);
+        } else if (theme == 2) {
+            hero.setImageResource(R.drawable.pond_at_dusk);
+            hero.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        } else {
+            hero.setImageResource(switch (reason) {
+                case BEDTIME -> R.drawable.mascot_sleep;
+                case BUDGET -> theme == 1 ? R.drawable.mascot_calm : R.drawable.mascot_alert;
+                default -> R.drawable.mascot_strong;
+            });
+        }
+        content.addView(hero, GardenUi.dp(this, 132), GardenUi.dp(this, 132));
+        GardenUi.gap(content, 20);
 
         String title = switch (reason) {
             case BEDTIME -> "睡眠时段强制锁定";
             case BUDGET -> "今日时间已用完";
-            default -> isStopwatch ? "自律模式 · 正计时中" : "自律模式 · 倒计时中";
+            default -> isStopwatch ? "自律正计时进行中" : "自律倒计时进行中";
         };
-        String pillLabel = switch (reason) {
-            case BEDTIME -> "睡眠时段全锁";
-            case BUDGET -> "额度已耗尽";
-            default -> "自律模式保护";
-        };
-        int pillColor = switch (reason) {
-            case BEDTIME -> GardenUi.PURPLE;
-            case BUDGET -> GardenUi.RED;
-            default -> GardenUi.BLUE;
-        };
-        int pillBg = switch (reason) {
-            case BEDTIME -> GardenUi.PURPLE_SOFT;
-            case BUDGET -> GardenUi.RED_SOFT;
-            default -> GardenUi.BLUE_SOFT;
-        };
-        String detail = switch (reason) {
-            case BEDTIME -> "睡眠时段已强制锁定所有应用，放下手机安心入眠，将在 "
-                    + GardenUi.clock(store.state.sleepEnd) + " 自动解锁。";
-            case BUDGET -> "去开启自律模式、使用学习应用或完成待办与习惯打卡，即可领取可用时长。";
-            default -> "自律模式进行中，除正向学习应用外其余应用均已锁定。";
-        };
-
-        int theme = store.state.blockTheme;
-        if (theme == 2) {
-            FrameLayout banner = GardenUi.artwork(this, 24);
-            LinearLayout hero = GardenUi.column(this);
-            hero.setGravity(Gravity.CENTER_VERTICAL);
-            hero.setPadding(inset, 0, inset, 0);
-            hero.addView(GardenUi.text(this, appName, 14, GardenUi.PALE, true));
-            GardenUi.gap(hero, 6);
-            hero.addView(GardenUi.text(this, title, 26, GardenUi.CARD, true));
-            banner.addView(hero, -1, -1);
-            background.addView(banner, -1, GardenUi.dp(this, 146));
-        } else {
-            FrameLayout hero = new FrameLayout(this);
-            hero.setBackground(GardenUi.cardBg(this, GardenUi.CARD, GardenUi.BORDER, 24));
-            hero.setClipToOutline(true);
-            GardenUi.elevate(hero, 4);
-
-            ImageView sky = new ImageView(this);
-            int skyRes = switch (reason) {
-                case BEDTIME -> R.drawable.bg_sleep_stars;
-                case BUDGET -> R.drawable.banner_state_low;
-                default -> R.drawable.banner_state_peak;
-            };
-            sky.setImageResource(skyRes);
-            sky.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            hero.addView(sky, -1, -1);
-
-            int mascotRes = switch (reason) {
-                case BEDTIME -> R.drawable.mascot_sleep;
-                case BUDGET -> theme == 1 ? R.drawable.mascot_calm : R.drawable.mascot_alert;
-                default -> R.drawable.mascot_strong;
-            };
-            ImageView mascot = new ImageView(this);
-            mascot.setImageResource(mascotRes);
-            mascot.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            FrameLayout.LayoutParams mLp = new FrameLayout.LayoutParams(
-                    GardenUi.dp(this, 112), GardenUi.dp(this, 112), Gravity.CENTER);
-            hero.addView(mascot, mLp);
-            background.addView(hero, -1, GardenUi.dp(this, 160));
-        }
-        GardenUi.gap(background, 14);
-
-        LinearLayout explanation = GardenUi.column(this);
-        explanation.setBackground(GardenUi.cardBg(this, GardenUi.CARD, GardenUi.BORDER, 24));
-        explanation.setPadding(inset, inset, inset, inset);
-        GardenUi.elevate(explanation, 3);
-
-        LinearLayout appRow = GardenUi.row(this);
-        appRow.addView(GardenUi.appIcon(this, pkg, 38, 10));
-        GardenUi.space(appRow, 10);
-        LinearLayout appTitles = GardenUi.column(this);
-        appTitles.addView(GardenUi.text(this, appName, 16, GardenUi.INK, true));
-        TextView tag = GardenUi.text(this, pillLabel, 11, pillColor, true);
-        tag.setBackground(GardenUi.shape(this, pillBg, 7));
-        tag.setPadding(GardenUi.dp(this, 7), GardenUi.dp(this, 2), GardenUi.dp(this, 7), GardenUi.dp(this, 2));
-        appTitles.addView(tag, -2, -2);
-        GardenUi.weight(appRow, appTitles);
-        explanation.addView(appRow);
-        GardenUi.gap(explanation, 12);
-
-        explanation.addView(GardenUi.text(this, title, 23, GardenUi.INK, true));
-        GardenUi.gap(explanation, 6);
+        String custom = store.state.blockMessage;
+        boolean customMessage = !custom.isEmpty();
+        TextView heading = GardenUi.text(this, customMessage ? custom : title, 27, GardenUi.CARD, true);
+        heading.setGravity(Gravity.CENTER);
+        content.addView(heading, -1, -2);
+        GardenUi.gap(content, 10);
+        TextView context = GardenUi.text(this, customMessage ? appName + " · " + title : appName,
+                14, GardenUi.PALE, true);
+        context.setGravity(Gravity.CENTER);
+        content.addView(context, -1, -2);
+        GardenUi.gap(content, 5);
 
         String info = switch (reason) {
             case BEDTIME -> "自动解锁  ·  " + GardenUi.clock(store.state.sleepEnd);
@@ -500,43 +457,32 @@ public final class FocusService extends AccessibilityService {
                     ? "自律正计时  ·  " + GardenUi.countdown(store.state.offlineElapsed(now))
                     : "自律倒计时还剩  ·  " + GardenUi.countdown(store.state.remaining(now));
         };
-        overlayStatus = GardenUi.text(this, info, 15, pillColor, true);
-        explanation.addView(overlayStatus, -1, -2);
-        GardenUi.gap(explanation, 8);
+        overlayStatus = GardenUi.text(this, info, 14, GardenUi.PALE, false);
+        overlayStatus.setGravity(Gravity.CENTER);
+        content.addView(overlayStatus, -1, -2);
 
-        TextView message = GardenUi.text(this, detail, 13, GardenUi.INK_SUB, false);
-        explanation.addView(message, -1, -2);
-        GardenUi.gap(explanation, 12);
-
-        QuoteBank.Quote quote = QuoteBank.quoteForOffset(this, 0);
-        TextView quotePill = GardenUi.text(this, "“" + quote.text() + "”", 12, GardenUi.MUTED, false);
-        quotePill.setBackground(GardenUi.shape(this, GardenUi.SURFACE_SUBTLE, 12));
-        quotePill.setPadding(GardenUi.dp(this, 12), GardenUi.dp(this, 9), GardenUi.dp(this, 12), GardenUi.dp(this, 9));
-        explanation.addView(quotePill, -1, -2);
-        GardenUi.gap(explanation, 16);
-
-        TextView home = GardenUi.primaryButton(this, "返回桌面");
+        GardenUi.gap(background, 12);
+        TextView home = GardenUi.pillButton(this, "返回桌面", GardenUi.CARD, BLOCK_BACKGROUND, 16, 50);
+        home.setBackground(GardenUi.touch(this, GardenUi.CARD, 25));
         home.setOnClickListener(view -> {
             if (performGlobalAction(GLOBAL_ACTION_HOME)) {
                 foreground = null;
                 hideOverlay();
             }
         });
-        explanation.addView(home, -1, -2);
-        GardenUi.gap(explanation, 8);
+        int buttonWidth = Math.min(GardenUi.dp(this, 240), getResources().getDisplayMetrics().widthPixels - 2 * inset);
+        LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(buttonWidth, -2);
+        buttonLp.gravity = Gravity.CENTER_HORIZONTAL;
+        background.addView(home, buttonLp);
+        GardenUi.gap(background, 6);
 
-        TextView openApp = GardenUi.secondaryButton(this,
-                reason == FocusState.Restriction.BEDTIME ? "打开留白专注" : "打开留白专注去赚时间");
+        TextView openApp = GardenUi.pillButton(this, "打开留白专注", BLOCK_BACKGROUND, GardenUi.PALE, 14, 44);
         openApp.setOnClickListener(view -> {
-            foreground = null;
-            hideOverlay();
             Intent intent = new Intent(this, MainActivity.class)
                     .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             startActivity(intent);
         });
-        explanation.addView(openApp, -1, -2);
-
-        background.addView(explanation, -1, -2);
+        background.addView(openApp, -1, -2);
         attachOverlay(background);
     }
 

@@ -7,4 +7,8 @@
         <item name="android:windowBackground">#F4F6FA</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="Animation.FocusGarden.BottomSheet" parent="">
+        <item name="android:windowEnterAnimation">@anim/sheet_enter</item>
+        <item name="android:windowExitAnimation">@anim/sheet_exit</item>
+    </style>
 </resources>

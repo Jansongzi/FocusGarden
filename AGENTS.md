@@ -1,6 +1,6 @@
 # 留白专注前端交接
 
-当前版本为 `1.5.1`（`versionCode=7`）。应用包名是 `com.focusgarden.app`，代码采用 Java 17 和 Android 原生 View，最低 API 27。项目根目录的 [README](README.md) 提供构建、规则验证和发布说明。界面截图及参照见 [设计参照](design/README.md)。
+当前版本为 `1.5.2`（`versionCode=8`）。应用包名是 `com.focusgarden.app`，代码采用 Java 17 和 Android 原生 View，最低 API 27。项目根目录的 [README](README.md) 提供构建、规则验证和发布说明。界面截图及参照见 [设计参照](design/README.md)。
 
 ## 界面入口
 

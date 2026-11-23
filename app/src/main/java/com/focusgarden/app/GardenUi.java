@@ -23,7 +23,9 @@ import android.os.VibratorManager;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.view.WindowManager;
@@ -190,12 +192,13 @@ final class GardenUi {
     static TextView redeemPill(Context context, String label, boolean active) {
         TextView v = text(context, label, 13, active ? CARD : BLUE_DISABLED_TEXT, true);
         v.setGravity(Gravity.CENTER);
-        v.setMinHeight(dp(context, 38));
-        v.setPadding(dp(context, 14), dp(context, 6), dp(context, 14), dp(context, 6));
+        v.setSingleLine(true);
+        v.setWidth(dp(context, 100));
+        v.setMinHeight(dp(context, 42));
+        v.setPadding(dp(context, 4), dp(context, 6), dp(context, 4), dp(context, 6));
         v.setBackground(active
                 ? new RippleDrawable(ColorStateList.valueOf(0x30ffffff), shape(context, BLUE, 12), null)
                 : shape(context, BLUE_DISABLED_BG, 12));
-        v.setSingleLine(true);
         return v;
     }
 
@@ -287,6 +290,7 @@ final class GardenUi {
     static Dialog bottomSheet(Activity activity, String title, String subtitle, View body) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCanceledOnTouchOutside(true);
 
         LinearLayout sheet = column(activity);
         GradientDrawable bg = new GradientDrawable();
@@ -295,14 +299,39 @@ final class GardenUi {
         bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
         sheet.setBackground(bg);
 
-        // Top drag handle
+        FrameLayout grip = new FrameLayout(activity);
+        grip.setContentDescription("向下拖动关闭面板");
+        grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         View handle = new View(activity);
         handle.setBackground(shape(activity, 0xffd5dde9, 3));
-        LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(activity, 38), dp(activity, 4));
-        handleLp.gravity = Gravity.CENTER_HORIZONTAL;
-        handleLp.topMargin = dp(activity, 10);
-        handleLp.bottomMargin = dp(activity, 10);
-        sheet.addView(handle, handleLp);
+        grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, 42), dp(activity, 4), Gravity.CENTER));
+        sheet.addView(grip, -1, dp(activity, 34));
+        int touchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
+        grip.setOnTouchListener(new View.OnTouchListener() {
+            private float downY;
+
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN -> {
+                        sheet.animate().cancel();
+                        downY = event.getRawY() - sheet.getTranslationY();
+                    }
+                    case MotionEvent.ACTION_MOVE ->
+                            sheet.setTranslationY(Math.max(0f, event.getRawY() - downY - touchSlop));
+                    case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        if (event.getActionMasked() == MotionEvent.ACTION_UP
+                                && sheet.getTranslationY() >= Math.min(dp(activity, 96), sheet.getHeight() * 0.2f)) {
+                            dialog.dismiss();
+                        } else {
+                            sheet.animate().translationY(0f).setDuration(180)
+                                    .setInterpolator(new DecelerateInterpolator()).start();
+                        }
+                    }
+                    default -> {}
+                }
+                return true;
+            }
+        });
 
         // Header
         LinearLayout head = row(activity);
@@ -315,47 +344,37 @@ final class GardenUi {
         }
         weight(head, titles);
 
-        FrameLayout close = iconBadge(activity, R.drawable.ic_close, SURFACE_SUBTLE, INK_SUB, 32, 16, 16);
-        close.setContentDescription("关闭");
-        close.setOnClickListener(v -> {
-            tapHaptic(v);
-            dialog.dismiss();
-        });
-        head.addView(close);
         sheet.addView(head);
 
         View sep = new View(activity);
         sep.setBackgroundColor(LINE);
         sheet.addView(sep, -1, dp(activity, 1));
 
-        int maxH = Math.round(activity.getResources().getDisplayMetrics().heightPixels * 0.88f);
-        int maxScrollH = Math.max(dp(activity, 200), maxH - dp(activity, 92));
-        ScrollView scroller = new MaxHeightScrollView(activity, maxScrollH);
+        ScrollView scroller = new ScrollView(activity);
         scroller.setVerticalScrollBarEnabled(false);
         LinearLayout wrap = column(activity);
         wrap.setPadding(dp(activity, 20), dp(activity, 16), dp(activity, 20), dp(activity, 24));
         wrap.addView(body, -1, -2);
         scroller.addView(wrap, -1, -2);
 
-        sheet.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+        sheet.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1f));
+        sheet.setFocusableInTouchMode(true);
+        sheet.requestFocus();
         dialog.setContentView(sheet);
 
         Window win = dialog.getWindow();
         if (win != null) {
             win.setBackgroundDrawableResource(android.R.color.transparent);
             win.setGravity(Gravity.BOTTOM);
-            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
-            win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            int viewport = activity.findViewById(android.R.id.content).getHeight();
+            if (viewport <= 0) viewport = activity.getResources().getDisplayMetrics().heightPixels;
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, Math.round(viewport * 0.8f));
+            win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
             win.setDimAmount(0.42f);
+            win.setWindowAnimations(R.style.Animation_FocusGarden_BottomSheet);
         }
-        sheet.setTranslationY(dp(activity, 20));
-        sheet.setAlpha(0.92f);
-        sheet.animate()
-                .translationY(0f)
-                .alpha(1f)
-                .setDuration(150)
-                .setInterpolator(new DecelerateInterpolator())
-                .start();
         dialog.show();
         return dialog;
     }

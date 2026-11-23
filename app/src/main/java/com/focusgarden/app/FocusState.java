@@ -241,6 +241,7 @@ final class FocusState {
 
     boolean timeAwarenessBar = true;
     int blockTheme = 0;
+    String blockMessage = "";
 
     FocusState() {
         seedDefaultRewardsIfNeeded();

@@ -103,6 +103,7 @@ final class FocusStore {
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
         state.blockTheme = root.optInt("blockTheme", 0);
+        state.blockMessage = root.optString("blockMessage", "");
 
         JSONArray earlySleep = root.optJSONArray("earlySleepDays");
         if (earlySleep != null) {
@@ -315,6 +316,7 @@ final class FocusStore {
                     .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
                     .put("blockTheme", state.blockTheme)
+                    .put("blockMessage", state.blockMessage)
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
                     .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
                     .put("heartbeats", new JSONArray(state.heartbeats))
