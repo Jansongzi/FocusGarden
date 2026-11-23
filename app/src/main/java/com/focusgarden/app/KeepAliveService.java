@@ -144,11 +144,12 @@ public final class KeepAliveService extends Service implements SensorEventListen
     @Override public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         if (floatingBall == null || ballParams == null || windows == null) return;
-        int hit = floatingBall.getWidth() > 0 ? floatingBall.getWidth() : GardenUi.dp(this, 44);
+        int hit = floatingBall.getWidth() > 0 ? floatingBall.getWidth() : GardenUi.dp(this, 40);
+        int visual = GardenUi.dp(this, 24);
+        int edgeOffset = Math.max(0, GardenUi.dp(this, 10) - (hit - visual) / 2);
         int w = displayWidth();
         int h = displayHeight();
-        int edge = GardenUi.dp(this, 10);
-        ballParams.x = (ballParams.x + hit / 2 < w / 2) ? edge : Math.max(edge, w - hit - edge);
+        ballParams.x = (ballParams.x + hit / 2 < w / 2) ? edgeOffset : Math.max(edgeOffset, w - hit - edgeOffset);
         ballParams.y = clampBallY(ballParams.y, hit, h);
         try {
             windows.updateViewLayout(floatingBall, ballParams);
@@ -156,8 +157,8 @@ public final class KeepAliveService extends Service implements SensorEventListen
     }
 
     private int clampBallY(int y, int hitSize, int screenH) {
-        int minY = GardenUi.dp(this, 44);
-        int maxY = Math.max(minY, screenH - hitSize - GardenUi.dp(this, 72));
+        int minY = GardenUi.dp(this, 40);
+        int maxY = Math.max(minY, screenH - hitSize - GardenUi.dp(this, 64));
         return Math.max(minY, Math.min(maxY, y));
     }
 
@@ -170,23 +171,24 @@ public final class KeepAliveService extends Service implements SensorEventListen
         }
         if (floatingBall != null) return;
 
-        int hitSize = GardenUi.dp(this, 44);
-        int visualSize = GardenUi.dp(this, 34);
+        int hitSize = GardenUi.dp(this, 40);
+        int visualSize = GardenUi.dp(this, 24);
+        int edgeOffset = Math.max(0, GardenUi.dp(this, 10) - (hitSize - visualSize) / 2);
+
         FrameLayout container = new FrameLayout(this);
         container.setContentDescription("留白专注悬浮球，可拖动或轻触返回应用");
 
         FrameLayout orb = new FrameLayout(this);
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(0xE61A6BFF);
-        bg.setStroke(GardenUi.dp(this, 1), 0xE6FFFFFF);
+        bg.setColor(GardenUi.BLUE);
+        bg.setStroke(GardenUi.dp(this, 1), 0xccffffff);
         orb.setBackground(bg);
-        GardenUi.elevate(orb, 4);
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_bubble);
         icon.setColorFilter(GardenUi.CARD);
-        int iconPx = GardenUi.dp(this, 16);
+        int iconPx = GardenUi.dp(this, 12);
         orb.addView(icon, new FrameLayout.LayoutParams(iconPx, iconPx, Gravity.CENTER));
         container.addView(orb, new FrameLayout.LayoutParams(visualSize, visualSize, Gravity.CENTER));
 
@@ -201,9 +203,8 @@ public final class KeepAliveService extends Service implements SensorEventListen
         SharedPreferences ballPrefs = getSharedPreferences("focus_garden_ball", MODE_PRIVATE);
         int screenW = displayWidth();
         int screenH = displayHeight();
-        int margin = GardenUi.dp(this, 8);
-        int savedX = ballPrefs.getInt("x", screenW - hitSize - margin);
-        int savedY = ballPrefs.getInt("y", Math.round(screenH * 0.45f));
+        int savedX = ballPrefs.getInt("x", edgeOffset);
+        int savedY = ballPrefs.getInt("y", Math.round(screenH * 0.48f) - (hitSize - visualSize) / 2);
 
         ballParams = new WindowManager.LayoutParams(
                 hitSize,
@@ -213,7 +214,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         ballParams.gravity = Gravity.TOP | Gravity.START;
-        ballParams.alpha = 0.62f;
+        ballParams.alpha = 0.16f;
         ballParams.x = Math.max(0, Math.min(screenW - hitSize, savedX));
         ballParams.y = clampBallY(savedY, hitSize, screenH);
         ballParams.setTitle("留白悬浮保活球");
@@ -233,10 +234,6 @@ public final class KeepAliveService extends Service implements SensorEventListen
                         downRawX = event.getRawX();
                         downRawY = event.getRawY();
                         dragged = false;
-                        ballParams.alpha = 0.94f;
-                        try {
-                            windows.updateViewLayout(container, ballParams);
-                        } catch (Exception ignored) {}
                         return true;
                     }
                     case MotionEvent.ACTION_MOVE -> {
@@ -256,16 +253,12 @@ public final class KeepAliveService extends Service implements SensorEventListen
                     }
                     case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         if (!dragged && event.getActionMasked() == MotionEvent.ACTION_UP) {
-                            ballParams.alpha = 0.62f;
-                            try {
-                                windows.updateViewLayout(container, ballParams);
-                            } catch (Exception ignored) {}
                             Intent launch = new Intent(KeepAliveService.this, MainActivity.class)
                                     .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                             startActivity(launch);
                         } else {
                             int w = displayWidth();
-                            int targetX = (ballParams.x + hitSize / 2 < w / 2) ? margin : w - hitSize - margin;
+                            int targetX = (ballParams.x + hitSize / 2 < w / 2) ? edgeOffset : w - hitSize - edgeOffset;
                             int fromX = ballParams.x;
                             snapAnimator = ValueAnimator.ofInt(fromX, targetX);
                             snapAnimator.setDuration(180L);
@@ -273,7 +266,6 @@ public final class KeepAliveService extends Service implements SensorEventListen
                             snapAnimator.addUpdateListener(anim -> {
                                 if (floatingBall != container) return;
                                 ballParams.x = (int) anim.getAnimatedValue();
-                                ballParams.alpha = 0.62f;
                                 try {
                                     windows.updateViewLayout(container, ballParams);
                                 } catch (Exception ignored) {}

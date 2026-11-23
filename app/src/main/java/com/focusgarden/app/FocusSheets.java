@@ -2411,7 +2411,7 @@ final class FocusSheets {
         gap(body, 12);
 
         body.addView(settingRow(activity, R.drawable.ic_edit, AMBER_SOFT, AMBER,
-                "管理首页卡片", null, null, () -> {
+                "管理兑换页卡片", null, null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onCards.run();
                 }));
@@ -2677,13 +2677,12 @@ final class FocusSheets {
     static void showCardManager(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
         String[][] defs = {
-                {"apps", "学习应用", "统计正向应用并自动赚取时间"},
+                {"apps", "应用", "统计正向学习应用时长并自动兑换"},
                 {"timer", "自律模式", "正计时与倒计时自律锁定控制"},
-                {"rewards", "奖励兑换", "设置现实奖励并主动消耗可用时间"},
-                {"sleep", "早睡挑战", "睡眠时段强制全锁，正常完成自动结算"},
-                {"todos", "待办清单", "完成日常任务兑换时间奖励"},
-                {"habits", "戒断挑战", "自定义戒断目标与持续打卡"},
-                {"steps", "步数兑换", "同步步行数兑换放松时间"}
+                {"sleep", "早睡挑战", "睡眠时段强制全锁，正常完赛自动结算"},
+                {"todos", "待办", "完成日常任务兑换时间奖励"},
+                {"habits", "戒断挑战", "在兑换页展示戒断快捷卡片"},
+                {"steps", "步数", "同步系统步行数兑换放松时间"}
         };
         for (int i = 0; i < defs.length; i++) {
             String key = defs[i][0];
