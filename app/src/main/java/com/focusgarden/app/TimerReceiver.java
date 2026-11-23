@@ -72,16 +72,16 @@ public final class TimerReceiver extends BroadcastReceiver {
         if (Build.VERSION.SDK_INT >= 33
                 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
         NotificationManager notifications = context.getSystemService(NotificationManager.class);
-        notifications.createNotificationChannel(new NotificationChannel(CHANNEL, "专注计时", NotificationManager.IMPORTANCE_DEFAULT));
+        notifications.createNotificationChannel(new NotificationChannel(CHANNEL, "自律模式计时", NotificationManager.IMPORTANCE_DEFAULT));
         String title = switch (transition) {
-            case BREAK -> "专注完成，休息一下";
-            case WORK -> "休息结束，下一轮开始";
-            default -> "专注计划已完成";
+            case BREAK -> "自律阶段完成";
+            case WORK -> "新一阶段自律开始";
+            default -> "自律倒计时已完成";
         };
         notifications.notify(7, new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(title)
-                .setContentText("点此查看本次专注与时间结余")
+                .setContentText("奖励已自动发放，点此查看时间结余")
                 .setContentIntent(FocusWidget.openApp(context))
                 .setAutoCancel(true)
                 .build());

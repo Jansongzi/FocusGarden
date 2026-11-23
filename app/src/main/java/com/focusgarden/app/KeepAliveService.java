@@ -106,11 +106,11 @@ public final class KeepAliveService extends Service implements SensorEventListen
             ch.setSound(null, null);
             nm.createNotificationChannel(ch);
         }
-        String title = state.offlineRunning() ? "离线锁机进行中"
-                : state.active() ? (state.inBreak ? "番茄休息中" : "专注计时进行中")
+        String title = state.offlineRunning() ? "自律模式 · 正计时进行中"
+                : state.active() ? "自律模式 · 倒计时进行中"
                 : "留白专注后台守护中";
         String body = state.offlineRunning()
-                ? "已持续离线 " + GardenUi.duration(state.offlineElapsed(System.currentTimeMillis()))
+                ? "已持续自律 " + GardenUi.duration(state.offlineElapsed(System.currentTimeMillis()))
                 : "轻触返回留白专注";
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
@@ -154,8 +154,8 @@ public final class KeepAliveService extends Service implements SensorEventListen
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         ballParams.gravity = Gravity.TOP | Gravity.START;
-        ballParams.x = screenW - size - GardenUi.dp(this, 10);
-        ballParams.y = Math.round(screenH * 0.42f);
+        ballParams.x = GardenUi.dp(this, 10);
+        ballParams.y = Math.round(screenH * 0.48f);
         ballParams.setTitle("留白悬浮保活球");
 
         final int slop = ViewConfiguration.get(this).getScaledTouchSlop();
@@ -191,7 +191,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
                     case MotionEvent.ACTION_UP -> {
                         if (!dragged) {
                             Intent launch = new Intent(KeepAliveService.this, MainActivity.class)
-                                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                             startActivity(launch);
                         } else {
                             int margin = GardenUi.dp(KeepAliveService.this, 10);

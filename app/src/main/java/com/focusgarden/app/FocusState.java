@@ -6,6 +6,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -24,6 +25,9 @@ final class FocusState {
     static final int EARLY_SLEEP_POST_WINDOW_MIN = 240;
     static final int RESET_HOUR = 4;
     static final long MAX_VAULT_MS = 120 * MINUTE;
+    static final int MAX_DAILY_BASE_FREE_MINUTES = 15;
+    static final long MAX_DAILY_BASE_FREE_MS = MAX_DAILY_BASE_FREE_MINUTES * MINUTE;
+    static final int SLEEP_CONFIG_COST_MINUTES = 35;
     static final int MODE_SWITCH_COST_MINUTES = 30;
     static final int INDULGENT_UNLOCK_DAYS = 5;
 
@@ -34,11 +38,11 @@ final class FocusState {
     enum ModeSwitchCheck { OK, SAME_MODE, INDULGENT_LOCKED, DAILY_LIMIT_REACHED, INSUFFICIENT_TIME }
 
     enum RateMode {
-        RELAXED("松弛模式", "1:1", "每专注 / 离线 1 分钟兑换 1 分钟", 1, 1, 100),
-        EASY("简单模式", "2:1", "每专注 / 离线 2 分钟兑换 1 分钟", 1, 2, 50),
-        MODERATE("适中模式", "3:1", "每专注 / 离线 3 分钟兑换 1 分钟", 1, 3, 33),
-        SCHOLAR("学霸模式", "4:1", "每专注 / 离线 4 分钟兑换 1 分钟", 1, 4, 25),
-        INDULGENT("放纵模式", "1:2", "每专注 / 离线 1 分钟兑换 2 分钟 · 累计自律 5 天解锁", 2, 1, 200);
+        RELAXED("松弛模式", "1:1", "每自律 / 学习 1 分钟兑换 1 分钟", 1, 1, 100),
+        EASY("简单模式", "2:1", "每自律 / 学习 2 分钟兑换 1 分钟", 1, 2, 50),
+        MODERATE("适中模式", "3:1", "每自律 / 学习 3 分钟兑换 1 分钟", 1, 3, 33),
+        SCHOLAR("学霸模式", "4:1", "每自律 / 学习 4 分钟兑换 1 分钟", 1, 4, 25),
+        INDULGENT("放纵模式", "1:2", "每自律 / 学习 1 分钟兑换 2 分钟 · 累计自律 5 天解锁", 2, 1, 200);
 
         final String label;
         final String ratioText;
@@ -163,6 +167,7 @@ final class FocusState {
         long stepsEarnedMs;
         long rewardSpentMs;
         long configSpentMs;
+        long baseFreeUsedMs;
         final List<Event> events = new ArrayList<>();
     }
 
@@ -527,8 +532,35 @@ final class FocusState {
 
     void putRule(String pkg, Rule rule) {
         if (pkg == null || rule == null) return;
-        rules.put(pkg, rule);
-        if (rule.category == Category.LEARNING) freeLearningSlotUsed = true;
+        Rule normalized = rule.category == Category.LIMITED
+                ? new Rule(rule.label, rule.category,
+                        Math.max(0, Math.min(MAX_DAILY_BASE_FREE_MINUTES, rule.dailyMinutes)))
+                : new Rule(rule.label, rule.category, 0);
+        rules.put(pkg, normalized);
+        if (normalized.category == Category.LEARNING) freeLearningSlotUsed = true;
+    }
+
+    int batchRuleChangeCostMinutes(Collection<String> pkgs, boolean targetLearning) {
+        if (pkgs == null || pkgs.isEmpty()) return 0;
+        boolean freeUsed = freeLearningSlotUsed || learningRuleCount() > 0;
+        int total = 0;
+        for (String pkg : pkgs) {
+            Rule existing = rules.get(pkg);
+            if (targetLearning) {
+                if (existing == null) {
+                    total += !freeUsed ? 0 : 10;
+                    freeUsed = true;
+                } else if (existing.category == Category.LIMITED) {
+                    total += 15;
+                    freeUsed = true;
+                }
+            } else {
+                int targetLimit = existing != null && existing.category == Category.LIMITED
+                        ? existing.dailyMinutes : 0;
+                total += ruleChangeCostMinutes(existing, false, targetLimit);
+            }
+        }
+        return total;
     }
 
     void addHabit(String id, Habit habit) {
@@ -551,9 +583,11 @@ final class FocusState {
     }
 
     int earlySleepConfigCostMinutes(boolean turningOffBedtime, int oldReward, int newReward, boolean clockChanged) {
-        if (turningOffBedtime || clockChanged) return Math.max(15, Math.max(oldReward, newReward) + 5);
-        if (newReward > oldReward) return Math.max(15, newReward);
-        if (newReward < oldReward) return 10;
+        if (turningOffBedtime || clockChanged) return SLEEP_CONFIG_COST_MINUTES;
+        if (newReward != oldReward) {
+            return bedtime ? SLEEP_CONFIG_COST_MINUTES
+                    : (newReward > oldReward ? Math.max(15, newReward) : 10);
+        }
         return 0;
     }
 
@@ -630,7 +664,7 @@ final class FocusState {
         day(d).offlineMs += elapsed;
         offlineUnredeemedMs += elapsed;
         if (elapsed >= MINUTE) {
-            logEvent(d, now, "OFFLINE", "完成离线锁机", "累计离线 " + (elapsed / MINUTE) + " 分钟", 0L);
+            logEvent(d, now, "OFFLINE", "完成自律正计时", "累计自律 " + (elapsed / MINUTE) + " 分钟", 0L);
         }
         evaluateDisciplinedDay(now, zone);
         return elapsed;
@@ -666,19 +700,41 @@ final class FocusState {
         Day stats = day(d);
         stats.offlineEarnedMs += granted;
         grant(stats, granted);
-        logEvent(d, now, "OFFLINE", "兑换离线锁机奖励",
-                rateMode.label + " " + rateMode.ratioText + " · 结算 " + (consumed / MINUTE) + " 分钟离线", granted);
+        logEvent(d, now, "OFFLINE", "兑换自律模式奖励",
+                rateMode.label + " " + rateMode.ratioText + " · 结算 " + (consumed / MINUTE) + " 分钟自律", granted);
         evaluateDisciplinedDay(now, zone);
         return granted;
     }
 
-    Restriction restriction(String pkg, long now, ZoneId zone) {
+    boolean isDisciplineLocked(long now) {
+        return offlineRunning() || ((phaseEnd > now || paused()) && !inBreak);
+    }
+
+    long dailyBaseFreeRemainingMs(String date) {
+        Day d = days.get(date);
+        long usedFree = d == null ? 0L : d.baseFreeUsedMs;
+        return Math.max(0L, MAX_DAILY_BASE_FREE_MS - usedFree);
+    }
+
+    long freeRemainingMs(String pkg, String date) {
         Rule rule = rules.get(pkg);
+        if (rule == null || rule.category != Category.LIMITED || rule.dailyMinutes <= 0) return 0L;
+        int cappedMin = Math.min(MAX_DAILY_BASE_FREE_MINUTES, rule.dailyMinutes);
+        long appLeft = Math.max(0L, cappedMin * MINUTE - used(pkg, date));
+        return Math.min(appLeft, dailyBaseFreeRemainingMs(date));
+    }
+
+    Restriction restriction(String pkg, long now, ZoneId zone) {
+        if (pkg == null || pkg.isEmpty()) return Restriction.NONE;
+        if (bedtimeAt(now, zone)) return Restriction.BEDTIME;
+        Rule rule = rules.get(pkg);
+        if (isDisciplineLocked(now)) {
+            return (rule != null && rule.category == Category.LEARNING)
+                    ? Restriction.NONE : Restriction.FOCUS;
+        }
         if (rule == null || rule.category != Category.LIMITED) return Restriction.NONE;
         if (soberActive(now)) return Restriction.NONE;
-        if (bedtimeAt(now, zone)) return Restriction.BEDTIME;
-        if (((phaseEnd > now || paused()) && !inBreak) || offlineRunning()) return Restriction.FOCUS;
-        long free = rule.dailyMinutes * MINUTE - used(pkg, date(now, zone));
+        long free = freeRemainingMs(pkg, date(now, zone));
         return free <= 0 && creditMs == 0 ? Restriction.BUDGET : Restriction.NONE;
     }
 
@@ -706,20 +762,24 @@ final class FocusState {
         while (cursor < end) {
             syncResetDay(cursor, zone);
             LocalDate logicDay = logicDate(cursor, zone);
+            String dayStr = logicDay.toString();
             long nextReset = logicDayStartMs(logicDay.plusDays(1), zone);
             long sliceEnd = Math.min(end, nextReset);
             long duration = sliceEnd - cursor;
-            Day stats = day(logicDay.toString());
+            Day stats = day(dayStr);
             long previous = stats.usage.getOrDefault(pkg, 0L);
             if (rule.category == Category.LEARNING) {
                 stats.learningMs += duration;
                 stats.learningEarnedMs += earnByMode(stats, duration);
                 if (stats.learningMs >= 10 * MINUTE) evaluateDisciplinedDay(sliceEnd - 1, zone);
             } else {
-                long free = Math.max(0, rule.dailyMinutes * MINUTE - previous);
-                long unlocked = Math.max(0, Math.min(sliceEnd, soberUntil) - cursor);
+                long free = freeRemainingMs(pkg, dayStr);
+                long unlocked = Math.max(0L, Math.min(sliceEnd, soberUntil) - cursor);
                 duration = Math.max(unlocked, Math.min(duration, free + creditMs));
-                long spent = Math.min(creditMs, Math.max(0, duration - free));
+                long nonSober = Math.max(0L, duration - unlocked);
+                long freeUsedNow = Math.min(free, nonSober);
+                long spent = Math.min(creditMs, Math.max(0L, nonSober - freeUsedNow));
+                stats.baseFreeUsedMs += freeUsedNow;
                 creditMs -= spent;
                 stats.spentMs += spent;
                 stats.limitedMs += duration;
@@ -1101,8 +1161,8 @@ final class FocusState {
                 stats.focusMs += phaseDuration;
                 long earned = earnByMode(stats, phaseDuration);
                 stats.focusEarnedMs += earned;
-                logEvent(d, completedAt, "FOCUS", "完成一次专注",
-                        rateMode.label + " " + rateMode.ratioText + " · " + (phaseDuration / MINUTE) + " 分钟专注", earned);
+                logEvent(d, completedAt, "FOCUS", "完成自律倒计时",
+                        rateMode.label + " " + rateMode.ratioText + " · " + (phaseDuration / MINUTE) + " 分钟倒计时", earned);
                 evaluateDisciplinedDay(completedAt, zone);
                 if (--roundsLeft == 0) {
                     cancel();
@@ -1124,5 +1184,23 @@ final class FocusState {
         pausedRemaining = 0;
         roundsLeft = 0;
         inBreak = false;
+    }
+
+    void debugAdjustCredit(long deltaMs) {
+        creditMs = Math.max(0L, creditMs + deltaMs);
+    }
+
+    void debugAdjustVault(long deltaMs) {
+        vaultMs = Math.max(0L, Math.min(MAX_VAULT_MS, vaultMs + deltaMs));
+    }
+
+    void debugUnlockAll(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        cancel();
+        offlineStartMs = 0L;
+        offlineAccumulatedMs = 0L;
+        bedtime = false;
+        stopSober();
+        logEvent(date(now, zone), now, "DEBUG", "调试一键解锁", "已解除全部自律模式与睡眠时段锁定", 0L);
     }
 }

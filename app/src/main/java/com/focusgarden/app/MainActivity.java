@@ -63,7 +63,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private int dayOffset;
     private int insightsMode;
     private int quoteOffset;
-    private int timerTabMode; // 0 = 离线锁机, 1 = 倒计时, 2 = 番茄钟
+    private int timerTabMode; // 0 = 自律正计时, 1 = 自律倒计时
     private int topInset;
     private int bottomInset;
 
@@ -87,13 +87,24 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private TextView homeSoberBadge;
     private TextView homeSoberSub;
     private SwitchView homeSoberSwitch;
+    private ImageView homeTimerHeadIcon;
     private TextView homeTimerSub;
     private TextView homeTimerReward;
+    private TextView homeTimerEarnedLabel;
+    private LinearLayout homeTimerModeSwitchRow;
+    private TextView homeTimerTabUp;
+    private TextView homeTimerTabDown;
+    private LinearLayout homeTimerPresetRow;
+    private TextView[] homeTimerPresetChips;
+    private TextView homeTimerStartLabel;
+    private TextView homeTimerIdleClaimBtn;
     private TextView homeTimerPrimaryBtn;
     private TextView homeTimerStopBtn;
     private TextView homeOfflineRedeemBtn;
+    private TextView homeTimerCountdownBtn;
     private LinearLayout homeTimerIdleRow;
-    private LinearLayout homeTimerRunRow;
+    private LinearLayout homeTimerStopWatchRunRow;
+    private LinearLayout homeTimerCountdownRunRow;
     private String lastLogicDate = "";
     private boolean lastTimerActive;
     private boolean lastOfflineActive;
@@ -133,7 +144,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     void setTimerTabMode(int value) {
-        this.timerTabMode = value;
+        this.timerTabMode = value == 1 ? 1 : 0;
     }
 
     void setRuleCategory(int value) {
@@ -148,7 +159,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             ruleCategory = saved.getInt("ruleCategory");
             dayOffset = saved.getInt("dayOffset");
             insightsMode = saved.getInt("insightsMode");
-            timerTabMode = saved.getInt("timerTabMode", 0);
+            setTimerTabMode(saved.getInt("timerTabMode", 0));
         }
         topInset = statusBarFallback();
         getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
@@ -301,13 +312,24 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeSoberSwitch = null;
         lastSoberBadgeActive = null;
         lastOfflineCanClaim = null;
+        homeTimerHeadIcon = null;
         homeTimerSub = null;
         homeTimerReward = null;
+        homeTimerEarnedLabel = null;
+        homeTimerModeSwitchRow = null;
+        homeTimerTabUp = null;
+        homeTimerTabDown = null;
+        homeTimerPresetRow = null;
+        homeTimerPresetChips = null;
+        homeTimerStartLabel = null;
+        homeTimerIdleClaimBtn = null;
         homeTimerPrimaryBtn = null;
         homeTimerStopBtn = null;
         homeOfflineRedeemBtn = null;
+        homeTimerCountdownBtn = null;
         homeTimerIdleRow = null;
-        homeTimerRunRow = null;
+        homeTimerStopWatchRunRow = null;
+        homeTimerCountdownRunRow = null;
     }
 
     private void render() {
@@ -534,7 +556,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 () -> liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed)));
         space(topActions, 8);
         topActions.addView(topBarBtn(R.drawable.ic_search, INK, "搜索并添加应用规则",
-                () -> FocusSheets.showAppPicker(this, state, e -> FocusSheets.showRuleEditor(this, state, e.pkg(), e.label(), this::changed))));
+                () -> FocusSheets.showAppPicker(this, state, false, this::changed)));
         space(topActions, 8);
         topActions.addView(topBarBtn(R.drawable.ic_settings, INK, "设置", this::openSettings));
         FrameLayout.LayoutParams topLp = new FrameLayout.LayoutParams(-2, -2);
@@ -574,7 +596,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             infoDialog(this, R.drawable.ic_info, BLUE_SOFT, BLUE,
                     "今日自律指数 · " + score + "%",
-                    "自律指数由今日离线锁机、专注、学习、习惯打卡、待办/步数、早睡及限制应用使用共同计算；每日凌晨 04:00 重置当日周期，累计 5 个达标自律日将自动解锁 1 次放纵模式。",
+                    "自律指数由今日自律正计时、倒计时、学习、习惯打卡、待办/步数、早睡及限制应用使用共同计算；每日凌晨 04:00 重置当日周期，累计 5 个达标自律日将自动解锁 1 次放纵模式。",
                     "知道了");
         });
         statusRow.addView(infoBtn, dp(this, 24), dp(this, 24));
@@ -658,7 +680,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         : "已存入 " + duration(moved) + " 到时间储蓄罐");
             } else {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("当前可用时长不足，先去离线锁机或打卡赚取时间吧");
+                toast("当前可用时长不足，先开启自律模式或打卡赚取时间吧");
             }
         });
 
@@ -833,7 +855,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         content.addView(redeemHeader);
         gap(content, 12);
 
-        // 6. Modular Redeem Cards (正向行为 + 锁机离线)
+        // 6. Modular Redeem Cards (正向行为 + 自律模式)
         if (!state.hiddenCards.contains("apps")) {
             content.addView(homeAppsCard(day));
             gap(content, 12);
@@ -863,42 +885,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             gap(content, 12);
         }
 
-        // 7. 强力防关闭与后台保活入口卡
-        content.addView(homeKeepAliveCard(now));
-        gap(content, 12);
-
-        // 8. 通用设置入口卡
-        LinearLayout labCard = surfaceCard();
-        LinearLayout labTop = row(this);
-        labTop.addView(iconBadge(this, R.drawable.ic_lab, PURPLE_SOFT, PURPLE, 32, 17, 10));
-        space(labTop, 10);
-        weight(labTop, text(this, "通用设置与感知体验", 15, INK, true));
-        labTop.addView(iconView(this, R.drawable.ic_chevron_right, 18, MUTED));
-        labCard.addView(labTop);
-        gap(labCard, 10);
-
-        String themeLabel = switch (state.blockTheme) {
-            case 1 -> "沉稳新芽";
-            case 2 -> "留白池塘";
-            default -> "活泼新芽";
-        };
-        LinearLayout labRow = row(this);
-        View dot = new View(this);
-        dot.setBackground(shape(this, state.timeAwarenessBar ? GREEN : MUTED, 4));
-        labRow.addView(dot, dp(this, 7), dp(this, 7));
-        space(labRow, 7);
-        weight(labRow, text(this, state.timeAwarenessBar ? "时间感知条 · 限制应用中生效" : "时间感知条 · 已关闭", 12, INK_SUB, false));
-        labRow.addView(text(this, "拦截风格：" + themeLabel, 12, MUTED, false));
-        labCard.addView(labRow);
-        labCard.setOnClickListener(v -> {
-            tapHaptic(v);
-            FocusSheets.showGeneralSettings(this, state,
-                    () -> FocusSheets.showCardManager(this, state, this::changed), this::changed);
-        });
-        content.addView(labCard);
-        gap(content, 14);
-
-        // 9. Card manager button
+        // 7. Card manager button
         LinearLayout manageBtn = row(this);
         manageBtn.setGravity(Gravity.CENTER);
         manageBtn.setBackground(touchCard(this, CARD, BORDER, 16));
@@ -947,8 +934,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         addApp.setContentDescription("添加学习应用");
         addApp.setOnClickListener(v -> {
             tapHaptic(v);
-            FocusSheets.showAppPicker(this, state,
-                    e -> FocusSheets.showRuleEditor(this, state, e.pkg(), e.label(), this::changed));
+            FocusSheets.showAppPicker(this, state, true, this::changed);
         });
         iconsRow.addView(addApp);
         if (learning.isEmpty()) {
@@ -974,30 +960,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private LinearLayout homeTimerCard(long now, FocusState.Day day) {
         LinearLayout card = surfaceCard();
-        int effectiveMode = state.offlineActive() ? 0
-                : state.active() ? (state.restMinutes > 0 ? 2 : 1)
-                : timerTabMode;
-        String[] modeNames = {"离线锁机", "倒计时", "番茄钟"};
 
         LinearLayout top = row(this);
-        top.addView(iconBadge(this, effectiveMode == 0 ? R.drawable.ic_phone_lock : R.drawable.ic_timer,
-                BLUE_SOFT, BLUE, 34, 18, 10));
+        FrameLayout badge = new FrameLayout(this);
+        badge.setBackground(shape(this, BLUE_SOFT, 10));
+        homeTimerHeadIcon = iconView(this, R.drawable.ic_phone_lock, 18, BLUE);
+        badge.addView(homeTimerHeadIcon, new FrameLayout.LayoutParams(dp(this, 18), dp(this, 18), Gravity.CENTER));
+        top.addView(badge, dp(this, 34), dp(this, 34));
         space(top, 10);
+
         LinearLayout titles = column(this);
-        LinearLayout nameLine = row(this);
-        nameLine.addView(text(this, effectiveMode == 0 ? "离线计时器" : "专注计时器", 16, INK, true));
-        space(nameLine, 8);
-        TextView modeBadge = text(this, modeNames[effectiveMode] + " ▾", 11, BLUE, true);
-        modeBadge.setBackground(shape(this, BLUE_SOFT, 8));
-        modeBadge.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
-        modeBadge.setOnClickListener(v -> {
-            if (state.active() || state.offlineActive()) return;
-            haptic(v, state.hapticFeedback, HapticKind.NAV);
-            timerTabMode = (timerTabMode + 1) % 3;
-            redraw();
-        });
-        nameLine.addView(modeBadge);
-        titles.addView(nameLine);
+        titles.addView(text(this, "自律模式", 16, INK, true));
         homeTimerSub = text(this, "", 12, MUTED, false);
         titles.addView(homeTimerSub);
         weight(top, titles);
@@ -1006,44 +979,78 @@ public final class MainActivity extends Activity implements SensorEventListener 
         right.setGravity(Gravity.END);
         homeTimerReward = text(this, "", 12, INK, true);
         right.addView(homeTimerReward);
-        long earned = effectiveMode == 0 ? day.offlineEarnedMs : day.focusEarnedMs;
-        right.addView(text(this, "已兑换 " + duration(earned), 11, MUTED, false));
+        homeTimerEarnedLabel = text(this, "", 11, MUTED, false);
+        right.addView(homeTimerEarnedLabel);
         top.addView(right);
         card.addView(top);
-        gap(card, 12);
+        gap(card, 10);
 
-        // Idle controls
+        // Idle controls (2 modes: 正计时 | 倒计时, updated in-place with zero redraw/flicker)
         homeTimerIdleRow = column(this);
-        if (effectiveMode == 1) {
-            LinearLayout presetRow = row(this);
-            int[] presets = {15, 25, 45};
-            for (int m : presets) {
-                boolean active = state.presetWork == m;
-                TextView p = pillButton(this, m + "分", active ? BLUE_SOFT : SURFACE_SUBTLE,
-                        active ? BLUE : INK_SUB, 10, 34);
-                if (!active) p.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 10));
-                p.setOnClickListener(v -> {
-                    tapHaptic(v);
-                    state.presetWork = m;
-                    changed();
-                });
-                weight(presetRow, p);
-                space(presetRow, 6);
-            }
-            TextView custom = pillButton(this, "自定义", SURFACE_SUBTLE, INK_SUB, 10, 34);
-            custom.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 10));
-            custom.setOnClickListener(v -> {
+
+        homeTimerModeSwitchRow = row(this);
+        homeTimerModeSwitchRow.setBackground(cardBg(this, SURFACE_SUBTLE, BORDER, 12));
+        homeTimerModeSwitchRow.setPadding(dp(this, 3), dp(this, 3), dp(this, 3), dp(this, 3));
+        homeTimerTabUp = text(this, "正计时", 12, INK, true);
+        homeTimerTabUp.setGravity(Gravity.CENTER);
+        homeTimerTabUp.setMinHeight(dp(this, 32));
+        homeTimerTabDown = text(this, "倒计时", 12, INK, true);
+        homeTimerTabDown.setGravity(Gravity.CENTER);
+        homeTimerTabDown.setMinHeight(dp(this, 32));
+        weight(homeTimerModeSwitchRow, homeTimerTabUp);
+        space(homeTimerModeSwitchRow, 4);
+        weight(homeTimerModeSwitchRow, homeTimerTabDown);
+        homeTimerIdleRow.addView(homeTimerModeSwitchRow);
+        gap(homeTimerIdleRow, 10);
+
+        homeTimerTabUp.setOnClickListener(v -> {
+            if (state.active() || state.offlineActive() || timerTabMode == 0) return;
+            haptic(v, state.hapticFeedback, HapticKind.NAV);
+            timerTabMode = 0;
+            syncHomeTimerMode();
+            updateHomeLive();
+        });
+        homeTimerTabDown.setOnClickListener(v -> {
+            if (state.active() || state.offlineActive() || timerTabMode == 1) return;
+            haptic(v, state.hapticFeedback, HapticKind.NAV);
+            timerTabMode = 1;
+            syncHomeTimerMode();
+            updateHomeLive();
+        });
+
+        homeTimerPresetRow = row(this);
+        int[] presets = {15, 25, 45};
+        homeTimerPresetChips = new TextView[4];
+        for (int i = 0; i < presets.length; i++) {
+            int m = presets[i];
+            TextView p = pillButton(this, m + "分", SURFACE_SUBTLE, INK_SUB, 10, 34);
+            p.setOnClickListener(v -> {
                 tapHaptic(v);
-                FocusSheets.askNumberSheet(this, "专注时长（分钟）",
-                        "1 到 180 分钟", state.presetWork, 1, 180, n -> {
-                            state.presetWork = n;
-                            changed();
-                        });
+                state.presetWork = m;
+                TimerReceiver.changed(this);
+                syncHomeTimerMode();
+                updateHomeLive();
             });
-            weight(presetRow, custom);
-            homeTimerIdleRow.addView(presetRow);
-            gap(homeTimerIdleRow, 10);
+            homeTimerPresetChips[i] = p;
+            weight(homeTimerPresetRow, p);
+            space(homeTimerPresetRow, 6);
         }
+        TextView custom = pillButton(this, "自定义", SURFACE_SUBTLE, INK_SUB, 10, 34);
+        custom.setOnClickListener(v -> {
+            tapHaptic(v);
+            FocusSheets.askNumberSheet(this, "倒计时时长（分钟）",
+                    "1 到 180 分钟", state.presetWork, 1, 180, n -> {
+                        state.presetWork = n;
+                        TimerReceiver.changed(this);
+                        syncHomeTimerMode();
+                        updateHomeLive();
+                    });
+        });
+        homeTimerPresetChips[3] = custom;
+        weight(homeTimerPresetRow, custom);
+        LinearLayout.LayoutParams presetLp = new LinearLayout.LayoutParams(-1, -2);
+        presetLp.bottomMargin = dp(this, 10);
+        homeTimerIdleRow.addView(homeTimerPresetRow, presetLp);
 
         LinearLayout startBar = row(this);
         LinearLayout startBtn = row(this);
@@ -1052,125 +1059,153 @@ public final class MainActivity extends Activity implements SensorEventListener 
         startBtn.setBackground(touch(this, BLUE, 12));
         startBtn.addView(iconView(this, R.drawable.ic_play, 15, CARD));
         space(startBtn, 6);
-        String startLabel = effectiveMode == 0 ? "开始离线锁机"
-                : effectiveMode == 2 ? "开始番茄钟" : "开始专注";
-        startBtn.addView(text(this, startLabel, 14, CARD, true));
+        homeTimerStartLabel = text(this, "开启自律模式", 14, CARD, true);
+        startBtn.addView(homeTimerStartLabel);
         startBtn.setOnClickListener(v -> {
             haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             long t = System.currentTimeMillis();
             TimerReceiver.advance(this, t);
-            if (effectiveMode == 0) state.startOffline(t);
-            else if (effectiveMode == 2) state.start(state.pomodoroWork, state.pomodoroRest, state.pomodoroRounds, t);
+            if (timerTabMode == 0) state.startOffline(t);
             else state.start(state.presetWork, 0, 1, t);
             changed();
+            liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
         });
         weight(startBar, startBtn);
         space(startBar, 8);
 
         FrameLayout expandBtn = iconBadge(this, R.drawable.ic_expand, BLUE_SOFT, BLUE, 42, 18, 12);
-        expandBtn.setContentDescription("全屏专注表盘");
+        expandBtn.setContentDescription("全屏自律表盘");
         expandBtn.setOnClickListener(v -> {
             tapHaptic(v);
             liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
         });
         startBar.addView(expandBtn);
 
-        if (effectiveMode == 0 && state.canClaimOffline(now)) {
-            space(startBar, 8);
-            TextView idleClaim = redeemPill(this, "+" + shortMinutes(state.claimableOfflineMs(now)) + " 分钟", true);
-            idleClaim.setOnClickListener(v -> {
-                long curNow = System.currentTimeMillis();
-                if (!state.canClaimOffline(curNow)) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    toast("累计离线需满 5 分钟且可兑换满 1 分钟才可领取");
-                    return;
-                }
-                long gained = state.claimOffline(curNow, ZoneId.systemDefault());
-                if (gained > 0L) {
-                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                    changed();
-                    toast("离线锁机兑换成功，+" + duration(gained));
-                } else {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                }
-            });
-            startBar.addView(idleClaim);
-        }
+        homeTimerIdleClaimBtn = redeemPill(this, "+0 分钟", true);
+        LinearLayout.LayoutParams idleClaimLp = new LinearLayout.LayoutParams(-2, -2);
+        idleClaimLp.leftMargin = dp(this, 8);
+        homeTimerIdleClaimBtn.setOnClickListener(v -> {
+            long curNow = System.currentTimeMillis();
+            if (!state.canClaimOffline(curNow)) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("累计自律需满 5 分钟且可兑换满 1 分钟才可领取");
+                return;
+            }
+            long gained = state.claimOffline(curNow, ZoneId.systemDefault());
+            if (gained > 0L) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                changed();
+                toast("自律模式兑换成功，+" + duration(gained));
+            } else {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+            }
+        });
+        startBar.addView(homeTimerIdleClaimBtn, idleClaimLp);
         homeTimerIdleRow.addView(startBar);
         card.addView(homeTimerIdleRow);
 
-        // Running controls
-        homeTimerRunRow = row(this);
+        // Running controls for 正计时 (can pause / stop anytime)
+        homeTimerStopWatchRunRow = row(this);
         homeTimerPrimaryBtn = pillButton(this, "", BLUE, CARD, 12, 42);
         homeTimerPrimaryBtn.setOnClickListener(v -> {
+            if (!state.offlineActive()) return;
             haptic(v, state.hapticFeedback, HapticKind.NAV);
             long t = System.currentTimeMillis();
-            if (state.offlineActive()) {
-                if (state.offlineRunning()) state.pauseOffline(t);
-                else state.startOffline(t);
-            } else {
-                TimerReceiver.advance(this, t);
-                state.togglePause(t);
-            }
+            if (state.offlineRunning()) state.pauseOffline(t);
+            else state.startOffline(t);
             changed();
         });
         homeTimerStopBtn = pillButton(this, "■ 停止", RED, CARD, 12, 42);
         homeTimerStopBtn.setOnClickListener(v -> {
-            if (state.offlineActive()) {
-                long elapsed = state.stopOffline(System.currentTimeMillis(), ZoneId.systemDefault());
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
-                if (elapsed >= FocusState.MIN_OFFLINE_CLAIM_MS) {
-                    toast("离线锁机已结算 " + duration(elapsed));
-                } else if (elapsed > 0L) {
-                    toast("已记录 " + duration(elapsed) + " 离线（满 5 分钟可兑换）");
-                }
-            } else {
-                tapHaptic(v);
-                endTimerConfirm();
+            if (!state.offlineActive()) return;
+            long elapsed = state.stopOffline(System.currentTimeMillis(), ZoneId.systemDefault());
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            changed();
+            if (elapsed >= FocusState.MIN_OFFLINE_CLAIM_MS) {
+                toast("自律正计时已结算 " + duration(elapsed));
+            } else if (elapsed > 0L) {
+                toast("已记录 " + duration(elapsed) + " 自律时长（满 5 分钟可兑换）");
             }
         });
+        homeTimerStopWatchRunRow.addView(homeTimerPrimaryBtn, new LinearLayout.LayoutParams(0, -2, 1.55f));
+        space(homeTimerStopWatchRunRow, 8);
+        homeTimerStopWatchRunRow.addView(homeTimerStopBtn, new LinearLayout.LayoutParams(0, -2, 0.85f));
+        space(homeTimerStopWatchRunRow, 8);
+        homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
+        homeOfflineRedeemBtn.setOnClickListener(v -> {
+            long curNow = System.currentTimeMillis();
+            if (!state.canClaimOffline(curNow)) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("累计自律需满 5 分钟且可兑换满 1 分钟才可领取");
+                return;
+            }
+            long gained = state.claimOffline(curNow, ZoneId.systemDefault());
+            if (gained > 0L) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                changed();
+                toast("已兑换 +" + duration(gained));
+            } else {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+            }
+        });
+        homeTimerStopWatchRunRow.addView(homeOfflineRedeemBtn);
+        card.addView(homeTimerStopWatchRunRow);
 
-        homeTimerRunRow.addView(homeTimerPrimaryBtn, new LinearLayout.LayoutParams(0, -2, 1.55f));
-        space(homeTimerRunRow, 8);
-        homeTimerRunRow.addView(homeTimerStopBtn, new LinearLayout.LayoutParams(0, -2, 0.85f));
-        if (effectiveMode == 0) {
-            space(homeTimerRunRow, 8);
-            homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
-            homeOfflineRedeemBtn.setOnClickListener(v -> {
-                long curNow = System.currentTimeMillis();
-                if (!state.canClaimOffline(curNow)) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    toast("累计离线需满 5 分钟且可兑换满 1 分钟才可领取");
-                    return;
-                }
-                long gained = state.claimOffline(curNow, ZoneId.systemDefault());
-                if (gained > 0L) {
-                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                    changed();
-                    toast("已兑换 +" + duration(gained));
-                } else {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                }
-            });
-            homeTimerRunRow.addView(homeOfflineRedeemBtn);
-        } else {
-            space(homeTimerRunRow, 8);
-            FrameLayout expandRun = iconBadge(this, R.drawable.ic_expand, BLUE_SOFT, BLUE, 42, 18, 12);
-            expandRun.setContentDescription("全屏专注表盘");
-            expandRun.setOnClickListener(v -> {
-                tapHaptic(v);
-                liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
-            });
-            homeTimerRunRow.addView(expandRun);
-        }
-        card.addView(homeTimerRunRow);
+        // Running controls for 倒计时 (locked: cannot stop early)
+        homeTimerCountdownRunRow = row(this);
+        homeTimerCountdownBtn = pillButton(this, "", BLUE_SOFT, BLUE, 12, 42);
+        homeTimerCountdownBtn.setBackground(touchCard(this, BLUE_SOFT, 0xffcfe0ff, 12));
+        homeTimerCountdownBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
+        });
+        homeTimerCountdownRunRow.addView(homeTimerCountdownBtn, -1, -2);
+        card.addView(homeTimerCountdownRunRow);
 
         card.setOnClickListener(v -> {
             tapHaptic(v);
             liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
         });
+        syncHomeTimerMode();
         return card;
+    }
+
+    private void syncHomeTimerMode() {
+        if (homeTimerTabUp == null) return;
+        int effectiveMode = state.offlineActive() ? 0 : state.active() ? 1 : timerTabMode;
+        if (homeTimerHeadIcon != null) {
+            homeTimerHeadIcon.setImageResource(effectiveMode == 0 ? R.drawable.ic_phone_lock : R.drawable.ic_timer);
+        }
+        homeTimerTabUp.setBackground(effectiveMode == 0 ? shape(this, CARD, 9) : null);
+        homeTimerTabUp.setTextColor(effectiveMode == 0 ? BLUE : MUTED);
+        elevate(homeTimerTabUp, effectiveMode == 0 ? 1.5f : 0f);
+        homeTimerTabDown.setBackground(effectiveMode == 1 ? shape(this, CARD, 9) : null);
+        homeTimerTabDown.setTextColor(effectiveMode == 1 ? BLUE : MUTED);
+        elevate(homeTimerTabDown, effectiveMode == 1 ? 1.5f : 0f);
+
+        if (homeTimerPresetRow != null) {
+            int pVis = (!state.active() && !state.offlineActive() && effectiveMode == 1) ? View.VISIBLE : View.GONE;
+            if (homeTimerPresetRow.getVisibility() != pVis) homeTimerPresetRow.setVisibility(pVis);
+        }
+        if (homeTimerPresetChips != null) {
+            int[] presets = {15, 25, 45};
+            boolean matchedPreset = false;
+            for (int i = 0; i < presets.length; i++) {
+                boolean active = state.presetWork == presets[i];
+                if (active) matchedPreset = true;
+                TextView p = homeTimerPresetChips[i];
+                p.setBackground(active ? shape(this, BLUE_SOFT, 10) : touchCard(this, SURFACE_SUBTLE, BORDER, 10));
+                p.setTextColor(active ? BLUE : INK_SUB);
+            }
+            TextView custom = homeTimerPresetChips[3];
+            boolean customActive = !matchedPreset;
+            custom.setText(customActive ? state.presetWork + "分" : "自定义");
+            custom.setBackground(customActive ? shape(this, BLUE_SOFT, 10) : touchCard(this, SURFACE_SUBTLE, BORDER, 10));
+            custom.setTextColor(customActive ? BLUE : INK_SUB);
+        }
+        if (homeTimerStartLabel != null) {
+            setTextIfChanged(homeTimerStartLabel, effectiveMode == 0 ? "开启自律正计时" : "开启自律倒计时");
+        }
     }
 
     private LinearLayout homeRewardCard(FocusState.Day day) {
@@ -1567,59 +1602,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
         return card;
     }
 
-    private LinearLayout homeKeepAliveCard(long now) {
-        LinearLayout card = surfaceCard();
-        int ready = KeepAliveManager.cachedStatus(this).readyCount();
-        int total = KeepAliveManager.totalChecks();
-
-        LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_power, ready >= 4 ? GREEN_SOFT : BLUE_SOFT,
-                ready >= 4 ? GREEN : BLUE, 32, 17, 10));
-        space(top, 10);
-        weight(top, text(this, "后台稳定运行与防关闭", 15, INK, true));
-        TextView badge = text(this, ready + "/" + total + " 已就绪", 11,
-                ready >= 4 ? GREEN : BLUE, true);
-        badge.setBackground(shape(this, ready >= 4 ? GREEN_SOFT : BLUE_SOFT, 8));
-        badge.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
-        top.addView(badge);
-        space(top, 4);
-        top.addView(iconView(this, R.drawable.ic_chevron_right, 18, MUTED));
-        card.addView(top);
-        gap(card, 10);
-
-        HeartbeatStripView miniStrip = new HeartbeatStripView(this);
-        miniStrip.setBuckets(state.heartbeatBuckets24h(now));
-        card.addView(miniStrip, -1, dp(this, 14));
-        gap(card, 6);
-
-        LinearLayout foot = row(this);
-        weight(foot, text(this, "24h 守护记录 · 悬浮球、保活壁纸与防卸载", 11, MUTED, false));
-        foot.addView(text(this, "去配置", 11, BLUE, true));
-        card.addView(foot);
-
-        card.setOnClickListener(v -> {
-            tapHaptic(v);
-            liveKeepAliveSheet = FocusSheets.showKeepAliveSheet(
-                    this, state, this::changed, this::launchWallpaperPicker,
-                    this::pinWidget, this::addQuickTile);
-        });
-        return card;
-    }
-
     private void updateHomeLive() {
         if (homeHeroTitle == null) return;
         long now = System.currentTimeMillis();
         LocalDate today = FocusState.today();
         boolean activeCountdown = state.active();
-        boolean activeOffline = state.offlineActive();
+        boolean activeStopwatch = state.offlineActive();
         boolean paused = state.paused();
         boolean sober = state.soberActive(now);
         boolean bedtimeNow = state.bedtimeAt(now, ZoneId.systemDefault());
         int score = state.disciplineScore(today);
 
-        String heroStr = bedtimeNow ? "早睡时段生效中"
-                : state.offlineRunning() ? "离线锁机中"
-                : activeCountdown && !paused ? (state.inBreak ? "番茄休息中" : "专注进行中")
+        String heroStr = bedtimeNow ? "睡眠时段全锁定"
+                : state.offlineRunning() ? "自律正计时进行中"
+                : activeCountdown && !paused ? "自律倒计时进行中"
                 : "自律在线 " + score + "%";
         setTextIfChanged(homeHeroTitle, heroStr);
         homeHeroBar.setProgress(score / 100f);
@@ -1654,22 +1650,25 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
         }
 
-        if (homeTimerIdleRow != null && homeTimerRunRow != null) {
-            boolean anyActive = activeCountdown || activeOffline;
+        if (homeTimerIdleRow != null && homeTimerStopWatchRunRow != null && homeTimerCountdownRunRow != null) {
+            boolean anyActive = activeCountdown || activeStopwatch;
             int idleVis = anyActive ? View.GONE : View.VISIBLE;
-            int runVis = anyActive ? View.VISIBLE : View.GONE;
+            int swVis = activeStopwatch ? View.VISIBLE : View.GONE;
+            int cdVis = (!activeStopwatch && activeCountdown) ? View.VISIBLE : View.GONE;
             if (homeTimerIdleRow.getVisibility() != idleVis) homeTimerIdleRow.setVisibility(idleVis);
-            if (homeTimerRunRow.getVisibility() != runVis) homeTimerRunRow.setVisibility(runVis);
+            if (homeTimerStopWatchRunRow.getVisibility() != swVis) homeTimerStopWatchRunRow.setVisibility(swVis);
+            if (homeTimerCountdownRunRow.getVisibility() != cdVis) homeTimerCountdownRunRow.setVisibility(cdVis);
 
-            if (activeOffline) {
+            if (activeStopwatch) {
                 long elapsed = state.offlineElapsed(now);
                 long claimable = state.claimableOfflineMs(now);
                 setTextIfChanged(homeTimerReward, shortMinutes(claimable) + " 分钟 可兑换");
+                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
                 String label = state.offlineRunning()
-                        ? "⏸ " + countdown(elapsed) + " 离线中"
-                        : "▶ " + countdown(elapsed) + " 继续离线";
+                        ? "⏸ " + countdown(elapsed) + " 自律中"
+                        : "▶ " + countdown(elapsed) + " 继续自律";
                 setTextIfChanged(homeTimerPrimaryBtn, label);
-                setTextIfChanged(homeTimerSub, "今日共离线 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
+                setTextIfChanged(homeTimerSub, "今日共自律 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
                 if (homeOfflineRedeemBtn != null) {
                     boolean canClaim = state.canClaimOffline(now);
                     setTextIfChanged(homeOfflineRedeemBtn, "+" + shortMinutes(claimable) + " 分钟");
@@ -1683,27 +1682,31 @@ public final class MainActivity extends Activity implements SensorEventListener 
             } else if (activeCountdown) {
                 long rem = state.remaining(now);
                 setTextIfChanged(homeTimerReward, shortMinutes(state.convertByMode(state.phaseDuration)) + " 分钟 预计奖励");
-                String label = paused
-                        ? "▶ " + countdown(rem) + (state.inBreak ? " 继续休息" : " 继续专注")
-                        : "⏸ " + countdown(rem) + (state.inBreak ? " 休息中" : " 专注中");
-                setTextIfChanged(homeTimerPrimaryBtn, label);
-                setTextIfChanged(homeTimerSub, state.restMinutes > 0
-                        ? "剩余 " + state.roundsLeft + " 轮 · 今日专注 " + duration(day == null ? 0 : day.focusMs)
-                        : "今日共专注 " + duration(day == null ? 0 : day.focusMs));
+                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
+                setTextIfChanged(homeTimerCountdownBtn, "自律倒计时还剩 " + countdown(rem) + " · 进入全屏");
+                setTextIfChanged(homeTimerSub, "除正向学习应用外已锁定 · 结束后自动结算");
             } else if (timerTabMode == 0) {
                 long claimable = state.claimableOfflineMs(now);
                 setTextIfChanged(homeTimerReward, state.canClaimOffline(now)
                         ? shortMinutes(claimable) + " 分钟 可兑换"
                         : "满 5 分钟可兑");
-                setTextIfChanged(homeTimerSub, "今日共离线 " + duration(day == null ? 0 : day.offlineMs)
-                        + " · " + state.rateMode.label + " " + state.rateMode.ratioText);
+                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
+                setTextIfChanged(homeTimerSub, "正计时可随时停止 · 按 " + state.rateMode.ratioText + " 兑换");
+                if (homeTimerIdleClaimBtn != null) {
+                    int claimVis = state.canClaimOffline(now) ? View.VISIBLE : View.GONE;
+                    if (homeTimerIdleClaimBtn.getVisibility() != claimVis) homeTimerIdleClaimBtn.setVisibility(claimVis);
+                    if (claimVis == View.VISIBLE) {
+                        setTextIfChanged(homeTimerIdleClaimBtn, "+" + shortMinutes(claimable) + " 分钟");
+                    }
+                }
             } else {
-                int targetMin = timerTabMode == 2 ? state.pomodoroWork : state.presetWork;
-                long expectedMs = state.convertByMode(targetMin * FocusState.MINUTE);
+                long expectedMs = state.convertByMode(state.presetWork * FocusState.MINUTE);
                 setTextIfChanged(homeTimerReward, "+" + shortMinutes(expectedMs) + " 分钟 预计奖励");
-                setTextIfChanged(homeTimerSub, timerTabMode == 2
-                        ? state.pomodoroWork + "分专注 · " + state.pomodoroRest + "分休息 · " + state.pomodoroRounds + "轮"
-                        : "今日共专注 " + duration(day == null ? 0 : day.focusMs));
+                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
+                setTextIfChanged(homeTimerSub, "倒计时开启后不可停止 · 按 " + state.rateMode.ratioText + " 兑换");
+                if (homeTimerIdleClaimBtn != null && homeTimerIdleClaimBtn.getVisibility() != View.GONE) {
+                    homeTimerIdleClaimBtn.setVisibility(View.GONE);
+                }
             }
         }
     }
@@ -1782,7 +1785,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             gap(empty, 5);
             empty.addView(text(this, ruleCategory == 0
                     ? "将阅读、课程或笔记类 App 添加到这里，使用时长自动兑换娱乐时间。"
-                    : "为容易分心的短视频或游戏 App 设定每日免费时长。", 13, MUTED, false));
+                    : "为容易分心的短视频或游戏 App 开启限制，默认由可用时长决定（共享每日最高 15 分钟基础免费上限）。", 13, MUTED, false));
             pages.addView(empty);
             gap(pages, 12);
         }
@@ -1790,8 +1793,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         TextView addRule = primaryButton(this, "添加应用规则");
         addRule.setOnClickListener(v -> {
             tapHaptic(v);
-            FocusSheets.showAppPicker(this, state,
-                    e -> FocusSheets.showRuleEditor(this, state, e.pkg(), e.label(), this::changed));
+            FocusSheets.showAppPicker(this, state, ruleCategory == 0, this::changed);
         });
         pages.addView(addRule, -1, -2);
         gap(pages, 22);
@@ -1808,7 +1810,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         space(sleepTop, 12);
         LinearLayout sleepCopy = column(this);
         sleepCopy.addView(text(this, "睡眠时段", 16, INK, true));
-        sleepCopy.addView(text(this, "这段时间暂停使用受限应用", 12, MUTED, false));
+        sleepCopy.addView(text(this, "开启后强制锁定所有应用 · 放弃或修改需 35 分钟", 12, MUTED, false));
         weight(sleepTop, sleepCopy);
         SwitchView sleepSw = new SwitchView(this, state.bedtime);
         sleepSw.setContentDescription("启用睡眠时段");
@@ -1821,8 +1823,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             sleepSw.setChecked(true, false);
             int cost = state.earlySleepConfigCostMinutes(true, state.earlySleepRewardMinutes,
                     state.earlySleepRewardMinutes, false);
-            FocusSheets.confirmPaidChange(this, state, "关闭夜间早睡锁",
-                    "关闭睡眠时段受限应用自动拦截", cost, () -> {
+            FocusSheets.confirmPaidChange(this, state, "放弃睡眠时段锁定",
+                    "关闭后将解除睡眠时段全应用强制锁定", cost, () -> {
                         state.bedtime = false;
                         changed();
                     });
@@ -1912,11 +1914,19 @@ public final class MainActivity extends Activity implements SensorEventListener 
         name.setEllipsize(TextUtils.TruncateAt.END);
         copy.addView(name);
 
-        long used = state.used(pkg, FocusState.today().toString());
-        long free = rule.dailyMinutes() * FocusState.MINUTE;
-        String detail = rule.category() == FocusState.Category.LEARNING
-                ? "今日学习 " + duration(used)
-                : "每日 " + rule.dailyMinutes() + " 分钟 · 免费剩 " + duration(Math.max(0, free - used)) + " · 已用 " + duration(used);
+        String todayStr = FocusState.today().toString();
+        long used = state.used(pkg, todayStr);
+        int cappedMin = Math.min(FocusState.MAX_DAILY_BASE_FREE_MINUTES, rule.dailyMinutes());
+        long free = cappedMin * FocusState.MINUTE;
+        String detail;
+        if (rule.category() == FocusState.Category.LEARNING) {
+            detail = "今日学习 " + duration(used);
+        } else if (cappedMin <= 0) {
+            detail = "完全由可用时长决定 · 今日已用 " + duration(used);
+        } else {
+            long remFree = state.freeRemainingMs(pkg, todayStr);
+            detail = "基础免费 " + cappedMin + " 分钟 · 剩 " + duration(remFree) + " · 已用 " + duration(used);
+        }
         copy.addView(text(this, detail, 12, MUTED, false));
         weight(line, copy);
 
@@ -1929,9 +1939,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         card.addView(line);
 
         if (free > 0 && rule.category() == FocusState.Category.LIMITED) {
+            long remFree = state.freeRemainingMs(pkg, todayStr);
             gap(card, 10);
             CapsuleBar bar = new CapsuleBar(this);
-            float p = Math.min(1f, (float) used / free);
+            float p = Math.min(1f, Math.max(0f, (float) (free - remFree) / free));
             bar.setColors(LINE, p >= 1f ? RED : p > 0.75f ? AMBER : BLUE);
             bar.setProgress(p);
             card.addView(bar, -1, dp(this, 6));
@@ -2130,7 +2141,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         TextView h = text(this, "使用洞察", 26, INK, true);
         if (Build.VERSION.SDK_INT >= 28) h.setAccessibilityHeading(true);
         titleBox.addView(h);
-        titleBox.addView(text(this, insightsMode == 0 ? "点选日期查看专注、离线与应用统计" : "回顾当日每一笔自律收支记录", 12, MUTED, false));
+        titleBox.addView(text(this, insightsMode == 0 ? "点选日期查看自律、学习与应用统计" : "回顾当日每一笔自律收支记录", 12, MUTED, false));
         weight(head, titleBox);
         head.addView(topBarBtn(R.drawable.ic_settings, INK, "设置", this::openSettings));
         pages.addView(head);
@@ -2189,7 +2200,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             dayName.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             col.addView(dayName, -1, -2);
             col.setSelected(picked);
-            col.setContentDescription(date.format(DATE) + "，专注与离线 " + duration(day.focusMs + day.offlineMs)
+            col.setContentDescription(date.format(DATE) + "，自律时长 " + duration(day.focusMs + day.offlineMs)
                     + "，学习 " + duration(day.learningMs) + "，限制应用 " + duration(day.limitedMs));
             col.setOnClickListener(v -> {
                 tapHaptic(v);
@@ -2202,7 +2213,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(week, 12);
 
         LinearLayout key = row(this);
-        chartKey(key, "专注/离线", BLUE);
+        chartKey(key, "自律时长", BLUE);
         chartKey(key, "学习", GREEN);
         chartKey(key, "限制应用", AMBER);
         week.addView(key);
@@ -2219,7 +2230,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(pages, 10);
 
         LinearLayout grid2 = row(this);
-        grid2.addView(metricTile("专注与离线", duration(selectedDay.focusMs + selectedDay.offlineMs), GREEN_SOFT, GREEN),
+        grid2.addView(metricTile("自律模式时长", duration(selectedDay.focusMs + selectedDay.offlineMs), GREEN_SOFT, GREEN),
                 new LinearLayout.LayoutParams(0, -2, 1f));
         space(grid2, 10);
         grid2.addView(metricTile("习惯与步数", selectedDay.checkIns + " 次 · " + selectedDay.steps + " 步",
@@ -2311,14 +2322,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
             gap(stream, 10);
             stream.addView(text(this, "这一天还没有时间线记录", 15, INK, true));
             gap(stream, 4);
-            stream.addView(text(this, "完成离线锁机、专注、习惯打卡或待办兑换后会在这里生成明细", 12, MUTED, false));
+            stream.addView(text(this, "完成自律模式、习惯打卡或待办兑换后会在这里生成明细", 12, MUTED, false));
         } else {
             for (int i = selectedDay.events.size() - 1; i >= 0; i--) {
                 FocusState.Event ev = selectedDay.events.get(i);
                 int accent = switch (ev.type()) {
                     case "FOCUS", "OFFLINE" -> BLUE;
                     case "HABIT" -> GREEN;
-                    case "SLEEP" -> PURPLE;
+                    case "SLEEP", "DEBUG" -> PURPLE;
                     case "SOBER", "RESET" -> CYAN;
                     case "REWARD" -> AMBER;
                     case "VAULT", "CONFIG" -> INK_SUB;
@@ -2327,7 +2338,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 int soft = switch (ev.type()) {
                     case "FOCUS", "OFFLINE" -> BLUE_SOFT;
                     case "HABIT" -> GREEN_SOFT;
-                    case "SLEEP" -> PURPLE_SOFT;
+                    case "SLEEP", "DEBUG" -> PURPLE_SOFT;
                     case "SOBER", "RESET" -> CYAN_SOFT;
                     case "REWARD" -> AMBER_SOFT;
                     case "VAULT", "CONFIG" -> SURFACE_SUBTLE;
@@ -2461,18 +2472,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (view != null && !value.contentEquals(view.getText())) view.setText(value);
     }
 
-    private void endTimerConfirm() {
-        confirmDialog(this, R.drawable.ic_timer, RED_SOFT, RED,
-                "结束这次计时？",
-                "已完成的轮次会保留奖励。当前未完成的轮次不计入结余。",
-                "继续", "结束", true, () -> {
-                    haptic(navBar, state.hapticFeedback, HapticKind.CONFIRM);
-                    TimerReceiver.advance(this, System.currentTimeMillis());
-                    state.cancel();
-                    changed();
-                });
-    }
-
     void accessibilityNotice() {
         confirmDialog(this, R.drawable.ic_shield, BLUE_SOFT, BLUE,
                 "启用前了解用途",
@@ -2505,6 +2504,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         () -> FocusSheets.showCardManager(this, state, this::changed), this::changed),
                 () -> FocusSheets.showRateSettings(this, state, this::changed),
                 () -> FocusSheets.showRewardsSheet(this, state, this::changed),
+                () -> FocusSheets.showDebugSheet(this, state, this::changed),
                 () -> new UpdatePanel(this).open());
     }
 

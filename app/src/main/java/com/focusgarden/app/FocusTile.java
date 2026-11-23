@@ -18,8 +18,11 @@ public final class FocusTile extends TileService {
             long now = System.currentTimeMillis();
             TimerReceiver.advance(this, now);
             FocusState state = FocusStore.get(this).state;
-            if (state.active()) state.cancel();
-            else if (state.offlineActive()) state.stopOffline(now, ZoneId.systemDefault());
+            if (state.active()) {
+                refresh();
+                return;
+            }
+            if (state.offlineActive()) state.stopOffline(now, ZoneId.systemDefault());
             else state.startOffline(now);
             TimerReceiver.changed(this);
             refresh();
@@ -33,10 +36,10 @@ public final class FocusTile extends TileService {
         boolean on = state.active() || state.offlineActive();
         tile.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         if (android.os.Build.VERSION.SDK_INT >= 29) {
-            String sub = !on ? "点按开始离线锁机"
-                    : state.offlineRunning() ? "离线锁机中 · 点按结束"
-                    : state.offlinePaused() ? "离线已暂停 · 点按结束"
-                    : state.paused() ? "计时已暂停" : "点按结束专注";
+            String sub = !on ? "点按开启自律正计时"
+                    : state.active() ? "自律倒计时不可提前停止"
+                    : state.offlineRunning() ? "自律正计时中 · 点按结束"
+                    : "自律已暂停 · 点按结束";
             tile.setSubtitle(sub);
         }
         tile.updateTile();

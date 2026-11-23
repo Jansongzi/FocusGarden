@@ -8,7 +8,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.time.LocalDate;
 import java.util.Iterator;
 
 final class FocusStore {
@@ -143,7 +142,10 @@ final class FocusStore {
             JSONObject row = rules.getJSONObject(pkg);
             FocusState.Category category = "LEARNING".equals(row.optString("category"))
                     ? FocusState.Category.LEARNING : FocusState.Category.LIMITED;
-            state.rules.put(pkg, new FocusState.Rule(row.optString("label", pkg), category, row.optInt("limit")));
+            int limit = category == FocusState.Category.LIMITED
+                    ? Math.max(0, Math.min(FocusState.MAX_DAILY_BASE_FREE_MINUTES, row.optInt("limit")))
+                    : 0;
+            state.rules.put(pkg, new FocusState.Rule(row.optString("label", pkg), category, limit));
         }
 
         JSONObject habits = root.optJSONObject("habits");
@@ -223,6 +225,7 @@ final class FocusStore {
             day.stepsEarnedMs = row.optLong("stepsEarned");
             day.rewardSpentMs = row.optLong("rewardSpent");
             day.configSpentMs = row.optLong("configSpent");
+            day.baseFreeUsedMs = row.optLong("baseFreeUsed");
 
             JSONObject usage = row.optJSONObject("usage");
             for (Iterator<String> p = keys(usage); p.hasNext();) {
@@ -390,6 +393,7 @@ final class FocusStore {
                         .put("stepsEarned", day.stepsEarnedMs)
                         .put("rewardSpent", day.rewardSpentMs)
                         .put("configSpent", day.configSpentMs)
+                        .put("baseFreeUsed", day.baseFreeUsedMs)
                         .put("usage", new JSONObject(day.usage))
                         .put("events", events));
             }

@@ -16,10 +16,13 @@ final class FocusStateCheck {
     public static void main(String[] args) {
         long noon = at("2026-11-22T12:00:00Z");
         var state = new FocusState();
-        // v1.5.0 defaults: MODERATE (3:1), 04:00 AM reset, 2h vault cap, seeded rewards
+        // v1.5.1 defaults: MODERATE (3:1), 04:00 AM reset, 2h vault cap, 15m daily base free cap, 35m sleep config cost
         equal(FocusState.RateMode.MODERATE, state.rateMode);
         equal(FocusState.RESET_HOUR, 4);
         equal(120 * MINUTE, FocusState.MAX_VAULT_MS);
+        equal(15, FocusState.MAX_DAILY_BASE_FREE_MINUTES);
+        equal(15 * MINUTE, FocusState.MAX_DAILY_BASE_FREE_MS);
+        equal(35, FocusState.SLEEP_CONFIG_COST_MINUTES);
         equal(30, FocusState.MODE_SWITCH_COST_MINUTES);
         equal(5, FocusState.INDULGENT_UNLOCK_DAYS);
         equal(33, state.offlinePercent);
@@ -59,7 +62,8 @@ final class FocusStateCheck {
         equal(BEDTIME, state.restriction(VIDEO, at("2026-11-22T23:00:00Z"), UTC));
         equal(BEDTIME, state.restriction(VIDEO, midnight + 1, UTC));
         equal(NONE, state.restriction(VIDEO, at("2026-11-23T07:00:00Z"), UTC));
-        equal(NONE, state.restriction(STUDY, midnight + 1, UTC));
+        equal(BEDTIME, state.restriction(STUDY, midnight + 1, UTC));
+        equal(BEDTIME, state.restriction("test.unconfigured", midnight + 1, UTC));
 
         // Pomodoro 15m * 4 rounds under MODERATE 3:1 = 5m per round -> 20m total
         var pomo = new FocusState();
@@ -375,23 +379,97 @@ final class FocusStateCheck {
         // Config cost rules
         equal(15, eco.stepConfigChangeCostMinutes(2000, 5, 1000, 5));
         equal(10, eco.stepConfigChangeCostMinutes(1000, 5, 2000, 5));
-        equal(15, eco.earlySleepConfigCostMinutes(true, 10, 10, false));
-        equal(15, eco.earlySleepConfigCostMinutes(false, 10, 10, true));
-        equal(25, eco.earlySleepConfigCostMinutes(true, 20, 20, false));
-        equal(25, eco.earlySleepConfigCostMinutes(false, 20, 20, true));
+        equal(35, eco.earlySleepConfigCostMinutes(true, 10, 10, false));
+        equal(35, eco.earlySleepConfigCostMinutes(false, 10, 10, true));
+        eco.bedtime = true;
+        equal(35, eco.earlySleepConfigCostMinutes(false, 10, 20, false));
+        eco.bedtime = false;
         equal(20, eco.earlySleepConfigCostMinutes(false, 10, 20, false));
         equal(0, eco.earlySleepConfigCostMinutes(false, 10, 10, false));
 
-        var limitedRule = new FocusState.Rule("Games", LIMITED, 15);
-        equal(0, eco.ruleChangeCostMinutes(null, false, 15));
+        var limitedRule = new FocusState.Rule("Games", LIMITED, 5);
+        equal(0, eco.ruleChangeCostMinutes(null, false, 0));
         equal(0, eco.ruleChangeCostMinutes(null, true, 0));
         eco.putRule("study1", new FocusState.Rule("Docs", LEARNING, 0));
         equal(10, eco.ruleChangeCostMinutes(null, true, 0));
         eco.rules.remove("study1");
         equal(10, eco.ruleChangeCostMinutes(null, true, 0));
-        equal(0, eco.ruleChangeCostMinutes(limitedRule, false, 5));
-        equal(20, eco.ruleChangeCostMinutes(limitedRule, false, 30));
+        equal(0, eco.ruleChangeCostMinutes(limitedRule, false, 3));
+        equal(15, eco.ruleChangeCostMinutes(limitedRule, false, 15));
         equal(15, eco.removeRuleCostMinutes(limitedRule));
+
+        // Batch rule changes & putRule clamping >15 down to 15
+        var batch = new FocusState();
+        batch.putRule("test.clamp", new FocusState.Rule("ClampApp", LIMITED, 99));
+        equal(15, batch.rules.get("test.clamp").dailyMinutes());
+        equal(10, batch.batchRuleChangeCostMinutes(java.util.Arrays.asList("learn.a", "learn.b"), true));
+        equal(0, batch.batchRuleChangeCostMinutes(java.util.Arrays.asList("lim.a", "lim.b"), false));
+
+        // 15m shared daily base free quota & uncustomized 0m limited apps draw directly from creditMs
+        var quota = new FocusState();
+        String qDate = "2026-11-22";
+        quota.putRule("lim.zero", new FocusState.Rule("ZeroFree", LIMITED, 0));
+        quota.putRule("lim.ten1", new FocusState.Rule("TenOne", LIMITED, 10));
+        quota.putRule("lim.ten2", new FocusState.Rule("TenTwo", LIMITED, 10));
+        quota.creditMs = 20 * MINUTE;
+        equal(0L, quota.freeRemainingMs("lim.zero", qDate));
+        equal(10 * MINUTE, quota.freeRemainingMs("lim.ten1", qDate));
+        equal(15 * MINUTE, quota.dailyBaseFreeRemainingMs(qDate));
+        // Uncustomized dailyMinutes=0 app consumes creditMs directly without touching 15m base free cap
+        quota.addUsage("lim.zero", noon, noon + 5 * MINUTE, UTC);
+        equal(15 * MINUTE, quota.creditMs);
+        equal(15 * MINUTE, quota.dailyBaseFreeRemainingMs(qDate));
+        // Two LIMITED(10) apps share the 15m daily cap: first takes 10m free, second gets only 5m free + 3m credit
+        quota.addUsage("lim.ten1", noon + 5 * MINUTE, noon + 15 * MINUTE, UTC);
+        equal(15 * MINUTE, quota.creditMs);
+        equal(5 * MINUTE, quota.dailyBaseFreeRemainingMs(qDate));
+        equal(5 * MINUTE, quota.freeRemainingMs("lim.ten2", qDate));
+        quota.addUsage("lim.ten2", noon + 15 * MINUTE, noon + 23 * MINUTE, UTC);
+        equal(0L, quota.dailyBaseFreeRemainingMs(qDate));
+        equal(0L, quota.freeRemainingMs("lim.ten2", qDate));
+        equal(12 * MINUTE, quota.creditMs);
+
+        // Strict lock semantics: discipline lock blocks unconfigured & limited (allows only LEARNING); bedtime ignores Sober
+        var strict = new FocusState();
+        strict.putRule(STUDY, new FocusState.Rule("Study", LEARNING, 0));
+        strict.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 15));
+        strict.creditMs = 30 * MINUTE;
+        strict.startOffline(noon);
+        equal(true, strict.isDisciplineLocked(noon + MINUTE));
+        equal(NONE, strict.restriction(STUDY, noon + MINUTE, UTC));
+        equal(FOCUS, strict.restriction(VIDEO, noon + MINUTE, UTC));
+        equal(FOCUS, strict.restriction("test.unconfigured", noon + MINUTE, UTC));
+        strict.stopOffline(noon + 2 * MINUTE, UTC);
+        strict.start(10, 0, 1, noon + 3 * MINUTE);
+        equal(true, strict.isDisciplineLocked(noon + 4 * MINUTE));
+        equal(NONE, strict.restriction(STUDY, noon + 4 * MINUTE, UTC));
+        equal(FOCUS, strict.restriction(VIDEO, noon + 4 * MINUTE, UTC));
+        equal(FOCUS, strict.restriction("test.unconfigured", noon + 4 * MINUTE, UTC));
+        strict.cancel();
+
+        strict.bedtime = true;
+        strict.creditMs = 60 * MINUTE;
+        strict.startSober("Late chat", 10, midnight + 1, UTC);
+        equal(true, strict.soberActive(midnight + MINUTE));
+        equal(BEDTIME, strict.restriction(STUDY, midnight + MINUTE, UTC));
+        equal(BEDTIME, strict.restriction(VIDEO, midnight + MINUTE, UTC));
+        equal(BEDTIME, strict.restriction("test.unconfigured", midnight + MINUTE, UTC));
+
+        // Debug mode helpers
+        strict.debugAdjustCredit(-200 * MINUTE);
+        equal(0L, strict.creditMs);
+        strict.debugAdjustCredit(25 * MINUTE);
+        equal(25 * MINUTE, strict.creditMs);
+        strict.debugAdjustVault(200 * MINUTE);
+        equal(120 * MINUTE, strict.vaultMs);
+        strict.startOffline(noon);
+        strict.start(10, 0, 1, noon);
+        strict.debugUnlockAll(midnight + MINUTE, UTC);
+        equal(false, strict.offlineActive());
+        equal(false, strict.active());
+        equal(false, strict.bedtime);
+        equal(false, strict.soberActive(midnight + MINUTE));
+        equal(false, strict.isDisciplineLocked(midnight + MINUTE));
 
         equal(0, eco.habitChangeCostMinutes(null, 5));
         eco.addHabit("h0", new FocusState.Habit("Read", 5, ""));
@@ -420,7 +498,7 @@ final class FocusStateCheck {
         equal(1, strip[46]);
         equal(2, strip[47]);
 
-        System.out.println("PASS: v1.5.0 5 modes, 04:00 reset, 2h vault cap, indulgent 5d unlock, economy, caps and steps");
+        System.out.println("PASS: v1.5.1 15m base free cap, 0m default limited, strict locks, 35m sleep, debug & economy");
     }
 
     private static long at(String instant) {
