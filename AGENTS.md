@@ -6,15 +6,15 @@
 
 | 界面 | 代码 |
 | --- | --- |
-| 首页（储蓄罐 2h 上限、可用时长、每日 15m 基础免费提示、清醒模式、奖励兑换快捷卡、无闪烁双模式自律卡片）、应用规则（支持学习/受限多选添加且隐藏包名）、习惯、洞察（统计与收支时间线）、滑动/触感切页与底部导航 | `app/src/main/java/com/focusgarden/app/MainActivity.java` |
+| 首页（顶部肉色动态小猪储蓄罐 + 右上角悬浮设置按钮、2h 上限储蓄卡、可用时长、每日 15m 基础免费提示、清醒模式、奖励兑换快捷卡、双行无省略号双模式自律卡片）、应用规则（支持学习/受限多选添加且隐藏包名）、习惯、洞察（统计与收支时间线）、滑动/触感切页与底部导航 | `app/src/main/java/com/focusgarden/app/MainActivity.java`、`PiggyBankView.java` |
 | 全屏自律双模式计时（`正计时` 可停 / `倒计时` 不可停 + 学习应用直达）、付费修改确认（`confirmPaidChange()`）、5 种时间获取模式与每日上限（`showRateSettings()`）、通用设置（`showGeneralSettings()`）、奖励兑换商店（`showRewardsSheet()`）、强力守护与系统聚合面板（`showKeepAliveSheet()`）、开发阶段调试面板（`showDebugSheet()`）、定制时间选择器（`pickClock()`）、待办、早睡（放弃/修改 35 分钟）、步数、复选框多选应用选择器（隐藏包名）与设置面板 | 同级 `FocusSheets.java` |
 | 设计系统、颜色、按钮、定制卡片弹窗（`cardDialog` / `infoDialog` / `confirmDialog` / `loadingDialog`）、单次测量限高弹窗（`MaxHeightScrollView`）、轻量规则提示按钮（`infoIcon` / `titleWithInfo`）、统一防抖触感通道（`HapticKind` / `tapHaptic()`）、开关、进度条与 24h 心跳条（`HeartbeatStripView`） | 同级 `GardenUi.java`、`GardenIcon.java` |
 | 倒计时/正计时表盘与 7 日堆叠统计柱（自律与专注合并展示） | 同级 `TimerDial.java`、`InsightChart.java` |
 | 保活与防关闭异步快照检测（`StatusSnapshot` / `refreshStatusAsync()`）、权限跳转、UsageStats 异步（04:00 逻辑日起点）与手动校准、自选壁纸持久化及服务同步 | 同级 `KeepAliveManager.java` |
 | 后台常驻保活前台服务（心跳记录、后台计步监听与可拖拽边缘吸附悬浮球） | 同级 `KeepAliveService.java`、`KeepAliveWallpaperService.java`、`FocusDeviceAdmin.java` |
 | 语录加载与无 API 速率限制阻断的网页优先更新检测/校验逻辑 | 同级 `QuoteBank.java`、`GitHubUpdates.java` |
-| 前台应用窗口识别、多应用清醒模式与桌面全非目标应用拦截、半透明灰色悬浮计时药丸、专注防关闭系统设置保护与顶部时间感知条 | 同级 `FocusService.java` |
-| 全屏图片与方图拦截界面、字号与图片尺寸、预览、多套界面顺序轮换 | 同级 `BlockAppearanceSettings.java`、`BlockScreen.java`、`BlockImage.java` |
+| 前台应用窗口识别（含受限应用在清醒模式期间切换窗口兜底防误拦）、多应用清醒模式与桌面全非目标应用拦截、半透明灰色悬浮计时药丸、专注防关闭系统设置保护与顶部时间感知条 | 同级 `FocusService.java` |
+| 全屏图片与方图拦截界面、字号与图片尺寸、居中小胶囊主按钮、预览、多套界面顺序轮换 | 同级 `BlockAppearanceSettings.java`、`BlockScreen.java`、`BlockImage.java` |
 | 清醒模式多应用复选框选择（隐藏包名）、全屏倒计时、目的应用直达与暂停操作 | 同级 `SoberModeUi.java` |
 | 启动更新检查、手动检查更新及下载安装弹窗 | 同级 `UpdatePanel.java` |
 | 桌面小组件与快捷设置磁贴（自律模式控制，禁止提前停倒计时） | 同级 `FocusWidget.java`、`FocusTile.java` 与 `app/src/main/res/layout/focus_widget.xml` |

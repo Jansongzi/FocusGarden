@@ -189,9 +189,9 @@ final class GardenUi {
     static TextView redeemPill(Context context, String label, boolean active) {
         TextView v = text(context, label, 13, active ? CARD : BLUE_DISABLED_TEXT, true);
         v.setGravity(Gravity.CENTER);
-        v.setWidth(dp(context, 100));
+        v.setMinWidth(dp(context, 96));
         v.setMinHeight(dp(context, 42));
-        v.setPadding(dp(context, 4), dp(context, 6), dp(context, 4), dp(context, 6));
+        v.setPadding(dp(context, 14), dp(context, 6), dp(context, 14), dp(context, 6));
         v.setBackground(active
                 ? new RippleDrawable(ColorStateList.valueOf(0x30ffffff), shape(context, BLUE, 12), null)
                 : shape(context, BLUE_DISABLED_BG, 12));

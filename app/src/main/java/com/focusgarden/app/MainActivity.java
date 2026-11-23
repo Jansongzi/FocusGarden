@@ -7,9 +7,6 @@ import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.drawable.Icon;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -20,7 +17,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -69,7 +65,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private int ruleCategory;
     private int dayOffset;
     private int insightsMode;
-    private int quoteOffset;
     private int timerTabMode; // 0 = 自律正计时, 1 = 自律倒计时
     private int topInset;
     private boolean resumed;
@@ -86,10 +81,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private boolean swipeCandidate;
 
     // Live Home references updated every 500ms without tearing down scroll
-    private TextView homeHeroTitle;
-    private CapsuleBar homeHeroBar;
+    private PiggyBankView homePiggyBank;
+    private float lastPiggyRatio = -1f;
+    private View homeScrim;
+    private FrameLayout homeFloatingSettings;
     private TextView homeVaultBig;
-    private CapsuleBar homeVaultBar;
     private TextView homeCreditBig;
     private TextView homeLimitedSub;
     private TextView homeSoberBadge;
@@ -106,9 +102,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private LinearLayout homeTimerPresetRow;
     private TextView[] homeTimerPresetChips;
     private TextView homeTimerStartLabel;
-    private TextView homeTimerPrimaryBtn;
-    private TextView homeTimerStopBtn;
+    private LinearLayout homeTimerPrimaryBtn;
+    private ImageView homeTimerPrimaryIcon;
+    private TextView homeTimerPrimaryLabel;
+    private LinearLayout homeTimerStopBtn;
     private TextView homeOfflineRedeemBtn;
+    private LinearLayout homeTimerRedeemRow;
+    private TextView homeTimerRedeemHint;
     private TextView homeTimerCountdownBtn;
     private LinearLayout homeTimerIdleRow;
     private LinearLayout homeTimerStopWatchRunRow;
@@ -121,6 +121,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Runnable blockImageChanged;
     private Boolean lastSoberBadgeActive;
     private Boolean lastOfflineCanClaim;
+    private Boolean lastStopwatchRunning;
     private FocusSheets.LiveRefresh liveTimerSheet;
     private FocusSheets.LiveRefresh liveStepsSheet;
     private SoberModeUi.Timer soberTimer;
@@ -441,10 +442,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void clearHomeRefs() {
-        homeHeroTitle = null;
-        homeHeroBar = null;
+        homePiggyBank = null;
         homeVaultBig = null;
-        homeVaultBar = null;
         homeCreditBig = null;
         homeLimitedSub = null;
         homeSoberBadge = null;
@@ -452,6 +451,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeSoberSwitch = null;
         lastSoberBadgeActive = null;
         lastOfflineCanClaim = null;
+        lastStopwatchRunning = null;
         homeTimerHeadIcon = null;
         homeTimerSub = null;
         homeTimerReward = null;
@@ -464,8 +464,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerPresetChips = null;
         homeTimerStartLabel = null;
         homeTimerPrimaryBtn = null;
+        homeTimerPrimaryIcon = null;
+        homeTimerPrimaryLabel = null;
         homeTimerStopBtn = null;
         homeOfflineRedeemBtn = null;
+        homeTimerRedeemRow = null;
+        homeTimerRedeemHint = null;
         homeTimerCountdownBtn = null;
         homeTimerIdleRow = null;
         homeTimerStopWatchRunRow = null;
@@ -473,6 +477,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void render() {
+        homeScrim = null;
+        homeFloatingSettings = null;
         LinearLayout root = column(this);
         root.setBackgroundColor(PAPER);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -510,19 +516,27 @@ public final class MainActivity extends Activity implements SensorEventListener 
         FrameLayout contentStage = new FrameLayout(this);
         contentStage.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         if (tab == 0) {
-            View scrim = new View(this);
-            scrim.setBackground(new android.graphics.drawable.GradientDrawable(
+            homeScrim = new View(this);
+            homeScrim.setBackground(new android.graphics.drawable.GradientDrawable(
                     android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
                     new int[]{0xf2f4f6fa, 0x00f4f6fa}));
-            scrim.setAlpha(0f);
-            scrim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            homeScrim.setAlpha(0f);
+            homeScrim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             FrameLayout.LayoutParams scrimLp = new FrameLayout.LayoutParams(-1, topInset + dp(this, 10));
             scrimLp.gravity = Gravity.TOP;
-            contentStage.addView(scrim, scrimLp);
+            contentStage.addView(homeScrim, scrimLp);
+
+            homeFloatingSettings = topBarBtn(R.drawable.ic_settings, INK, "设置", this::openSettings);
+            FrameLayout.LayoutParams settingsLp = new FrameLayout.LayoutParams(dp(this, 38), dp(this, 38));
+            settingsLp.gravity = Gravity.TOP | Gravity.END;
+            settingsLp.topMargin = topInset + dp(this, 14);
+            settingsLp.rightMargin = dp(this, 16);
+            contentStage.addView(homeFloatingSettings, settingsLp);
+
             scroll.setOnScrollChangeListener((v, sx, sy, osx, osy) -> {
-                scrim.setAlpha(Math.min(1f, Math.max(0f, (sy - dp(this, 60)) / (float) dp(this, 60))));
-                int threshold = dp(this, 124);
-                if ((sy < threshold) != (osy < threshold)) updateStatusBar(sy < threshold);
+                if (homeScrim != null) {
+                    homeScrim.setAlpha(Math.min(1f, Math.max(0f, (sy - dp(this, 12)) / (float) dp(this, 56))));
+                }
             });
         }
         root.addView(contentStage, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -565,7 +579,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redraw();
         setContentView(root);
         root.requestApplyInsets();
-        updateStatusBar(tab == 0);
+        updateStatusBar(false);
 
         if (Build.VERSION.SDK_INT >= 33) BackNavigation.update(this);
 
@@ -628,6 +642,22 @@ public final class MainActivity extends Activity implements SensorEventListener 
         int side = tab == 0 ? 0 : dp(this, 16);
         int top = tab == 0 ? 0 : topInset + dp(this, 14);
         pages.setPadding(side, top, side, dp(this, 24));
+        if (tab == 0) {
+            if (homeScrim != null && homeScrim.getLayoutParams() instanceof FrameLayout.LayoutParams lp) {
+                int h = topInset + dp(this, 10);
+                if (lp.height != h) {
+                    lp.height = h;
+                    homeScrim.setLayoutParams(lp);
+                }
+            }
+            if (homeFloatingSettings != null && homeFloatingSettings.getLayoutParams() instanceof FrameLayout.LayoutParams lp) {
+                int tm = topInset + dp(this, 14);
+                if (lp.topMargin != tm) {
+                    lp.topMargin = tm;
+                    homeFloatingSettings.setLayoutParams(lp);
+                }
+            }
+        }
         lastLogicDate = FocusState.today().toString();
         lastAccessibilityEnabled = KeepAliveManager.cachedStatus(this).accOk();
         switch (tab) {
@@ -659,115 +689,41 @@ public final class MainActivity extends Activity implements SensorEventListener 
         long now = System.currentTimeMillis();
         LocalDate today = FocusState.today();
         FocusState.Day day = state.days.getOrDefault(today.toString(), new FocusState.Day());
-        int score = state.disciplineScore(today);
-        boolean bedtimeNow = state.bedtimeAt(now, ZoneId.systemDefault());
 
-        // 1. Sky Hero Banner + Curved Horizon + Sprout Mascot
-        FrameLayout heroFrame = new FrameLayout(this);
-        int skyRes = bedtimeNow ? R.drawable.banner_state_busy
-                : (score >= 85 || state.offlineRunning() || (state.active() && !state.inBreak)) ? R.drawable.banner_state_peak
-                : score >= 60 ? R.drawable.banner_state_light
-                : R.drawable.banner_state_low;
-        ImageView sky = new ImageView(this);
-        sky.setImageResource(skyRes);
-        sky.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        sky.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        int skyHeight = dp(this, 152) + topInset;
-        FrameLayout.LayoutParams skyLp = new FrameLayout.LayoutParams(-1, skyHeight);
-        heroFrame.addView(sky, skyLp);
-
-        View arch = new View(this) {
-            private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            private final Path path = new Path();
-            @Override protected void onDraw(Canvas canvas) {
-                float w = getWidth();
-                float h = getHeight();
-                p.setColor(PAPER);
-                path.reset();
-                path.moveTo(0, h);
-                path.lineTo(0, h * 0.65f);
-                path.quadTo(w * 0.5f, -h * 0.35f, w, h * 0.65f);
-                path.lineTo(w, h);
-                path.close();
-                canvas.drawPath(path, p);
+        // 1. Pastel Peach Piggy Bank Hero Stage
+        FrameLayout piggyStage = new FrameLayout(this);
+        piggyStage.setPadding(dp(this, 16), topInset + dp(this, 14), dp(this, 16), dp(this, 6));
+        homePiggyBank = new PiggyBankView(this);
+        float vaultRatio = Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS);
+        if (lastPiggyRatio < 0f) {
+            homePiggyBank.setProgress(vaultRatio, false);
+        } else {
+            homePiggyBank.setProgress(lastPiggyRatio, false);
+            if (Math.abs(vaultRatio - lastPiggyRatio) > 0.0005f) {
+                homePiggyBank.setProgress(vaultRatio, true);
             }
-        };
-        FrameLayout.LayoutParams archLp = new FrameLayout.LayoutParams(-1, dp(this, 36));
-        archLp.gravity = Gravity.BOTTOM;
-        archLp.bottomMargin = dp(this, 24);
-        heroFrame.addView(arch, archLp);
-
-        View archFill = new View(this);
-        archFill.setBackgroundColor(PAPER);
-        FrameLayout.LayoutParams fillLp = new FrameLayout.LayoutParams(-1, dp(this, 25));
-        fillLp.gravity = Gravity.BOTTOM;
-        heroFrame.addView(archFill, fillLp);
-
-        FrameLayout settings = topBarBtn(R.drawable.ic_settings, INK, "设置", this::openSettings);
-        FrameLayout.LayoutParams topLp = new FrameLayout.LayoutParams(dp(this, 38), dp(this, 38));
-        topLp.gravity = Gravity.TOP | Gravity.END;
-        topLp.topMargin = topInset + dp(this, 14);
-        topLp.rightMargin = dp(this, 16);
-        heroFrame.addView(settings, topLp);
-
-        int mascotRes = bedtimeNow ? R.drawable.mascot_sleep
-                : (state.offlineRunning() || (state.active() && !state.inBreak && !state.paused())) ? R.drawable.mascot_strong
-                : score < 60 ? R.drawable.mascot_alert
-                : R.drawable.mascot_calm;
-        ImageView mascot = new ImageView(this);
-        mascot.setImageResource(mascotRes);
-        mascot.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        mascot.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        FrameLayout.LayoutParams mascotLp = new FrameLayout.LayoutParams(dp(this, 96), dp(this, 96));
-        mascotLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        heroFrame.addView(mascot, mascotLp);
-
-        pages.addView(heroFrame, -1, skyHeight + dp(this, 24));
-
-        LinearLayout content = column(this);
-        content.setPadding(dp(this, 16), dp(this, 2), dp(this, 16), 0);
-        pages.addView(content, -1, -2);
-
-        LinearLayout statusRow = row(this);
-        statusRow.setGravity(Gravity.CENTER);
-        homeHeroTitle = text(this, "", 20, INK, true);
-        statusRow.addView(homeHeroTitle);
-        space(statusRow, 6);
-        FrameLayout infoBtn = new FrameLayout(this);
-        infoBtn.addView(iconView(this, R.drawable.ic_info, 17, MUTED),
-                new FrameLayout.LayoutParams(dp(this, 17), dp(this, 17), Gravity.CENTER));
-        infoBtn.setContentDescription("查看状态说明");
-        infoBtn.setOnClickListener(v -> {
+        }
+        lastPiggyRatio = vaultRatio;
+        homePiggyBank.setVaultMinutes(state.vaultMs);
+        homePiggyBank.setOnClickListener(v -> {
             tapHaptic(v);
+            LocalDate d = FocusState.today();
+            int curScore = state.disciplineScore(d);
+            String indulgentInfo = state.indulgentPasses > 0
+                    ? "已拥有 " + state.indulgentPasses + " 次放纵模式机会"
+                    : "自律达标进度 " + state.disciplinedProgress + " / 5 天（满 5 天解锁放纵模式）";
             infoDialog(this, R.drawable.ic_info, BLUE_SOFT, BLUE,
-                    "今日自律指数 · " + score + "%",
-                    "自律指数由今日自律正计时、倒计时、学习、习惯打卡、待办/步数、早睡及限制应用使用共同计算；每日凌晨 04:00 重置当日周期，累计 5 个达标自律日将自动解锁 1 次放纵模式。",
+                    "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / 120 分钟",
+                    "储蓄罐内时长每日凌晨 04:00 不清零，上限 2 小时。\n\n今日自律指数：" + curScore + "%\n" + indulgentInfo,
                     "知道了");
         });
-        statusRow.addView(infoBtn, dp(this, 24), dp(this, 24));
-        content.addView(statusRow);
-        gap(content, 8);
+        piggyStage.addView(homePiggyBank,
+                new FrameLayout.LayoutParams(dp(this, 228), dp(this, 152), Gravity.CENTER));
+        pages.addView(piggyStage, -1, -2);
 
-        homeHeroBar = new CapsuleBar(this);
-        homeHeroBar.setColors(0xffe1e8f3, score < 55 ? AMBER : BLUE);
-        homeHeroBar.setProgress(score / 100f);
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(dp(this, 220), dp(this, 7));
-        barLp.gravity = Gravity.CENTER_HORIZONTAL;
-        content.addView(homeHeroBar, barLp);
-        gap(content, 8);
-
-        QuoteBank.Quote quote = QuoteBank.quoteForOffset(this, quoteOffset);
-        TextView quoteView = text(this, quote.text() + (quote.author().isEmpty() ? "" : " · " + quote.author()),
-                12, INK_SUB, false);
-        quoteView.setGravity(Gravity.CENTER);
-        quoteView.setOnClickListener(v -> {
-            tapHaptic(v);
-            quoteOffset++;
-            QuoteBank.Quote next = QuoteBank.quoteForOffset(this, quoteOffset);
-            quoteView.setText(next.text() + (next.author().isEmpty() ? "" : " · " + next.author()));
-        });
-        content.addView(quoteView, -1, -2);
-        gap(content, 16);
+        LinearLayout content = column(this);
+        content.setPadding(dp(this, 16), dp(this, 4), dp(this, 16), 0);
+        pages.addView(content, -1, -2);
 
         // 2. Hero Blue Card: 时间储蓄罐 (Time Vault)
         LinearLayout vaultCard = column(this);
@@ -792,13 +748,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         });
         vaultTop.addView(vaultTag);
         vaultCard.addView(vaultTop);
-        gap(vaultCard, 8);
-
-        homeVaultBar = new CapsuleBar(this);
-        homeVaultBar.setColors(0x33ffffff, CARD);
-        homeVaultBar.setProgress(Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS));
-        vaultCard.addView(homeVaultBar, -1, dp(this, 5));
-        gap(vaultCard, 12);
+        gap(vaultCard, 14);
 
         LinearLayout vaultBtns = row(this);
         LinearLayout depositBtn = row(this);
@@ -819,7 +769,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     nowClick, ZoneId.systemDefault());
             if (moved > 0) {
                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
+                TimerReceiver.changed(this);
+                updateHomeLive();
+                if (homePiggyBank != null) homePiggyBank.playDepositBurst();
                 toast(state.isVaultFull()
                         ? "已存入 " + duration(moved) + "，储蓄罐已满 2 小时"
                         : "已存入 " + duration(moved) + " 到时间储蓄罐");
@@ -841,7 +793,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     System.currentTimeMillis(), ZoneId.systemDefault());
             if (moved > 0) {
                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
+                TimerReceiver.changed(this);
+                updateHomeLive();
+                if (homePiggyBank != null) homePiggyBank.playWithdrawRipple();
                 toast("已提取 " + duration(moved) + " 到今日可用时长");
             } else {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
@@ -1218,14 +1172,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout startBar = row(this);
         LinearLayout startBtn = row(this);
         startBtn.setGravity(Gravity.CENTER);
-        startBtn.setMinimumHeight(dp(this, 42));
+        startBtn.setMinimumHeight(dp(this, 44));
         startBtn.setPadding(dp(this, 14), 0, dp(this, 14), 0);
         startBtn.setBackground(touch(this, BLUE, 12));
         startBtn.addView(iconView(this, R.drawable.ic_play, 14, CARD));
         space(startBtn, 6);
-        homeTimerStartLabel = text(this, "开启自律模式", 14, CARD, true);
-        homeTimerStartLabel.setSingleLine(true);
-        homeTimerStartLabel.setEllipsize(TextUtils.TruncateAt.END);
+        homeTimerStartLabel = text(this, "开启自律正计时", 14, CARD, true);
+        homeTimerStartLabel.setIncludeFontPadding(false);
         startBtn.addView(homeTimerStartLabel);
         startBtn.setOnClickListener(v -> {
             tapHaptic(v);
@@ -1234,7 +1187,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         weight(startBar, startBtn);
         space(startBar, 8);
 
-        FrameLayout expandBtn = iconBadge(this, R.drawable.ic_expand, BLUE_SOFT, BLUE, 42, 18, 12);
+        FrameLayout expandBtn = iconBadge(this, R.drawable.ic_expand, BLUE_SOFT, BLUE, 44, 18, 12);
         expandBtn.setContentDescription("全屏自律表盘");
         expandBtn.setOnClickListener(v -> {
             tapHaptic(v);
@@ -1245,9 +1198,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout controls = column(this);
         homeTimerIdleRow.addView(startBar);
 
-        // Running controls for 正计时 (can pause / stop anytime)
+        // Running controls for 正计时 (crisp monochrome vector icons, single-line labels)
         homeTimerStopWatchRunRow = row(this);
-        homeTimerPrimaryBtn = pillButton(this, "", BLUE, CARD, 12, 42);
+        homeTimerPrimaryBtn = row(this);
+        homeTimerPrimaryBtn.setGravity(Gravity.CENTER);
+        homeTimerPrimaryBtn.setMinimumHeight(dp(this, 44));
+        homeTimerPrimaryBtn.setPadding(dp(this, 12), 0, dp(this, 12), 0);
+        homeTimerPrimaryBtn.setBackground(touch(this, BLUE, 12));
+        homeTimerPrimaryIcon = iconView(this, R.drawable.ic_pause, 14, CARD);
+        homeTimerPrimaryBtn.addView(homeTimerPrimaryIcon);
+        space(homeTimerPrimaryBtn, 6);
+        homeTimerPrimaryLabel = text(this, "", 14, CARD, true);
+        homeTimerPrimaryLabel.setIncludeFontPadding(false);
+        homeTimerPrimaryLabel.setFontFeatureSettings("tnum");
+        homeTimerPrimaryBtn.addView(homeTimerPrimaryLabel);
         homeTimerPrimaryBtn.setOnClickListener(v -> {
             if (!state.offlineActive()) return;
             haptic(v, state.hapticFeedback, HapticKind.NAV);
@@ -1256,7 +1220,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
             else state.startOffline(t);
             changed();
         });
-        homeTimerStopBtn = pillButton(this, "■ 停止", RED, CARD, 12, 42);
+
+        homeTimerStopBtn = row(this);
+        homeTimerStopBtn.setGravity(Gravity.CENTER);
+        homeTimerStopBtn.setMinimumHeight(dp(this, 44));
+        homeTimerStopBtn.setPadding(dp(this, 12), 0, dp(this, 12), 0);
+        homeTimerStopBtn.setBackground(touch(this, RED, 12));
+        homeTimerStopBtn.addView(iconView(this, R.drawable.ic_stop, 13, CARD));
+        space(homeTimerStopBtn, 6);
+        TextView stopLabel = text(this, "停止", 14, CARD, true);
+        stopLabel.setIncludeFontPadding(false);
+        homeTimerStopBtn.addView(stopLabel);
         homeTimerStopBtn.setOnClickListener(v -> {
             if (!state.offlineActive()) return;
             long elapsed = state.stopOffline(System.currentTimeMillis(), ZoneId.systemDefault());
@@ -1268,9 +1242,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 toast("已记录 " + duration(elapsed) + " 自律时长（满 5 分钟可兑换）");
             }
         });
-        homeTimerStopWatchRunRow.addView(homeTimerPrimaryBtn, new LinearLayout.LayoutParams(0, -2, 1.55f));
+        homeTimerStopWatchRunRow.addView(homeTimerPrimaryBtn, new LinearLayout.LayoutParams(0, -2, 1.45f));
         space(homeTimerStopWatchRunRow, 8);
-        homeTimerStopWatchRunRow.addView(homeTimerStopBtn, new LinearLayout.LayoutParams(0, -2, 0.85f));
+        homeTimerStopWatchRunRow.addView(homeTimerStopBtn, new LinearLayout.LayoutParams(0, -2, 0.90f));
+
         homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
         homeOfflineRedeemBtn.setOnClickListener(v -> {
             if (state.active() || (!state.offlineActive() && timerTabMode == 1)) return;
@@ -1292,7 +1267,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         // Running controls for 倒计时 (locked: cannot stop early)
         homeTimerCountdownRunRow = row(this);
-        homeTimerCountdownBtn = pillButton(this, "", BLUE_SOFT, BLUE, 12, 42);
+        homeTimerCountdownBtn = pillButton(this, "", BLUE_SOFT, BLUE, 12, 44);
         homeTimerCountdownBtn.setBackground(touchCard(this, BLUE_SOFT, 0xffcfe0ff, 12));
         homeTimerCountdownBtn.setOnClickListener(v -> {
             tapHaptic(v);
@@ -1302,12 +1277,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
         controls.addView(homeTimerIdleRow);
         controls.addView(homeTimerStopWatchRunRow);
         controls.addView(homeTimerCountdownRunRow);
-        LinearLayout footer = row(this);
-        footer.setGravity(Gravity.CENTER_VERTICAL);
-        weight(footer, controls);
-        space(footer, 8);
-        footer.addView(homeOfflineRedeemBtn);
-        card.addView(footer);
+        card.addView(controls);
+
+        homeTimerRedeemRow = row(this);
+        homeTimerRedeemRow.setGravity(Gravity.CENTER_VERTICAL);
+        homeTimerRedeemHint = text(this, "", 12, MUTED, false);
+        weight(homeTimerRedeemRow, homeTimerRedeemHint);
+        space(homeTimerRedeemRow, 8);
+        homeTimerRedeemRow.addView(homeOfflineRedeemBtn);
+        LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, -2);
+        redeemLp.topMargin = dp(this, 10);
+        card.addView(homeTimerRedeemRow, redeemLp);
 
         card.setOnClickListener(v -> {
             tapHaptic(v);
@@ -1785,27 +1765,21 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void updateHomeLive() {
-        if (homeHeroTitle == null) return;
+        if (homeVaultBig == null) return;
         long now = System.currentTimeMillis();
         LocalDate today = FocusState.today();
         boolean activeCountdown = state.active();
         boolean activeStopwatch = state.offlineActive();
-        boolean paused = state.paused();
         boolean sober = state.soberActive(now);
-        boolean bedtimeNow = state.bedtimeAt(now, ZoneId.systemDefault());
-        int score = state.disciplineScore(today);
 
-        String heroStr = bedtimeNow ? "睡眠时段全锁定"
-                : state.offlineRunning() ? "自律正计时进行中"
-                : activeCountdown && !paused ? "自律倒计时进行中"
-                : "自律在线 " + score + "%";
-        setTextIfChanged(homeHeroTitle, heroStr);
-        homeHeroBar.setProgress(score / 100f);
+        float vaultRatio = Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS);
+        if (homePiggyBank != null) {
+            homePiggyBank.setProgress(vaultRatio, true);
+            homePiggyBank.setVaultMinutes(state.vaultMs);
+        }
+        lastPiggyRatio = vaultRatio;
 
         setTextIfChanged(homeVaultBig, shortMinutes(state.vaultMs));
-        if (homeVaultBar != null) {
-            homeVaultBar.setProgress(Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS));
-        }
         setTextIfChanged(homeCreditBig, shortMinutes(state.creditMs));
         FocusState.Day day = state.days.get(today.toString());
         setTextIfChanged(homeLimitedSub, "今日已使用 " + duration(day == null ? 0 : day.limitedMs));
@@ -1856,10 +1830,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 long claimable = state.claimableOfflineMs(now);
                 setTextIfChanged(homeTimerReward, shortMinutes(claimable) + " 分钟 可兑换");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
-                String label = state.offlineRunning()
-                        ? "⏸ " + countdown(elapsed) + " 自律中"
-                        : "▶ " + countdown(elapsed) + " 继续自律";
-                setTextIfChanged(homeTimerPrimaryBtn, label);
+                boolean running = state.offlineRunning();
+                if (!Boolean.valueOf(running).equals(lastStopwatchRunning)) {
+                    if (homeTimerPrimaryIcon != null) {
+                        homeTimerPrimaryIcon.setImageResource(running ? R.drawable.ic_pause : R.drawable.ic_play);
+                    }
+                    lastStopwatchRunning = running;
+                }
+                setTextIfChanged(homeTimerPrimaryLabel, running
+                        ? countdown(elapsed) + " 自律中"
+                        : countdown(elapsed) + " 继续自律");
                 setTextIfChanged(homeTimerSub, "今日共自律 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
                 homeTimerSub.setVisibility(View.VISIBLE);
             } else if (activeCountdown) {
@@ -1885,6 +1865,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
             boolean countdownMode = !activeStopwatch && (activeCountdown || timerTabMode == 1);
             boolean canClaim = !countdownMode && state.canClaimOffline(now);
             long claimable = canClaim ? state.claimableOfflineMs(now) : 0L;
+            if (homeTimerRedeemRow != null) {
+                homeTimerRedeemRow.setVisibility(countdownMode ? View.GONE : View.VISIBLE);
+            }
+            if (homeTimerRedeemHint != null) {
+                setTextIfChanged(homeTimerRedeemHint, canClaim ? "已满 5 分钟，点击立即领取" : "累计满 5 分钟可随时兑换");
+            }
             setTextIfChanged(homeOfflineRedeemBtn, "+" + shortMinutes(claimable) + " 分钟");
             if (!Boolean.valueOf(canClaim).equals(lastOfflineCanClaim)) {
                 homeOfflineRedeemBtn.setBackground(canClaim
@@ -2573,8 +2559,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private FrameLayout topBarBtn(int iconRes, int tint, String desc, Runnable action) {
-        FrameLayout btn = iconBadge(this, iconRes, 0xebffffff, tint, 38, 19, 12);
-        elevate(btn, 3);
+        FrameLayout btn = iconBadge(this, iconRes, 0xf2ffffff, tint, 38, 19, 12);
+        btn.setBackground(touchCard(this, 0xf2ffffff, BORDER, 12));
+        elevate(btn, 4);
         btn.setContentDescription(desc);
         btn.setOnClickListener(v -> {
             tapHaptic(v);

@@ -92,9 +92,14 @@ final class BlockScreen extends FrameLayout {
         LinearLayout controls = column(context);
         controls.setGravity(Gravity.CENTER_HORIZONTAL);
         panel.addView(controls, -1, -2);
-        TextView primary = pillButton(context, buttonLabel, CARD, BACKGROUND, 30, 60);
-        primary.setTextSize(18);
-        primary.setWidth(dp(context, 320));
+        TextView primary = pillButton(context, buttonLabel, 0xf2ffffff, BACKGROUND, 24, 48);
+        primary.setBackground(touchCard(context, 0xf2ffffff, 0x55ffffff, 24));
+        primary.setTextSize(15);
+        primary.setLetterSpacing(0.06f);
+        primary.setIncludeFontPadding(false);
+        primary.setMinWidth(dp(context, 188));
+        primary.setPadding(dp(context, 32), 0, dp(context, 32), 0);
+        elevate(primary, 4);
         primary.setOnClickListener(v -> onPrimary.run());
         controls.addView(primary, -2, -2);
     }

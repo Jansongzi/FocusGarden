@@ -69,6 +69,7 @@ public final class FocusService extends AccessibilityService {
     private String lastEventPackage;
     private long lastEventAt;
     private long soberLaunchGraceUntil;
+    private boolean soberTargetSeen;
     private final Runnable pulse = this::update;
     private final Runnable refreshWindows = () -> {
         refreshPending = false;
@@ -134,11 +135,16 @@ public final class FocusService extends AccessibilityService {
     private void beginSoberLaunch(String pkg) {
         hideOverlay();
         blockedPackage = null;
-        soberLaunchGraceUntil = SystemClock.elapsedRealtime() + 2500L;
+        soberTargetSeen = false;
+        soberLaunchGraceUntil = SystemClock.elapsedRealtime() + 4500L;
         if (pkg != null && !pkg.isEmpty()) {
+            foreground = pkg;
+            foregroundFocused = true;
             lastEventPackage = pkg;
             lastEventAt = SystemClock.elapsedRealtime();
         }
+        cancelRefresh();
+        main.postDelayed(pulse, 200);
     }
 
     @Override public void onConfigurationChanged(Configuration configuration) {
@@ -160,14 +166,20 @@ public final class FocusService extends AccessibilityService {
                 lastEventPackage = pkg;
                 lastEventAt = SystemClock.elapsedRealtime();
                 long now = System.currentTimeMillis();
-                if (store.state.soberActive(now) && store.state.isSoberAllowed(pkg)) {
-                    foreground = pkg;
-                    foregroundFocused = true;
-                    soberLaunchGraceUntil = Math.max(soberLaunchGraceUntil, SystemClock.elapsedRealtime() + 1200L);
-                    hideOverlay();
-                    cancelRefresh();
-                    requestWindowRefresh();
-                    return;
+                if (store.state.soberActive(now)) {
+                    if (store.state.isSoberAllowed(pkg)) {
+                        foreground = pkg;
+                        foregroundFocused = true;
+                        soberTargetSeen = true;
+                        hideOverlay();
+                        cancelRefresh();
+                        requestWindowRefresh();
+                        return;
+                    }
+                    refreshExemptSets();
+                    if (soberTargetSeen && launcherPackages.contains(pkg)) {
+                        soberLaunchGraceUntil = 0L;
+                    }
                 }
             }
             requestWindowRefresh();
@@ -201,7 +213,8 @@ public final class FocusService extends AccessibilityService {
         return switch (pkg) {
             case "android", "com.android.systemui",
                     "com.android.permissioncontroller", "com.google.android.permissioncontroller",
-                    "com.android.intentresolver", "com.google.android.intentresolver" -> true;
+                    "com.android.intentresolver", "com.google.android.intentresolver",
+                    "com.lbe.security.miui" -> true;
             default -> false;
         };
     }
@@ -222,9 +235,12 @@ public final class FocusService extends AccessibilityService {
     private String detectForegroundPackage() {
         refreshExemptSets();
         var currentWindows = getWindows();
-        String focusedAppPkg = null;
-        String activeAppPkg = null;
-        String topLayerAppPkg = null;
+        String focusedPkg = null;
+        boolean focusedSeen = false;
+        String activePkg = null;
+        boolean activeSeen = false;
+        String topPkg = null;
+        boolean topSeen = false;
         int topLayer = Integer.MIN_VALUE;
         try {
             for (AccessibilityWindowInfo window : currentWindows) {
@@ -232,12 +248,19 @@ public final class FocusService extends AccessibilityService {
                     continue;
                 }
                 String pkg = resolveWindowPackage(window);
-                if (pkg == null || isTransientSystemPackage(pkg)) continue;
-                if (window.isFocused() && focusedAppPkg == null) focusedAppPkg = pkg;
-                if (window.isActive() && activeAppPkg == null) activeAppPkg = pkg;
-                if (window.getLayer() >= topLayer) {
+                if (pkg != null && isTransientSystemPackage(pkg)) continue;
+                if (window.isFocused() && !focusedSeen) {
+                    focusedSeen = true;
+                    focusedPkg = pkg;
+                }
+                if (window.isActive() && !activeSeen) {
+                    activeSeen = true;
+                    activePkg = pkg;
+                }
+                if (!topSeen || window.getLayer() >= topLayer) {
+                    topSeen = true;
                     topLayer = window.getLayer();
-                    topLayerAppPkg = pkg;
+                    topPkg = pkg;
                 }
             }
         } finally {
@@ -245,9 +268,13 @@ public final class FocusService extends AccessibilityService {
                 for (AccessibilityWindowInfo window : currentWindows) window.recycle();
             }
         }
-        String chosen = focusedAppPkg != null ? focusedAppPkg
-                : activeAppPkg != null ? activeAppPkg : topLayerAppPkg;
-        if (chosen != null) return chosen;
+        if (focusedSeen) {
+            if (focusedPkg != null) return focusedPkg;
+        } else if (activeSeen) {
+            if (activePkg != null) return activePkg;
+        } else if (topSeen) {
+            if (topPkg != null) return topPkg;
+        }
 
         AccessibilityNodeInfo activeRoot = getRootInActiveWindow();
         if (activeRoot != null) {
@@ -262,8 +289,12 @@ public final class FocusService extends AccessibilityService {
             }
         }
 
-        if (lastEventPackage != null && SystemClock.elapsedRealtime() - lastEventAt <= 1500L) {
-            return lastEventPackage;
+        if (lastEventPackage != null && !isTransientSystemPackage(lastEventPackage)) {
+            long age = SystemClock.elapsedRealtime() - lastEventAt;
+            if (age <= 3500L || (store != null && store.state.soberActive(System.currentTimeMillis())
+                    && store.state.isSoberAllowed(lastEventPackage))) {
+                return lastEventPackage;
+            }
         }
         return null;
     }
@@ -344,7 +375,7 @@ public final class FocusService extends AccessibilityService {
         boolean sober = store.state.soberActive(now);
         if (sober && SystemClock.elapsedRealtime() < soberLaunchGraceUntil) {
             if (store.state.isSoberAllowed(foreground)) {
-                soberLaunchGraceUntil = 0L;
+                soberTargetSeen = true;
             } else if (foreground == null || getPackageName().equals(foreground)
                     || launcherPackages.contains(foreground) || coreExemptPackages.contains(foreground)) {
                 hideOverlay();
@@ -352,11 +383,12 @@ public final class FocusService extends AccessibilityService {
                 hideSoberPill();
                 main.postDelayed(pulse, 150);
                 return;
-            } else {
+            } else if (focused != null) {
                 soberLaunchGraceUntil = 0L;
             }
         } else if (!sober) {
             soberLaunchGraceUntil = 0L;
+            soberTargetSeen = false;
         }
 
         boolean focusGuardActive = store.state.guardSettingsDuringFocus
@@ -469,6 +501,7 @@ public final class FocusService extends AccessibilityService {
         coreExemptPackages.add("com.google.android.packageinstaller");
         coreExemptPackages.add("com.android.permissioncontroller");
         coreExemptPackages.add("com.google.android.permissioncontroller");
+        coreExemptPackages.add("com.lbe.security.miui");
         try {
             PackageManager pm = getPackageManager();
             Intent homeIntent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
@@ -773,6 +806,7 @@ public final class FocusService extends AccessibilityService {
         lastEventPackage = null;
         lastEventAt = 0L;
         soberLaunchGraceUntil = 0L;
+        soberTargetSeen = false;
         if (store != null) accountUntilNow();
         flushUsage();
         foreground = null;

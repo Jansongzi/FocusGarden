@@ -598,6 +598,25 @@ final class FocusStateCheck {
         multi.creditMs = 10 * MINUTE;
         equal(true, multi.startSober(chosen3, 5, noon + 20 * MINUTE, UTC));
         equal("A、B 等 3 个应用", multi.soberSummaryLabel());
+
+        // Restricted app (BUDGET with 0 credit and 0 free quota) opened via Sober Mode paid from vaultMs
+        var restrictedSober = new FocusState();
+        restrictedSober.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        restrictedSober.creditMs = 0L;
+        restrictedSober.vaultMs = 20 * MINUTE;
+        equal(BUDGET, restrictedSober.restriction(VIDEO, noon, UTC));
+        equal(true, restrictedSober.startSober(VIDEO, "Video", 10, noon, UTC));
+        equal(0L, restrictedSober.creditMs);
+        equal(10 * MINUTE, restrictedSober.vaultMs);
+        equal(NONE, restrictedSober.restriction(VIDEO, noon + MINUTE, UTC));
+        equal(FocusState.Restriction.SOBER, restrictedSober.restriction("com.android.launcher3", noon + MINUTE, UTC));
+        restrictedSober.addUsage(VIDEO, noon, noon + 3 * MINUTE, UTC);
+        String todayStr = FocusState.date(noon, UTC);
+        equal(0L, restrictedSober.day(todayStr).baseFreeUsedMs);
+        equal(0L, restrictedSober.creditMs);
+        equal(7 * MINUTE, restrictedSober.stopSober(noon + 3 * MINUTE, UTC));
+        equal(17 * MINUTE, restrictedSober.vaultMs);
+        equal(BUDGET, restrictedSober.restriction(VIDEO, noon + 4 * MINUTE, UTC));
     }
 
     private static long at(String instant) {

@@ -7,7 +7,6 @@ import android.os.Build;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
-import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -48,7 +47,17 @@ final class SoberModeUi {
         if (!canStart(activity, state)) return;
 
         LinearLayout body = column(activity);
+        int spendableMin = (int) (state.totalSpendableMs() / FocusState.MINUTE);
         body.addView(text(activity, "可支配 " + duration(state.totalSpendableMs()), 15, INK, true));
+        if (spendableMin < 1) {
+            gap(body, 10);
+            TextView tip = text(activity,
+                    "可用时长与储蓄罐均不足 1 分钟，请先通过自律模式或打卡赚取时长后再开启清醒模式",
+                    12, AMBER, false);
+            tip.setBackground(cardBg(activity, AMBER_SOFT, 0xfff5dcb1, 12));
+            tip.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+            body.addView(tip, -1, -2);
+        }
         gap(body, 14);
         body.addView(text(activity, "目的应用", 13, INK_SUB, true));
         gap(body, 8);
@@ -93,11 +102,14 @@ final class SoberModeUi {
 
         body.addView(text(activity, "使用时长（分钟）", 13, INK_SUB, true));
         gap(body, 8);
-        EditText minutes = styledInput(activity, "1–" + FocusState.MAX_SOBER_MINUTES, "10", InputType.TYPE_CLASS_NUMBER);
+        String defaultMin = String.valueOf(Math.max(1, Math.min(10, spendableMin)));
+        EditText minutes = styledInput(activity, "1–" + FocusState.MAX_SOBER_MINUTES, defaultMin, InputType.TYPE_CLASS_NUMBER);
         minutes.setFilters(new InputFilter[]{new InputFilter.LengthFilter(3)});
         body.addView(minutes, -1, -2);
         gap(body, 14);
-        TextView start = primaryButton(activity, "开启清醒模式");
+        TextView start = spendableMin >= 1
+                ? primaryButton(activity, "开启清醒模式")
+                : pillButton(activity, "可支配时间不足", BLUE_DISABLED_BG, BLUE_DISABLED_TEXT, 14, 46);
         body.addView(start, -1, -2);
 
         Dialog sheet = bottomSheet(activity, "开启清醒模式", null, body, true,
@@ -246,8 +258,6 @@ final class SoberModeUi {
                 row.addView(appIcon(activity, entry.pkg(), 38, 10));
                 space(row, 12);
                 TextView name = text(activity, entry.label(), 15, INK, true);
-                name.setSingleLine(true);
-                name.setEllipsize(TextUtils.TruncateAt.END);
                 weight(row, name);
                 space(row, 10);
                 if (checked) {
@@ -321,7 +331,7 @@ final class SoberModeUi {
     private static Intent purposeIntent(MainActivity activity, String pkg) {
         Intent intent = activity.getPackageManager().getLaunchIntentForPackage(pkg);
         if (intent == null) message(activity, "目的应用已不可用");
-        else intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        else intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         return intent;
     }
 
@@ -423,8 +433,6 @@ final class SoberModeUi {
                     item.addView(appIcon(activity, entry.getKey(), 34, 9));
                     space(item, 12);
                     TextView name = text(activity, entry.getValue(), 15, INK, true);
-                    name.setSingleLine(true);
-                    name.setEllipsize(TextUtils.TruncateAt.END);
                     weight(item, name);
                     space(item, 8);
                     item.addView(iconView(activity, R.drawable.ic_chevron_right, 16, MUTED));
