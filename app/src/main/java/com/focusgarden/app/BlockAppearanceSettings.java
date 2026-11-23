@@ -6,10 +6,8 @@ import android.content.res.ColorStateList;
 import android.os.Build;
 import android.text.InputFilter;
 import android.text.InputType;
-import android.text.TextUtils;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -66,8 +64,6 @@ final class BlockAppearanceSettings {
                     copy.addView(sub);
                     if (!appearance.text().isEmpty()) {
                         TextView sample = text(activity, appearance.text(), 12, INK_SUB, false);
-                        sample.setSingleLine(true);
-                        sample.setEllipsize(TextUtils.TruncateAt.END);
                         copy.addView(sample);
                     }
                     weight(entry, copy);
@@ -165,7 +161,7 @@ final class BlockAppearanceSettings {
 
         body.addView(text(activity, "提示文字", 14, INK, true));
         gap(body, 8);
-        EditText message = styledInput(activity, "留空时显示默认提示", appearance.text(),
+        EditText message = styledInput(activity, "留空时仅显示图片", appearance.text(),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setSingleLine(false);
         message.setMinLines(2);
@@ -241,18 +237,11 @@ final class BlockAppearanceSettings {
     private static void preview(MainActivity activity, FocusState.BlockAppearance appearance, int theme) {
         Dialog dialog = new Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        BlockScreen screen = new BlockScreen(activity, appearance, "关闭预览", dialog::dismiss, null);
-        screen.setContent("今日时间已用完", "受限应用", "今日已用  ·  0 分钟",
-                BlockScreen.builtInImage(appearance.fullImage(), theme, FocusState.Restriction.BUDGET));
+        BlockScreen screen = new BlockScreen(activity, appearance, "关闭预览", dialog::dismiss);
+        screen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), theme, FocusState.Restriction.BUDGET));
+        screen.setStatus("可用时间已耗尽");
         Window window = dialog.getWindow();
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.setDecorFitsSystemWindows(false);
-            screen.setOnApplyWindowInsetsListener((view, insets) -> {
-                var bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                screen.setContentInsets(bars.left, bars.top, bars.right, bars.bottom);
-                return insets;
-            });
-        }
+        if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false);
         dialog.setContentView(screen);
         dialog.show();
         window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);

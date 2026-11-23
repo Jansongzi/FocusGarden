@@ -2,10 +2,12 @@ package com.focusgarden.app;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowInsets;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -24,14 +26,11 @@ final class BlockScreen extends FrameLayout {
     private final FocusState.BlockAppearance appearance;
     private final ImageView picture;
     private final LinearLayout panel;
-    private final TextView heading;
-    private final TextView source;
     private final TextView status;
     private boolean customLoaded;
     private int builtInImage;
 
-    BlockScreen(Context context, FocusState.BlockAppearance appearance,
-                String buttonLabel, Runnable onPrimary, Runnable onOpenApp) {
+    BlockScreen(Context context, FocusState.BlockAppearance appearance, String buttonLabel, Runnable onPrimary) {
         super(context);
         this.appearance = appearance;
         setBackgroundColor(BACKGROUND);
@@ -53,6 +52,17 @@ final class BlockScreen extends FrameLayout {
 
         panel = column(context);
         setContentInsets(0, 0, 0, 0);
+        setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                var edges = insets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars()
+                        | WindowInsets.Type.displayCutout());
+                setContentInsets(edges.left, edges.top, edges.right, edges.bottom);
+            } else {
+                setContentInsets(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            }
+            return insets;
+        });
         addView(panel, -1, -1);
         ScrollView scroll = new ScrollView(context);
         scroll.setFillViewport(true);
@@ -64,36 +74,29 @@ final class BlockScreen extends FrameLayout {
 
         if (!full) {
             content.addView(picture, dp(context, 132), dp(context, 132));
-            gap(content, 20);
+            if (!appearance.text().isEmpty()) gap(content, 20);
         }
-        heading = text(context, "", appearance.textSize(), CARD, true);
-        heading.setGravity(Gravity.CENTER);
-        content.addView(heading, -1, -2);
-        gap(content, 10);
-        source = text(context, "", 14, PALE, true);
-        source.setGravity(Gravity.CENTER);
-        content.addView(source, -1, -2);
-        gap(content, 5);
-        status = text(context, "", 14, PALE, false);
+        if (!appearance.text().isEmpty()) {
+            TextView heading = text(context, appearance.text(), appearance.textSize(), CARD, true);
+            heading.setGravity(Gravity.CENTER);
+            content.addView(heading, -1, -2);
+        }
+        status = text(context, "", 15, PALE, false);
         status.setGravity(Gravity.CENTER);
-        content.addView(status, -1, -2);
+        status.setVisibility(View.GONE);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(-1, -2);
+        statusLp.topMargin = dp(context, 10);
+        content.addView(status, statusLp);
 
         gap(panel, 12);
         LinearLayout controls = column(context);
         controls.setGravity(Gravity.CENTER_HORIZONTAL);
         panel.addView(controls, -1, -2);
-        TextView primary = pillButton(context, buttonLabel, CARD, BACKGROUND, 16, 50);
-        primary.setBackground(touch(context, CARD, 25));
-        primary.setWidth(dp(context, 240));
+        TextView primary = pillButton(context, buttonLabel, CARD, BACKGROUND, 30, 60);
+        primary.setTextSize(18);
+        primary.setWidth(dp(context, 320));
         primary.setOnClickListener(v -> onPrimary.run());
         controls.addView(primary, -2, -2);
-        if (onOpenApp != null) {
-            gap(controls, 6);
-            TextView open = pillButton(context, "打开留白专注", full ? 0x80000000 : BACKGROUND, PALE, 14, 44);
-            open.setOnClickListener(v -> onOpenApp.run());
-            controls.addView(open, -2, -2);
-        }
-
     }
 
     @Override protected void onAttachedToWindow() {
@@ -119,16 +122,12 @@ final class BlockScreen extends FrameLayout {
         return appearance.fullImage();
     }
 
-    void setContentInsets(int left, int top, int right, int bottom) {
+    private void setContentInsets(int left, int top, int right, int bottom) {
         int inset = dp(getContext(), 24);
-        panel.setPadding(left + inset, top + dp(getContext(), 12), right + inset, bottom + inset);
+        panel.setPadding(left + inset, top + dp(getContext(), 12), right + inset, bottom + dp(getContext(), 64));
     }
 
-    void setContent(String title, String appName, String info, int image) {
-        boolean customText = !appearance.text().isEmpty();
-        heading.setText(customText ? appearance.text() : title);
-        source.setText(customText ? appName + " · " + title : appName);
-        setStatus(info);
+    void setBuiltInImage(int image) {
         if (!customLoaded && builtInImage != image) {
             builtInImage = image;
             picture.setScaleType(appearance.fullImage() || image == R.drawable.pond_at_dusk
@@ -137,8 +136,9 @@ final class BlockScreen extends FrameLayout {
         }
     }
 
-    void setStatus(String info) {
-        if (!info.contentEquals(status.getText())) status.setText(info);
+    void setStatus(String value) {
+        if (!value.contentEquals(status.getText())) status.setText(value);
+        status.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE);
     }
 
     @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {

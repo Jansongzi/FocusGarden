@@ -142,22 +142,25 @@ final class FocusStateCheck {
 
         // Sober mode spends earned time (credit first, then vault) and refuses when insufficient
         extra.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
-        equal(false, extra.startSober("Too long", 30, noon, UTC));
+        equal(false, extra.startSober(VIDEO, "Video", 30, noon, UTC));
         equal(false, extra.soberActive(noon));
         extra.creditMs = 0L;
         equal(BUDGET, extra.restriction(VIDEO, noon, UTC));
         extra.creditMs = 4 * MINUTE;
         extra.vaultMs = 15 * MINUTE;
-        equal(true, extra.startSober("Reply message", 10, noon, UTC));
+        equal(true, extra.startSober(VIDEO, "Video", 10, noon, UTC));
         equal(0L, extra.creditMs);
         equal(9 * MINUTE, extra.vaultMs);
         equal(true, extra.soberActive(noon + 5 * MINUTE));
         equal(NONE, extra.restriction(VIDEO, noon + 5 * MINUTE, UTC));
+        equal(FocusState.Restriction.SOBER, extra.restriction(STUDY, noon + 5 * MINUTE, UTC));
+        equal(FocusState.Restriction.SOBER, extra.restriction("test.unconfigured", noon + 5 * MINUTE, UTC));
         extra.addUsage(VIDEO, noon + 9 * MINUTE, noon + 11 * MINUTE, UTC);
-        equal(MINUTE, extra.used(VIDEO, "2026-11-22"));
+        equal(0L, extra.used(VIDEO, "2026-11-22"));
         equal(0L, extra.creditMs);
         equal(false, extra.soberActive(noon + 10 * MINUTE));
         equal(BUDGET, extra.restriction(VIDEO, noon + 10 * MINUTE, UTC));
+        checkSoberRefund(noon);
 
         // Early sleep requires bedtime=true AND claim window (1h before sleepStart or 4h after sleepEnd)
         long preSleep = at("2026-11-22T22:15:00Z");
@@ -240,11 +243,10 @@ final class FocusStateCheck {
         equal(4 * MINUTE, sync.syncUsageTotal(VIDEO, 4 * MINUTE, noon + 22 * MINUTE, UTC));
         equal(1 * MINUTE, sync.creditMs);
 
-        // Steps: 4000 manual daily cap, 2000 steps per 5m, 30m step daily cap
+        // System steps: 2000 per 5m with a 30m daily cap
         extra.creditMs = 0L;
-        equal(3000, extra.addManualSteps(3000, dayTodo));
-        equal(1000, extra.addManualSteps(2000, dayTodo));
-        equal(0, extra.addManualSteps(500, dayTodo));
+        equal(true, extra.recordStepCounter(100, dayTodo));
+        equal(true, extra.recordStepCounter(4100, dayTodo));
         equal(2, extra.claimableStepUnits(dayTodo));
         equal(4000, extra.pendingStepsRemainder(dayTodo));
         equal(10 * MINUTE, extra.claimSteps(todoNoon, UTC));
@@ -256,10 +258,9 @@ final class FocusStateCheck {
         equal(true, counter.recordStepCounter(400, dayTodo));
         equal(true, counter.recordStepCounter(480, dayTodo));
         equal(false, counter.recordStepCounter(480, dayTodo));
-        equal(500, counter.addManualSteps(500, dayTodo));
         equal(true, counter.recordStepCounter(490, dayTodo));
         equal(true, counter.recordStepCounter(5, dayTodo));
-        equal(595, counter.day(dayTodo.toString()).steps);
+        equal(95, counter.day(dayTodo.toString()).steps);
         equal(true, counter.recordStepCounter(70, dayTodo.plusDays(1)));
         equal(true, counter.recordStepCounter(72, dayTodo.plusDays(1)));
         equal(2, counter.day(dayTodo.plusDays(1).toString()).steps);
@@ -449,8 +450,8 @@ final class FocusStateCheck {
 
         strict.bedtime = true;
         strict.creditMs = 60 * MINUTE;
-        strict.startSober("Late chat", 10, midnight + 1, UTC);
-        equal(true, strict.soberActive(midnight + MINUTE));
+        equal(false, strict.startSober(VIDEO, "Late chat", 10, midnight + 1, UTC));
+        equal(false, strict.soberActive(midnight + MINUTE));
         equal(BEDTIME, strict.restriction(STUDY, midnight + MINUTE, UTC));
         equal(BEDTIME, strict.restriction(VIDEO, midnight + MINUTE, UTC));
         equal(BEDTIME, strict.restriction("test.unconfigured", midnight + MINUTE, UTC));
@@ -480,7 +481,6 @@ final class FocusStateCheck {
         equal(15, eco.habitChangeCostMinutes(eco.habits.get("h0"), 8));
         equal(15, eco.dailyCapChangeCostMinutes(30, 45));
         equal(10, eco.dailyCapChangeCostMinutes(30, 20));
-        equal(10, eco.soberUnlockCostMinutes(10));
 
         equal(true, eco.spendTime(10 * MINUTE, "CONFIG", "调整上限", "待办改为45分", noon + 2_000, UTC));
         equal(0L, eco.vaultMs);
@@ -526,6 +526,40 @@ final class FocusStateCheck {
         state.rotateBlockAppearances = false;
         equal(first, state.nextBlockAppearance().id());
         equal(false, FocusState.BlockAppearance.validId("../escape"));
+    }
+
+    private static void checkSoberRefund(long noon) {
+        var state = new FocusState();
+        state.creditMs = 4 * MINUTE;
+        state.vaultMs = 15 * MINUTE;
+        equal(false, state.startSober("", "Empty package", 5, noon, UTC));
+        equal(true, state.startSober(VIDEO, "Video", 10, noon, UTC));
+        equal(10 * MINUTE, state.soberRemaining(noon - MINUTE));
+        equal(false, state.startSober(STUDY, "Study", 1, noon + 100, UTC));
+        equal(8 * MINUTE, state.pauseSober(noon + 2 * MINUTE, UTC));
+        equal(2 * MINUTE, state.creditMs);
+        equal(15 * MINUTE, state.vaultMs);
+        equal(2 * MINUTE, state.day(FocusState.date(noon, UTC)).spentMs);
+        equal(0L, state.pauseSober(noon + 2 * MINUTE, UTC));
+        equal(true, state.resumeSober(noon + 3 * MINUTE, UTC));
+        equal(5 * MINUTE, state.stopSober(noon + 6 * MINUTE, UTC));
+        equal(0L, state.creditMs);
+        equal(14 * MINUTE, state.vaultMs);
+        equal(5 * MINUTE, state.day(FocusState.date(noon, UTC)).spentMs);
+        equal(1 * MINUTE, FocusState.usageOutsideSober(noon, noon + 6 * MINUTE, state.soberWindows));
+        equal(0L, state.stopSober(noon + 6 * MINUTE, UTC));
+        equal(false, state.resumeSober(noon + 7 * MINUTE, UTC));
+        equal(true, state.startSober(VIDEO, "Video", 1, noon + 8 * MINUTE, UTC));
+        equal(true, state.expireSober(noon + 9 * MINUTE, UTC));
+        equal(false, state.soberActive(noon + 9 * MINUTE));
+        equal(13 * MINUTE, state.vaultMs);
+
+        var legacy = new FocusState();
+        legacy.soberUntil = noon + 5 * MINUTE;
+        equal(false, legacy.soberActive(noon));
+        equal(true, legacy.migrateLegacySober(noon, UTC));
+        equal(5 * MINUTE, legacy.creditMs);
+        equal(false, legacy.migrateLegacySober(noon, UTC));
     }
 
     private static long at(String instant) {

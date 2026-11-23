@@ -20,7 +20,6 @@ import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -159,10 +158,8 @@ final class GardenUi {
         TextView v = text(context, label, 14, textColor, true);
         v.setGravity(Gravity.CENTER);
         v.setMinHeight(dp(context, heightDp));
-        v.setPadding(dp(context, 14), dp(context, 6), dp(context, 14), dp(context, 6));
+        v.setPadding(dp(context, 10), dp(context, 6), dp(context, 10), dp(context, 6));
         v.setBackground(touch(context, bg, radiusDp));
-        v.setSingleLine(true);
-        v.setEllipsize(TextUtils.TruncateAt.END);
         v.setFocusable(true);
         v.setAccessibilityDelegate(new View.AccessibilityDelegate() {
             @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
@@ -192,7 +189,6 @@ final class GardenUi {
     static TextView redeemPill(Context context, String label, boolean active) {
         TextView v = text(context, label, 13, active ? CARD : BLUE_DISABLED_TEXT, true);
         v.setGravity(Gravity.CENTER);
-        v.setSingleLine(true);
         v.setWidth(dp(context, 100));
         v.setMinHeight(dp(context, 42));
         v.setPadding(dp(context, 4), dp(context, 6), dp(context, 4), dp(context, 6));
@@ -288,6 +284,10 @@ final class GardenUi {
     }
 
     static Dialog bottomSheet(Activity activity, String title, String subtitle, View body) {
+        return bottomSheet(activity, title, subtitle, body, true);
+    }
+
+    static Dialog bottomSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
@@ -350,14 +350,19 @@ final class GardenUi {
         sep.setBackgroundColor(LINE);
         sheet.addView(sep, -1, dp(activity, 1));
 
-        ScrollView scroller = new ScrollView(activity);
-        scroller.setVerticalScrollBarEnabled(false);
         LinearLayout wrap = column(activity);
         wrap.setPadding(dp(activity, 20), dp(activity, 16), dp(activity, 20), dp(activity, 24));
-        wrap.addView(body, -1, -2);
-        scroller.addView(wrap, -1, -2);
-
-        sheet.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1f));
+        View content = wrap;
+        if (scrollBody) {
+            ScrollView scroller = new ScrollView(activity);
+            scroller.setVerticalScrollBarEnabled(false);
+            wrap.addView(body, -1, -2);
+            scroller.addView(wrap, -1, -2);
+            content = scroller;
+        } else {
+            wrap.addView(body, -1, -1);
+        }
+        sheet.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
         sheet.setFocusableInTouchMode(true);
         sheet.requestFocus();
         dialog.setContentView(sheet);

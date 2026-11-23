@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.PixelFormat;
@@ -18,6 +19,7 @@ import android.telecom.TelecomManager;
 import android.util.SparseArray;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -35,12 +37,14 @@ import java.util.HashSet;
 import java.util.Set;
 
 public final class FocusService extends AccessibilityService {
+    private static FocusService connected;
     private final Handler main = new Handler(Looper.getMainLooper());
     private WindowManager windows;
     private FocusStore store;
     private FrameLayout overlay;
     private BlockScreen blockScreen;
     private GardenUi.CapsuleBar awarenessBar;
+    private TextView soberPill;
     private FocusState.Restriction showing = FocusState.Restriction.NONE;
     private boolean showingGuard;
     private String foreground;
@@ -80,6 +84,7 @@ public final class FocusService extends AccessibilityService {
             foregroundFocused = false;
             hideOverlay();
             hideAwarenessBar();
+            hideSoberPill();
             cancelRefresh();
         }
     };
@@ -87,6 +92,7 @@ public final class FocusService extends AccessibilityService {
     @Override protected void onServiceConnected() {
         windows = getSystemService(WindowManager.class);
         store = FocusStore.get(this);
+        connected = this;
         store.state.recordHeartbeat(System.currentTimeMillis());
         store.save();
         if (!screenListenerRegistered) {
@@ -99,6 +105,20 @@ public final class FocusService extends AccessibilityService {
         }
         recoverWindowUntil = SystemClock.elapsedRealtime() + 3000L;
         requestWindowRefresh();
+    }
+
+    static boolean isConnected() {
+        return connected != null;
+    }
+
+    static void refreshConnected() {
+        if (connected != null) connected.requestWindowRefresh();
+    }
+
+    @Override public void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        hideSoberPill();
+        if (connected == this) requestWindowRefresh();
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -208,6 +228,7 @@ public final class FocusService extends AccessibilityService {
             flushUsage();
             hideOverlay();
             hideAwarenessBar();
+            hideSoberPill();
             if (SystemClock.elapsedRealtime() < recoverWindowUntil) main.postDelayed(pulse, 250);
             return;
         }
@@ -230,6 +251,7 @@ public final class FocusService extends AccessibilityService {
             KeepAliveManager.syncUsageStatsAsync(this, null);
         }
         ZoneId zone = ZoneId.systemDefault();
+        boolean sober = store.state.soberActive(now);
         boolean focusGuardActive = store.state.guardSettingsDuringFocus
                 && (store.state.isDisciplineLocked(now) || store.state.bedtimeAt(now, zone))
                 && "com.android.settings".equals(foreground)
@@ -237,6 +259,7 @@ public final class FocusService extends AccessibilityService {
 
         if (focusGuardActive) {
             hideAwarenessBar();
+            hideSoberPill();
             if (!showingGuard || overlay == null) {
                 flushUsage();
                 showSettingsGuardOverlay();
@@ -245,7 +268,8 @@ public final class FocusService extends AccessibilityService {
             return;
         }
 
-        FocusState.Restriction reason = (foreground == null || isSystemExempt(foreground))
+        boolean exempt = isSystemExempt(foreground) && !(sober && "com.android.settings".equals(foreground));
+        FocusState.Restriction reason = exempt
                 ? FocusState.Restriction.NONE
                 : store.state.restriction(foreground, now, zone);
 
@@ -263,8 +287,10 @@ public final class FocusService extends AccessibilityService {
 
         if (reason == FocusState.Restriction.NONE) {
             hideOverlay();
-            updateAwarenessBar(now);
+            if (sober) hideAwarenessBar();
+            else updateAwarenessBar(now);
         } else {
+            hideSoberPill();
             hideAwarenessBar();
             if (showingGuard || !foreground.equals(blockedPackage) || reason != showing || overlay == null) {
                 flushUsage();
@@ -272,11 +298,18 @@ public final class FocusService extends AccessibilityService {
             }
         }
 
-        if (blockScreen != null && reason == FocusState.Restriction.FOCUS) {
-            String status = store.state.offlineRunning()
-                    ? "自律正计时  ·  " + GardenUi.countdown(store.state.offlineElapsed(now))
-                    : (store.state.paused() ? "已暂停  ·  " : "自律倒计时还剩  ·  ")
-                    + GardenUi.countdown(store.state.remaining(now));
+        if (sober && reason == FocusState.Restriction.NONE) updateSoberPill(now);
+        else hideSoberPill();
+
+        if (blockScreen != null) {
+            FocusState state = store.state;
+            String status = switch (reason) {
+                case FOCUS -> state.offlineRunning()
+                        ? "自律正计时  " + GardenUi.countdown(state.offlineElapsed(now))
+                        : "自律倒计时  " + GardenUi.countdown(state.remaining(now));
+                case BUDGET -> "可用时间已耗尽";
+                default -> "";
+            };
             blockScreen.setStatus(status);
         }
 
@@ -286,9 +319,9 @@ public final class FocusService extends AccessibilityService {
             FocusWidget.refresh(this);
         }
         boolean keepTicking = (foreground != null && (store.state.rules.containsKey(foreground)
-                || store.state.soberActive(now)
                 || reason == FocusState.Restriction.FOCUS
                 || reason == FocusState.Restriction.BEDTIME))
+                || sober
                 || store.state.isDisciplineLocked(now)
                 || store.state.bedtimeAt(now, zone);
         if (focused == null && SystemClock.elapsedRealtime() < recoverWindowUntil) {
@@ -356,16 +389,51 @@ public final class FocusService extends AccessibilityService {
         return exemptPackages.contains(pkg);
     }
 
-    private String resolveAppLabel(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return "当前应用";
-        try {
-            PackageManager pm = getPackageManager();
-            CharSequence label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
-            String clean = label == null ? "" : label.toString().trim();
-            return clean.isEmpty() ? "当前应用" : clean;
-        } catch (Exception e) {
-            return "当前应用";
+    private void updateSoberPill(long now) {
+        String remaining = SoberModeUi.clockText(store.state.soberRemaining(now));
+        if (soberPill == null) {
+            TextView pill = GardenUi.pillButton(this, remaining, 0xea173b31, GardenUi.CARD, 22, 38);
+            pill.setTypeface(android.graphics.Typeface.MONOSPACE);
+            pill.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)
+                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)));
+            WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                    GardenUi.dp(this, 104), GardenUi.dp(this, 38),
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+            params.gravity = Gravity.TOP | Gravity.END;
+            params.x = GardenUi.dp(this, 14);
+            params.y = GardenUi.dp(this, 10);
+            if (Build.VERSION.SDK_INT >= 30) {
+                var insets = windows.getCurrentWindowMetrics().getWindowInsets().getInsetsIgnoringVisibility(
+                        WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout());
+                params.setFitInsetsTypes(0);
+                params.x += getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
+                        ? insets.left : insets.right;
+                params.y += insets.top;
+            } else {
+                int status = getResources().getIdentifier("status_bar_height", "dimen", "android");
+                params.y += status == 0 ? GardenUi.dp(this, 24) : getResources().getDimensionPixelSize(status);
+            }
+            params.setTitle("清醒模式悬浮计时");
+            try {
+                windows.addView(pill, params);
+                soberPill = pill;
+            } catch (WindowManager.BadTokenException | IllegalStateException | SecurityException e) {
+                return;
+            }
         }
+        if (!remaining.contentEquals(soberPill.getText())) {
+            soberPill.setText(remaining);
+        }
+        soberPill.setContentDescription("清醒模式剩余 " + remaining + "，返回倒计时");
+    }
+
+    private void hideSoberPill() {
+        if (soberPill == null) return;
+        try {
+            windows.removeViewImmediate(soberPill);
+        } catch (IllegalArgumentException ignored) {}
+        soberPill = null;
     }
 
     private void updateAwarenessBar(long now) {
@@ -373,31 +441,22 @@ public final class FocusService extends AccessibilityService {
             hideAwarenessBar();
             return;
         }
-        boolean sober = store.state.soberActive(now);
         FocusState.Rule rule = store.state.rules.get(foreground);
         if (rule == null || rule.category() != FocusState.Category.LIMITED) {
             hideAwarenessBar();
             return;
         }
 
-        float ratio;
-        int barColor;
-        if (sober) {
-            long rem = store.state.soberRemaining(now);
-            ratio = Math.min(1f, (float) rem / (15f * FocusState.MINUTE));
-            barColor = GardenUi.CYAN;
-        } else {
-            String todayStr = FocusState.date(now, ZoneId.systemDefault());
-            long used = store.state.used(foreground, todayStr);
-            long freeLeft = store.state.freeRemainingMs(foreground, todayStr);
-            long totalLeft = freeLeft + store.state.creditMs;
-            long totalBudget = Math.max(FocusState.MINUTE, freeLeft + store.state.creditMs + used);
-            ratio = Math.min(1f, (float) totalLeft / totalBudget);
-            barColor = totalLeft <= FocusState.MINUTE ? GardenUi.RED
-                    : ratio < 0.2f ? GardenUi.AMBER
-                    : ratio < 0.5f ? GardenUi.BLUE
-                    : GardenUi.GREEN;
-        }
+        String todayStr = FocusState.date(now, ZoneId.systemDefault());
+        long used = store.state.used(foreground, todayStr);
+        long freeLeft = store.state.freeRemainingMs(foreground, todayStr);
+        long totalLeft = freeLeft + store.state.creditMs;
+        long totalBudget = Math.max(FocusState.MINUTE, totalLeft + used);
+        float ratio = Math.min(1f, (float) totalLeft / totalBudget);
+        int barColor = totalLeft <= FocusState.MINUTE ? GardenUi.RED
+                : ratio < 0.2f ? GardenUi.AMBER
+                : ratio < 0.5f ? GardenUi.BLUE
+                : GardenUi.GREEN;
 
         if (awarenessBar == null) {
             GardenUi.CapsuleBar bar = new GardenUi.CapsuleBar(this);
@@ -495,38 +554,16 @@ public final class FocusService extends AccessibilityService {
         hideAwarenessBar();
 
         FocusState state = store.state;
-        FocusState.Rule rule = state.rules.get(pkg);
-        String appName = rule != null ? rule.label() : resolveAppLabel(pkg);
-        long now = System.currentTimeMillis();
-        boolean stopwatch = reason == FocusState.Restriction.FOCUS && state.offlineRunning();
-        String title = switch (reason) {
-            case BEDTIME -> "睡眠时段强制锁定";
-            case BUDGET -> "今日时间已用完";
-            default -> stopwatch ? "自律正计时进行中" : "自律倒计时进行中";
-        };
-        String info = switch (reason) {
-            case BEDTIME -> "自动解锁  ·  " + GardenUi.clock(state.sleepEnd);
-            case BUDGET -> "今日已用  ·  " + GardenUi.duration(state.used(pkg, FocusState.date(now, ZoneId.systemDefault())))
-                    + (state.vaultMs > 0 ? "  ·  储蓄罐存有 " + GardenUi.duration(state.vaultMs) : "");
-            default -> stopwatch
-                    ? "自律正计时  ·  " + GardenUi.countdown(state.offlineElapsed(now))
-                    : "自律倒计时还剩  ·  " + GardenUi.countdown(state.remaining(now));
-        };
         if (continuing) {
-            blockScreen.setContent(title, appName, info,
-                    BlockScreen.builtInImage(blockScreen.isFullImage(), state.blockTheme, reason));
+            blockScreen.setBuiltInImage(BlockScreen.builtInImage(blockScreen.isFullImage(), state.blockTheme, reason));
             return;
         }
 
         FocusState.BlockAppearance appearance = state.nextBlockAppearance();
-        blockScreen = new BlockScreen(this, appearance, "返回桌面",
-                () -> {
-                    if (performGlobalAction(GLOBAL_ACTION_HOME)) requestWindowRefresh();
-                },
-                () -> startActivity(new Intent(this, MainActivity.class)
-                        .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)));
-        blockScreen.setContent(title, appName, info,
-                BlockScreen.builtInImage(appearance.fullImage(), state.blockTheme, reason));
+        blockScreen = new BlockScreen(this, appearance, "返回桌面", () -> {
+            if (performGlobalAction(GLOBAL_ACTION_HOME)) requestWindowRefresh();
+        });
+        blockScreen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), state.blockTheme, reason));
         attachOverlay(blockScreen);
         if (overlay != null && state.rotateBlockAppearances && !appearance.id().equals(state.lastBlockAppearance)) {
             state.lastBlockAppearance = appearance.id();
@@ -544,7 +581,17 @@ public final class FocusService extends AccessibilityService {
         rootView.addView(content, -1, -1);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.OPAQUE);
+        if (Build.VERSION.SDK_INT >= 30) {
+            params.setFitInsetsTypes(0);
+            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        } else {
+            params.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+            if (Build.VERSION.SDK_INT >= 28) {
+                params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
+        }
         params.setTitle("留白专注提醒");
         try {
             windows.addView(rootView, params);
@@ -584,6 +631,7 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void stopTracking() {
+        if (connected == this) connected = null;
         cancelRefresh();
         windowPackages.clear();
         resolvedWindowId = -1;
@@ -594,6 +642,7 @@ public final class FocusService extends AccessibilityService {
         foregroundFocused = false;
         hideOverlay();
         hideAwarenessBar();
+        hideSoberPill();
         if (screenListenerRegistered) {
             unregisterReceiver(screenListener);
             screenListenerRegistered = false;

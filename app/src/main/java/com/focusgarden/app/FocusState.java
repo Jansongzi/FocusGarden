@@ -20,7 +20,7 @@ final class FocusState {
     static final long MIN_OFFLINE_CLAIM_MS = 5 * MINUTE;
     static final long TODO_MATURE_MS = 10 * MINUTE;
     static final long HABIT_MATURE_MS = 10 * MINUTE;
-    static final int MANUAL_STEP_DAILY_LIMIT = 4000;
+    static final int MAX_SOBER_MINUTES = 180;
     static final int EARLY_SLEEP_PRE_WINDOW_MIN = 60;
     static final int EARLY_SLEEP_POST_WINDOW_MIN = 240;
     static final int RESET_HOUR = 4;
@@ -32,7 +32,7 @@ final class FocusState {
     static final int INDULGENT_UNLOCK_DAYS = 5;
 
     enum Category { LEARNING, LIMITED }
-    enum Restriction { NONE, FOCUS, BEDTIME, BUDGET }
+    enum Restriction { NONE, FOCUS, BEDTIME, BUDGET, SOBER }
     enum Transition { NONE, BREAK, WORK, FINISHED }
     enum CheckInResult { OK, OK_CAPPED, ALREADY_DONE, COOLING_DOWN, NOT_FOUND }
     enum ModeSwitchCheck { OK, SAME_MODE, INDULGENT_LOCKED, DAILY_LIMIT_REACHED, INSUFFICIENT_TIME }
@@ -70,6 +70,7 @@ final class FocusState {
 
     record Rule(String label, Category category, int dailyMinutes) {}
     record Event(long timeMs, String type, String title, String detail, long deltaMs) {}
+    record SoberWindow(long start, long end) {}
 
     static final class Habit {
         String name;
@@ -162,7 +163,6 @@ final class FocusState {
         long todoEarnedMs;
         long habitEarnedMs;
         int steps;
-        int manualSteps;
         int stepsClaimed;
         long stepsEarnedMs;
         long rewardSpentMs;
@@ -223,7 +223,12 @@ final class FocusState {
     long offlineUnredeemedMs;
 
     long soberUntil;
-    String soberPurpose = "";
+    long soberPausedMs;
+    long soberVaultPaid;
+    String soberPaidOn = "";
+    String soberPackage = "";
+    String soberApp = "";
+    final List<SoberWindow> soberWindows = new ArrayList<>();
 
     int stepsPerReward = 2000;
     int stepRewardMinutes = 5;
@@ -355,7 +360,7 @@ final class FocusState {
         creditRemainder = 0;
         syncLegacyPercents();
         logEvent(dateStr, now, "CONFIG", "放纵模式到期恢复",
-                "次日 04:00 自动恢复为" + restore.label + "（" + restore.ratioText + "）", 0L);
+                "次日 04:00 自动恢复为" + restore.label, 0L);
     }
 
     void seedDefaultRewardsIfNeeded() {
@@ -388,27 +393,111 @@ final class FocusState {
     }
 
     boolean soberActive(long now) {
-        return soberUntil > now;
+        return !soberPackage.isEmpty() && soberUntil > now;
     }
 
     long soberRemaining(long now) {
-        return Math.max(0L, soberUntil - now);
+        long remaining = Math.max(0L, soberUntil - now);
+        if (!soberWindows.isEmpty()) {
+            SoberWindow window = soberWindows.get(soberWindows.size() - 1);
+            if (window.end() == soberUntil) return Math.min(remaining, window.end() - window.start());
+        }
+        return remaining;
     }
 
-    boolean startSober(String purpose, int minutes, long now, ZoneId zone) {
-        if (minutes <= 0) return false;
-        long costMs = soberUnlockCostMinutes(minutes) * MINUTE;
-        String cleanPurpose = purpose == null ? "" : purpose.trim();
-        String detail = (cleanPurpose.isEmpty() ? "临时解锁" : cleanPurpose) + " · " + minutes + " 分钟";
-        if (!spendTime(costMs, "SOBER", "开启清醒模式", detail, now, zone)) return false;
-        soberPurpose = cleanPurpose;
-        soberUntil = now + minutes * MINUTE;
+    boolean canStartSober(long now, ZoneId zone) {
+        return !soberActive(now) && !active() && !offlineActive() && !bedtimeAt(now, zone);
+    }
+
+    boolean startSober(String pkg, String label, int minutes, long now, ZoneId zone) {
+        if (minutes < 1 || minutes > MAX_SOBER_MINUTES || soberPausedMs > 0) return false;
+        return chargeSober(pkg, label, minutes * MINUTE, now, zone, "开启清醒模式");
+    }
+
+    boolean resumeSober(long now, ZoneId zone) {
+        return chargeSober(soberPackage, soberApp, soberPausedMs, now, zone, "继续清醒模式");
+    }
+
+    private boolean chargeSober(String pkg, String label, long duration, long now, ZoneId zone, String action) {
+        if (pkg == null || pkg.isEmpty() || duration <= 0 || !canStartSober(now, zone)) return false;
+        syncResetDay(now, zone);
+        long paidFromVault = Math.max(0, duration - creditMs);
+        if (!spendTime(duration, "SOBER", action, label, now, zone)) return false;
+        soberPackage = pkg;
+        soberApp = label;
+        soberVaultPaid = paidFromVault;
+        soberPaidOn = date(now, zone);
+        soberPausedMs = 0;
+        soberUntil = now + duration;
+        long retainFrom = logicDayStartMs(logicDate(now, zone).minusDays(1), zone);
+        soberWindows.removeIf(window -> window.end() <= retainFrom);
+        soberWindows.add(new SoberWindow(now, soberUntil));
         return true;
     }
 
-    void stopSober() {
-        soberUntil = 0L;
-        soberPurpose = "";
+    long pauseSober(long now, ZoneId zone) {
+        if (!soberActive(now)) return 0;
+        soberPausedMs = refundSober(now, zone, "暂停清醒模式");
+        return soberPausedMs;
+    }
+
+    long stopSober(long now, ZoneId zone) {
+        long refunded = soberActive(now) ? refundSober(now, zone, "结束清醒模式") : 0;
+        soberPausedMs = 0;
+        soberUntil = 0;
+        soberVaultPaid = 0;
+        soberPaidOn = "";
+        soberPackage = "";
+        soberApp = "";
+        return refunded;
+    }
+
+    boolean expireSober(long now, ZoneId zone) {
+        if (soberUntil <= 0 || soberUntil > now) return false;
+        stopSober(now, zone);
+        return true;
+    }
+
+    private long refundSober(long now, ZoneId zone, String action) {
+        long remaining = soberRemaining(now);
+        syncResetDay(now, zone);
+        long toVault = Math.min(Math.min(remaining, soberVaultPaid), vaultRemainingCapacityMs());
+        vaultMs += toVault;
+        creditMs += remaining - toVault;
+        Day paidDay = days.get(soberPaidOn);
+        if (paidDay != null) paidDay.spentMs = Math.max(0L, paidDay.spentMs - remaining);
+        logEvent(date(now, zone), now, "SOBER", action + " · 退回未用时长", soberApp, remaining);
+        if (!soberWindows.isEmpty()) {
+            int last = soberWindows.size() - 1;
+            SoberWindow window = soberWindows.get(last);
+            soberWindows.set(last, new SoberWindow(window.start(), Math.max(window.start(), now)));
+        }
+        soberUntil = 0;
+        soberVaultPaid = 0;
+        soberPaidOn = "";
+        return remaining;
+    }
+
+    boolean migrateLegacySober(long now, ZoneId zone) {
+        if (soberUntil == 0 || !soberPackage.isEmpty()) return false;
+        long remaining = soberRemaining(now);
+        if (remaining > 0) {
+            syncResetDay(now, zone);
+            creditMs += remaining;
+            Day day = day(date(now, zone));
+            day.spentMs = Math.max(0L, day.spentMs - remaining);
+            logEvent(date(now, zone), now, "SOBER", "退回旧版清醒模式剩余时长", "", remaining);
+        }
+        soberUntil = 0;
+        return true;
+    }
+
+    static long usageOutsideSober(long start, long end, List<SoberWindow> windows) {
+        long duration = end - start;
+        for (SoberWindow window : windows) {
+            duration -= Math.max(0L, Math.min(end, window.end()) - Math.max(start, window.start()));
+        }
+        return Math.max(0L, duration);
     }
 
     long totalSpendableMs() {
@@ -452,7 +541,7 @@ final class FocusState {
     ModeSwitchCheck switchMode(RateMode target, long now, ZoneId zone) {
         ModeSwitchCheck status = checkSwitchMode(target, now, zone);
         if (status != ModeSwitchCheck.OK) return status;
-        String detail = rateMode.label + "（" + rateMode.ratioText + "）→ " + target.label + "（" + target.ratioText + "）";
+        String detail = rateMode.label + " → " + target.label;
         if (!spendTime(MODE_SWITCH_COST_MINUTES * MINUTE, "CONFIG", "切换时间获取模式", detail, now, zone)) {
             return ModeSwitchCheck.INSUFFICIENT_TIME;
         }
@@ -495,7 +584,7 @@ final class FocusState {
             indulgentPasses++;
             unlocked = true;
             logEvent(d, now, "HABIT", "解锁放纵模式机会",
-                    "累计自律满 " + INDULGENT_UNLOCK_DAYS + " 天 · 获得 1 天放纵模式（1:2）", 0L);
+                    "累计自律满 " + INDULGENT_UNLOCK_DAYS + " 天 · 获得 1 天放纵模式", 0L);
         }
         return unlocked;
     }
@@ -513,7 +602,7 @@ final class FocusState {
         indulgentPasses--;
         creditRemainder = 0;
         syncLegacyPercents();
-        logEvent(indulgentActiveDate, now, "CONFIG", "开启放纵模式（1:2）",
+        logEvent(indulgentActiveDate, now, "CONFIG", "开启放纵模式",
                 "明日凌晨 04:00 自动恢复为" + previousMode.label, 0L);
         return true;
     }
@@ -661,10 +750,6 @@ final class FocusState {
         return newCap > oldCap ? 15 : 10;
     }
 
-    int soberUnlockCostMinutes(int minutes) {
-        return Math.max(5, minutes);
-    }
-
     boolean offlineRunning() {
         return offlineStartMs > 0L;
     }
@@ -739,7 +824,7 @@ final class FocusState {
         stats.offlineEarnedMs += granted;
         grant(stats, granted);
         logEvent(d, now, "OFFLINE", "兑换自律模式奖励",
-                rateMode.label + " " + rateMode.ratioText + " · 结算 " + (consumed / MINUTE) + " 分钟自律", granted);
+                "结算 " + (consumed / MINUTE) + " 分钟自律", granted);
         evaluateDisciplinedDay(now, zone);
         return granted;
     }
@@ -770,8 +855,8 @@ final class FocusState {
             return (rule != null && rule.category == Category.LEARNING)
                     ? Restriction.NONE : Restriction.FOCUS;
         }
+        if (soberActive(now)) return soberPackage.equals(pkg) ? Restriction.NONE : Restriction.SOBER;
         if (rule == null || rule.category != Category.LIMITED) return Restriction.NONE;
-        if (soberActive(now)) return Restriction.NONE;
         long free = freeRemainingMs(pkg, date(now, zone));
         return free <= 0 && creditMs == 0 ? Restriction.BUDGET : Restriction.NONE;
     }
@@ -789,11 +874,15 @@ final class FocusState {
         long start = Math.max(dayStart, now - delta);
         long actual = Math.max(0L, now - start);
         if (actual <= 0L) return 0L;
-        addUsage(pkg, start, now, zone);
+        addUsage(pkg, start, now, zone, false);
         return actual;
     }
 
     void addUsage(String pkg, long start, long end, ZoneId zone) {
+        addUsage(pkg, start, end, zone, true);
+    }
+
+    private void addUsage(String pkg, long start, long end, ZoneId zone, boolean excludeSober) {
         Rule rule = rules.get(pkg);
         if (rule == null || end <= start) return;
         long cursor = start;
@@ -803,7 +892,7 @@ final class FocusState {
             String dayStr = logicDay.toString();
             long nextReset = logicDayStartMs(logicDay.plusDays(1), zone);
             long sliceEnd = Math.min(end, nextReset);
-            long duration = sliceEnd - cursor;
+            long duration = excludeSober ? usageOutsideSober(cursor, sliceEnd, soberWindows) : sliceEnd - cursor;
             Day stats = day(dayStr);
             long previous = stats.usage.getOrDefault(pkg, 0L);
             if (rule.category == Category.LEARNING) {
@@ -812,11 +901,9 @@ final class FocusState {
                 if (stats.learningMs >= 10 * MINUTE) evaluateDisciplinedDay(sliceEnd - 1, zone);
             } else {
                 long free = freeRemainingMs(pkg, dayStr);
-                long unlocked = Math.max(0L, Math.min(sliceEnd, soberUntil) - cursor);
-                duration = Math.max(unlocked, Math.min(duration, free + creditMs));
-                long nonSober = Math.max(0L, duration - unlocked);
-                long freeUsedNow = Math.min(free, nonSober);
-                long spent = Math.min(creditMs, Math.max(0L, nonSober - freeUsedNow));
+                duration = Math.min(duration, free + creditMs);
+                long freeUsedNow = Math.min(free, duration);
+                long spent = Math.min(creditMs, Math.max(0L, duration - freeUsedNow));
                 stats.baseFreeUsedMs += freeUsedNow;
                 creditMs -= spent;
                 stats.spentMs += spent;
@@ -1050,23 +1137,6 @@ final class FocusState {
         return true;
     }
 
-    int remainingManualSteps(LocalDate today) {
-        Day d = days.get(today.toString());
-        int used = d == null ? 0 : d.manualSteps;
-        return Math.max(0, MANUAL_STEP_DAILY_LIMIT - used);
-    }
-
-    int addManualSteps(int deltaSteps, LocalDate today) {
-        if (deltaSteps <= 0) return 0;
-        int allowed = remainingManualSteps(today);
-        int actual = Math.min(deltaSteps, allowed);
-        if (actual <= 0) return 0;
-        Day day = day(today.toString());
-        day.steps += actual;
-        day.manualSteps += actual;
-        return actual;
-    }
-
     long remainingStepCapMs(LocalDate today) {
         Day d = days.get(today.toString());
         long earned = d == null ? 0L : d.stepsEarnedMs;
@@ -1200,7 +1270,7 @@ final class FocusState {
                 long earned = earnByMode(stats, phaseDuration);
                 stats.focusEarnedMs += earned;
                 logEvent(d, completedAt, "FOCUS", "完成自律倒计时",
-                        rateMode.label + " " + rateMode.ratioText + " · " + (phaseDuration / MINUTE) + " 分钟倒计时", earned);
+                        (phaseDuration / MINUTE) + " 分钟倒计时", earned);
                 evaluateDisciplinedDay(completedAt, zone);
                 if (--roundsLeft == 0) {
                     cancel();
@@ -1238,7 +1308,7 @@ final class FocusState {
         offlineStartMs = 0L;
         offlineAccumulatedMs = 0L;
         bedtime = false;
-        stopSober();
+        stopSober(now, zone);
         logEvent(date(now, zone), now, "DEBUG", "调试一键解锁", "已解除全部自律模式与睡眠时段锁定", 0L);
     }
 }

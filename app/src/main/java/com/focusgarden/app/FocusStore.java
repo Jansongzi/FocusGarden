@@ -27,6 +27,7 @@ final class FocusStore {
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not read saved state", e);
         }
+        if (state.migrateLegacySober(System.currentTimeMillis(), java.time.ZoneId.systemDefault())) save();
     }
 
     private void load(JSONObject root) throws JSONException {
@@ -81,7 +82,20 @@ final class FocusStore {
         state.offlineUnredeemedMs = root.optLong("offlineUnredeemedMs");
 
         state.soberUntil = root.optLong("soberUntil");
-        state.soberPurpose = root.optString("soberPurpose", "");
+        state.soberPausedMs = Math.max(0L, root.optLong("soberPausedMs"));
+        state.soberVaultPaid = Math.max(0L, root.optLong("soberVaultPaid"));
+        state.soberPaidOn = root.optString("soberPaidOn", "");
+        state.soberPackage = root.optString("soberPackage", "");
+        state.soberApp = root.optString("soberApp", "");
+        JSONArray soberWindows = root.optJSONArray("soberWindows");
+        if (soberWindows != null) {
+            for (int i = 0; i < soberWindows.length(); i++) {
+                JSONArray window = soberWindows.optJSONArray(i);
+                if (window != null && window.optLong(0) > 0 && window.optLong(1) > window.optLong(0)) {
+                    state.soberWindows.add(new FocusState.SoberWindow(window.optLong(0), window.optLong(1)));
+                }
+            }
+        }
 
         state.stepsPerReward = root.optInt("stepsPerReward", 2000);
         state.stepRewardMinutes = root.optInt("stepRewardMinutes", 5);
@@ -220,9 +234,10 @@ final class FocusStore {
             day.offlineEarnedMs = row.optLong("offlineEarned");
             day.todoEarnedMs = row.optLong("todoEarned");
             day.habitEarnedMs = row.optLong("habitEarned");
-            day.steps = row.optInt("steps");
-            day.manualSteps = row.optInt("manualSteps");
-            day.stepsClaimed = row.optInt("stepsClaimed");
+            int steps = Math.max(0, row.optInt("steps"));
+            int manualSteps = Math.max(0, Math.min(steps, row.optInt("manualSteps")));
+            day.steps = steps - manualSteps;
+            day.stepsClaimed = Math.max(0, Math.min(day.steps, row.optInt("stepsClaimed") - manualSteps));
             day.stepsEarnedMs = row.optLong("stepsEarned");
             day.rewardSpentMs = row.optLong("rewardSpent");
             day.configSpentMs = row.optLong("configSpent");
@@ -295,6 +310,10 @@ final class FocusStore {
                         .put("textSize", appearance.textSize()).put("text", appearance.text()));
             }
 
+            JSONArray soberWindows = new JSONArray();
+            for (FocusState.SoberWindow window : state.soberWindows) {
+                soberWindows.put(new JSONArray().put(window.start()).put(window.end()));
+            }
             JSONObject root = new JSONObject()
                     .put("credit", state.creditMs)
                     .put("creditRemainder", state.creditRemainder)
@@ -333,7 +352,12 @@ final class FocusStore {
                     .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
                     .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
                     .put("soberUntil", state.soberUntil)
-                    .put("soberPurpose", state.soberPurpose)
+                    .put("soberPausedMs", state.soberPausedMs)
+                    .put("soberVaultPaid", state.soberVaultPaid)
+                    .put("soberPaidOn", state.soberPaidOn)
+                    .put("soberPackage", state.soberPackage)
+                    .put("soberApp", state.soberApp)
+                    .put("soberWindows", soberWindows)
                     .put("stepsPerReward", state.stepsPerReward)
                     .put("stepRewardMinutes", state.stepRewardMinutes)
                     .put("stepBaselineDate", state.stepBaselineDate)
@@ -425,7 +449,6 @@ final class FocusStore {
                         .put("todoEarned", day.todoEarnedMs)
                         .put("habitEarned", day.habitEarnedMs)
                         .put("steps", day.steps)
-                        .put("manualSteps", day.manualSteps)
                         .put("stepsClaimed", day.stepsClaimed)
                         .put("stepsEarned", day.stepsEarnedMs)
                         .put("rewardSpent", day.rewardSpentMs)

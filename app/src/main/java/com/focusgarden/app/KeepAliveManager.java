@@ -265,7 +265,8 @@ final class KeepAliveManager {
         }
     }
 
-    private static Map<String, Long> queryTodayUsageTotals(Context context, java.util.Set<String> trackedPkgs) {
+    private static Map<String, Long> queryTodayUsageTotals(Context context, java.util.Set<String> trackedPkgs,
+                                                           java.util.List<FocusState.SoberWindow> soberWindows) {
         UsageStatsManager usm = context.getSystemService(UsageStatsManager.class);
         if (usm == null || trackedPkgs.isEmpty()) return java.util.Collections.emptyMap();
         long now = System.currentTimeMillis();
@@ -288,7 +289,8 @@ final class KeepAliveManager {
                     || type == UsageEvents.Event.ACTIVITY_STOPPED) {
                 Long started = activeStart.remove(pkg);
                 if (started != null && ev.getTimeStamp() > started) {
-                    totals.merge(pkg, ev.getTimeStamp() - started, Long::sum);
+                    long duration = FocusState.usageOutsideSober(started, ev.getTimeStamp(), soberWindows);
+                    if (duration > 0) totals.merge(pkg, duration, Long::sum);
                 }
             }
         }
@@ -297,7 +299,7 @@ final class KeepAliveManager {
 
     static boolean syncUsageStats(Context context, FocusState state) {
         if (!hasUsageStatsPermission(context) || state.rules.isEmpty()) return false;
-        Map<String, Long> totals = queryTodayUsageTotals(context, state.rules.keySet());
+        Map<String, Long> totals = queryTodayUsageTotals(context, state.rules.keySet(), state.soberWindows);
         return applyUsageTotals(context, state, totals);
     }
 
@@ -306,11 +308,13 @@ final class KeepAliveManager {
         FocusState state = FocusStore.get(app).state;
         if (state.rules.isEmpty()) return;
         java.util.Set<String> tracked = new java.util.HashSet<>(state.rules.keySet());
+        var soberWindows = new java.util.ArrayList<>(state.soberWindows);
         STATUS_IO.execute(() -> {
             if (!hasUsageStatsPermission(app)) return;
-            Map<String, Long> totals = queryTodayUsageTotals(app, tracked);
+            Map<String, Long> totals = queryTodayUsageTotals(app, tracked, soberWindows);
             if (totals.isEmpty()) return;
             MAIN.post(() -> {
+                if (!soberWindows.equals(state.soberWindows)) return;
                 if (applyUsageTotals(app, state, totals) && onUpdated != null) onUpdated.run();
             });
         });
