@@ -498,7 +498,34 @@ final class FocusStateCheck {
         equal(1, strip[46]);
         equal(2, strip[47]);
 
-        System.out.println("PASS: v1.5.1 15m base free cap, 0m default limited, strict locks, 35m sleep, debug & economy");
+        checkBlockAppearances();
+        System.out.println("PASS: economy, strict locks, and restriction appearance rotation");
+    }
+
+    private static void checkBlockAppearances() {
+        FocusState state = new FocusState();
+        String first = FocusState.DEFAULT_BLOCK_APPEARANCE;
+        String second = "11111111-1111-1111-1111-111111111111";
+        var configured = new FocusState.BlockAppearance(second, true, 10, 230, 80, "Take a break");
+        equal(30, configured.squarePercent());
+        equal(175, configured.fullZoom());
+        equal(48, configured.textSize());
+        equal(first, state.nextBlockAppearance().id());
+        state.blockAppearances.put(second, configured);
+        state.selectedBlockAppearance = second;
+        equal(configured, state.nextBlockAppearance());
+        state.rotateBlockAppearances = true;
+        equal(first, state.nextBlockAppearance().id());
+        state.lastBlockAppearance = first;
+        equal(configured, state.nextBlockAppearance());
+        equal(first, state.lastBlockAppearance);
+        state.lastBlockAppearance = second;
+        equal(first, state.nextBlockAppearance().id());
+        state.blockAppearances.remove(second);
+        equal(first, state.nextBlockAppearance().id());
+        state.rotateBlockAppearances = false;
+        equal(first, state.nextBlockAppearance().id());
+        equal(false, FocusState.BlockAppearance.validId("../escape"));
     }
 
     private static long at(String instant) {

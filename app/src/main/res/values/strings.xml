@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">留白专注</string>
     <string name="accessibility_label">留白专注 · 应用限制</string>
-    <string name="accessibility_description">只使用窗口变化事件的来源应用来统计你选中的学习或限制应用，并在达到限制时显示提醒。事件中的屏幕内容不会被读取。可随时在系统设置中关闭。</string>
+    <string name="accessibility_description">通过无障碍服务确认前台窗口所属的应用，用于统计学习和受限应用时长，以及显示拦截提示。留白专注只读取窗口和事件所属的应用包名，不读取界面文字或输入内容。可随时在系统设置中关闭。</string>
     <string name="focus_tile">留白专注</string>
     <string name="focus_widget">专注与结余</string>
     <string name="wallpaper_label">留白专注保活壁纸</string>

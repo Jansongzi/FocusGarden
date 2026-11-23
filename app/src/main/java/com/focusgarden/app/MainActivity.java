@@ -113,7 +113,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private String lastLogicDate = "";
     private boolean lastAccessibilityEnabled;
     private Dialog timerConfirmation;
-    private boolean pickingBlockImage;
+    private String requestedBlockImage;
+    private String loadingBlockImage;
     private Runnable blockImageChanged;
     private Boolean lastSoberBadgeActive;
     private Boolean lastOfflineCanClaim;
@@ -161,6 +162,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             dayOffset = saved.getInt("dayOffset");
             insightsMode = saved.getInt("insightsMode");
             setTimerTabMode(saved.getInt("timerTabMode", 0));
+            requestedBlockImage = saved.getString("requestedBlockImage");
         }
         topInset = statusBarFallback();
         getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
@@ -179,6 +181,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         out.putInt("dayOffset", dayOffset);
         out.putInt("insightsMode", insightsMode);
         out.putInt("timerTabMode", timerTabMode);
+        out.putString("requestedBlockImage", requestedBlockImage);
         super.onSaveInstanceState(out);
     }
 
@@ -245,15 +248,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_PICK_BLOCK_IMAGE) {
-            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            String id = requestedBlockImage;
+            requestedBlockImage = null;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null
+                    || !state.blockAppearances.containsKey(id)) {
                 finishBlockImageSelection();
                 return;
             }
             var uri = data.getData();
             var app = getApplicationContext();
-            pickingBlockImage = true;
+            loadingBlockImage = id;
             new Thread(() -> {
-                boolean saved = BlockImage.save(app, uri);
+                boolean saved = BlockImage.save(app, id, uri);
                 main.post(() -> {
                     if (!isDestroyed() && !isFinishing()) {
                         finishBlockImageSelection();
@@ -273,32 +279,42 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
     }
 
-    void pickBlockImage(Runnable onFinished) {
+    boolean pickBlockImage(String id, Runnable onFinished) {
+        if (blockImageBusy()) {
+            toast("正在载入图片");
+            return false;
+        }
         blockImageChanged = onFinished;
-        if (pickingBlockImage) return;
-        pickingBlockImage = true;
+        requestedBlockImage = id;
         try {
             startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
                     .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_PICK_BLOCK_IMAGE);
+            return true;
         } catch (android.content.ActivityNotFoundException e) {
             finishBlockImageSelection();
             toast("无法打开系统图片选择器");
+            return false;
         }
     }
 
-    void resetBlockImage(Runnable onChanged) {
-        if (pickingBlockImage) {
+    void resetBlockImage(String id, Runnable onChanged) {
+        if (blockImageBusy()) {
             toast("正在载入图片");
             return;
         }
-        BlockImage.clear(this);
+        BlockImage.clear(this, id);
         onChanged.run();
+    }
+
+    boolean blockImageBusy() {
+        return requestedBlockImage != null || loadingBlockImage != null;
     }
 
     private void finishBlockImageSelection() {
         Runnable callback = blockImageChanged;
         blockImageChanged = null;
-        pickingBlockImage = false;
+        requestedBlockImage = null;
+        loadingBlockImage = null;
         if (callback != null) callback.run();
     }
 

@@ -103,7 +103,7 @@ final class FocusStore {
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
         state.blockTheme = root.optInt("blockTheme", 0);
-        state.blockMessage = root.optString("blockMessage", "");
+        loadBlockAppearances(root);
 
         JSONArray earlySleep = root.optJSONArray("earlySleepDays");
         if (earlySleep != null) {
@@ -255,6 +255,30 @@ final class FocusStore {
         return o == null ? java.util.Collections.emptyIterator() : o.keys();
     }
 
+    private void loadBlockAppearances(JSONObject root) {
+        JSONArray entries = root.optJSONArray("blockAppearances");
+        state.blockAppearances.clear();
+        if (entries != null) {
+            for (int i = 0; i < entries.length(); i++) {
+                JSONObject item = entries.optJSONObject(i);
+                if (item == null) continue;
+                String id = item.optString("id", "");
+                if (!FocusState.BlockAppearance.validId(id)) continue;
+                state.blockAppearances.put(id, new FocusState.BlockAppearance(id, item.optBoolean("fullImage"),
+                        item.optInt("squarePercent", 50), item.optInt("fullZoom", 100),
+                        item.optInt("textSize", 27), item.optString("text", "")));
+            }
+        }
+        if (state.blockAppearances.isEmpty()) {
+            String id = FocusState.DEFAULT_BLOCK_APPEARANCE;
+            state.blockAppearances.put(id, FocusState.BlockAppearance.defaults(id, root.optString("blockMessage", "")));
+        }
+        state.rotateBlockAppearances = root.optBoolean("rotateBlockAppearances");
+        state.selectedBlockAppearance = root.optString("selectedBlockAppearance", FocusState.DEFAULT_BLOCK_APPEARANCE);
+        state.selectedBlockAppearance = state.selectedBlockAppearance().id();
+        state.lastBlockAppearance = root.optString("lastBlockAppearance", "");
+    }
+
     void save() {
         try {
             String cutoff = FocusState.today().minusDays(90).toString();
@@ -262,6 +286,14 @@ final class FocusStore {
             state.earlySleepDays.removeIf(date -> date.compareTo(cutoff) < 0);
             state.earlySleepFailed.removeIf(date -> date.compareTo(cutoff) < 0);
             state.disciplinedDays.removeIf(date -> date.compareTo(cutoff) < 0);
+
+            JSONArray blockAppearances = new JSONArray();
+            for (FocusState.BlockAppearance appearance : state.blockAppearances.values()) {
+                blockAppearances.put(new JSONObject()
+                        .put("id", appearance.id()).put("fullImage", appearance.fullImage())
+                        .put("squarePercent", appearance.squarePercent()).put("fullZoom", appearance.fullZoom())
+                        .put("textSize", appearance.textSize()).put("text", appearance.text()));
+            }
 
             JSONObject root = new JSONObject()
                     .put("credit", state.creditMs)
@@ -316,7 +348,10 @@ final class FocusStore {
                     .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
                     .put("blockTheme", state.blockTheme)
-                    .put("blockMessage", state.blockMessage)
+                    .put("blockAppearances", blockAppearances)
+                    .put("rotateBlockAppearances", state.rotateBlockAppearances)
+                    .put("selectedBlockAppearance", state.selectedBlockAppearance)
+                    .put("lastBlockAppearance", state.lastBlockAppearance)
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
                     .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
                     .put("heartbeats", new JSONArray(state.heartbeats))

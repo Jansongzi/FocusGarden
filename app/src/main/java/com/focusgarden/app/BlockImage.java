@@ -14,39 +14,41 @@ import java.io.IOException;
 import java.io.InputStream;
 
 final class BlockImage {
-    private static final int MAX_DIMENSION = 512;
+    private static final int MAX_DIMENSION = 1600;
 
     private BlockImage() {}
 
-    private static AtomicFile file(Context context) {
-        return new AtomicFile(new File(context.getFilesDir(), "restriction_image.png"));
+    private static AtomicFile file(Context context, String id) {
+        String name = FocusState.DEFAULT_BLOCK_APPEARANCE.equals(id)
+                ? "restriction_image.png" : "restriction_image_" + id + ".png";
+        return new AtomicFile(new File(context.getFilesDir(), name));
     }
 
-    static boolean hasCustom(Context context) {
-        return file(context).getBaseFile().isFile();
+    static boolean hasCustom(Context context, String id) {
+        return file(context, id).getBaseFile().isFile();
     }
 
-    static Bitmap load(Context context) {
-        try (InputStream input = open(context)) {
+    static Bitmap load(Context context, String id) {
+        try (InputStream input = open(context, id)) {
             return BitmapFactory.decodeStream(input);
         } catch (IOException e) {
             return null;
         }
     }
 
-    private static synchronized InputStream open(Context context) throws IOException {
-        return file(context).openRead();
+    private static synchronized InputStream open(Context context, String id) throws IOException {
+        return file(context, id).openRead();
     }
 
-    static synchronized void clear(Context context) {
-        file(context).delete();
+    static synchronized void clear(Context context, String id) {
+        file(context, id).delete();
     }
 
-    static boolean save(Context context, Uri uri) {
+    static boolean save(Context context, String id, Uri uri) {
         Bitmap bitmap = null;
         try {
             bitmap = decode(context, uri);
-            return bitmap != null && replace(context, bitmap);
+            return bitmap != null && replace(context, id, bitmap);
         } catch (IOException | RuntimeException e) {
             return false;
         } finally {
@@ -54,8 +56,8 @@ final class BlockImage {
         }
     }
 
-    private static synchronized boolean replace(Context context, Bitmap bitmap) throws IOException {
-        AtomicFile image = file(context);
+    private static synchronized boolean replace(Context context, String id, Bitmap bitmap) throws IOException {
+        AtomicFile image = file(context, id);
         FileOutputStream output = image.startWrite();
         try {
             if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) return false;

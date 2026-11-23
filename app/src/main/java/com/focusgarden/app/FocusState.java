@@ -241,11 +241,48 @@ final class FocusState {
 
     boolean timeAwarenessBar = true;
     int blockTheme = 0;
-    String blockMessage = "";
+    static final String DEFAULT_BLOCK_APPEARANCE = "default";
+    record BlockAppearance(String id, boolean fullImage, int squarePercent, int fullZoom, int textSize, String text) {
+        BlockAppearance {
+            squarePercent = Math.max(30, Math.min(90, squarePercent));
+            fullZoom = Math.max(100, Math.min(175, fullZoom));
+            textSize = Math.max(18, Math.min(48, textSize));
+        }
+
+        static BlockAppearance defaults(String id, String text) {
+            return new BlockAppearance(id, false, 50, 100, 27, text);
+        }
+
+        static boolean validId(String id) {
+            return DEFAULT_BLOCK_APPEARANCE.equals(id) || id.matches(
+                    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+        }
+    }
+
+    final Map<String, BlockAppearance> blockAppearances = new LinkedHashMap<>();
+    String selectedBlockAppearance = DEFAULT_BLOCK_APPEARANCE;
+    String lastBlockAppearance = "";
+    boolean rotateBlockAppearances;
 
     FocusState() {
+        blockAppearances.put(DEFAULT_BLOCK_APPEARANCE, BlockAppearance.defaults(DEFAULT_BLOCK_APPEARANCE, ""));
         seedDefaultRewardsIfNeeded();
         syncLegacyPercents();
+    }
+
+    BlockAppearance selectedBlockAppearance() {
+        BlockAppearance selected = blockAppearances.get(selectedBlockAppearance);
+        return selected != null ? selected : blockAppearances.values().iterator().next();
+    }
+
+    BlockAppearance nextBlockAppearance() {
+        if (!rotateBlockAppearances) return selectedBlockAppearance();
+        boolean next = false;
+        for (BlockAppearance appearance : blockAppearances.values()) {
+            if (next) return appearance;
+            next = appearance.id().equals(lastBlockAppearance);
+        }
+        return blockAppearances.values().iterator().next();
     }
 
     void syncLegacyPercents() {

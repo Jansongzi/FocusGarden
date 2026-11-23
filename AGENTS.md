@@ -1,6 +1,6 @@
 # 留白专注前端交接
 
-当前版本为 `1.5.2`（`versionCode=8`）。应用包名是 `com.focusgarden.app`，代码采用 Java 17 和 Android 原生 View，最低 API 27。项目根目录的 [README](README.md) 提供构建、规则验证和发布说明。界面截图及参照见 [设计参照](design/README.md)。
+当前版本为 `1.5.3`（`versionCode=9`）。应用包名是 `com.focusgarden.app`，代码采用 Java 17 和 Android 原生 View，最低 API 27。项目根目录的 [README](README.md) 提供构建、规则验证和发布说明。界面截图及参照见 [设计参照](design/README.md)。
 
 ## 界面入口
 
@@ -13,7 +13,8 @@
 | 保活与防关闭异步快照检测（`StatusSnapshot` / `refreshStatusAsync()`）、权限跳转、UsageStats 异步（04:00 逻辑日起点）与手动校准、自选壁纸持久化及服务同步 | 同级 `KeepAliveManager.java` |
 | 后台常驻保活前台服务（心跳记录、后台计步监听与可拖拽边缘吸附悬浮球） | 同级 `KeepAliveService.java`、`KeepAliveWallpaperService.java`、`FocusDeviceAdmin.java` |
 | 语录加载与无 API 速率限制阻断的网页优先更新检测/校验逻辑 | 同级 `QuoteBank.java`、`GitHubUpdates.java` |
-| 应用拦截页（自律锁定仅放行学习应用 / 睡眠时段强制全锁）、专注防关闭系统设置保护与顶部时间感知条 | 同级 `FocusService.java` 的 `showOverlay()`、`showSettingsGuardOverlay()`、`updateAwarenessBar()` |
+| 前台应用窗口识别、应用拦截、专注防关闭系统设置保护与顶部时间感知条 | 同级 `FocusService.java` |
+| 全屏图片与方图拦截界面、字号与图片尺寸、预览、多套界面顺序轮换 | 同级 `BlockAppearanceSettings.java`、`BlockScreen.java`、`BlockImage.java` |
 | 软件更新弹窗（统一定制卡片弹窗，`检查更新` 主入口） | 同级 `UpdatePanel.java` |
 | 桌面小组件与快捷设置磁贴（自律模式控制，禁止提前停倒计时） | 同级 `FocusWidget.java`、`FocusTile.java` 与 `app/src/main/res/layout/focus_widget.xml` |
 
