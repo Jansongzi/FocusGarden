@@ -228,6 +228,7 @@ final class FocusState {
     String soberPaidOn = "";
     String soberPackage = "";
     String soberApp = "";
+    final Map<String, String> soberApps = new LinkedHashMap<>();
     final List<SoberWindow> soberWindows = new ArrayList<>();
 
     int stepsPerReward = 2000;
@@ -392,8 +393,32 @@ final class FocusState {
                 : minute >= sleepStart || minute < sleepEnd;
     }
 
+    boolean hasSoberApps() {
+        return !soberApps.isEmpty() || !soberPackage.isEmpty();
+    }
+
+    boolean isSoberAllowed(String pkg) {
+        return pkg != null && !pkg.isEmpty() && (soberApps.containsKey(pkg) || pkg.equals(soberPackage));
+    }
+
+    String soberSummaryLabel() {
+        if (!soberApps.isEmpty()) return summarizeApps(soberApps);
+        return soberApp == null ? "" : soberApp;
+    }
+
+    private static String summarizeApps(Map<String, String> apps) {
+        if (apps == null || apps.isEmpty()) return "";
+        int size = apps.size();
+        var it = apps.values().iterator();
+        String first = it.next();
+        if (size == 1) return first;
+        String second = it.next();
+        if (size == 2) return first + "、" + second;
+        return first + "、" + second + " 等 " + size + " 个应用";
+    }
+
     boolean soberActive(long now) {
-        return !soberPackage.isEmpty() && soberUntil > now;
+        return hasSoberApps() && soberUntil > now;
     }
 
     long soberRemaining(long now) {
@@ -410,21 +435,43 @@ final class FocusState {
     }
 
     boolean startSober(String pkg, String label, int minutes, long now, ZoneId zone) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        Map<String, String> apps = new LinkedHashMap<>();
+        apps.put(pkg, (label == null || label.isEmpty()) ? pkg : label);
+        return startSober(apps, minutes, now, zone);
+    }
+
+    boolean startSober(Map<String, String> apps, int minutes, long now, ZoneId zone) {
         if (minutes < 1 || minutes > MAX_SOBER_MINUTES || soberPausedMs > 0) return false;
-        return chargeSober(pkg, label, minutes * MINUTE, now, zone, "开启清醒模式");
+        return chargeSober(apps, minutes * MINUTE, now, zone, "开启清醒模式");
     }
 
     boolean resumeSober(long now, ZoneId zone) {
-        return chargeSober(soberPackage, soberApp, soberPausedMs, now, zone, "继续清醒模式");
+        Map<String, String> apps = new LinkedHashMap<>(soberApps);
+        if (apps.isEmpty() && !soberPackage.isEmpty()) {
+            apps.put(soberPackage, soberApp.isEmpty() ? soberPackage : soberApp);
+        }
+        return chargeSober(apps, soberPausedMs, now, zone, "继续清醒模式");
     }
 
-    private boolean chargeSober(String pkg, String label, long duration, long now, ZoneId zone, String action) {
-        if (pkg == null || pkg.isEmpty() || duration <= 0 || !canStartSober(now, zone)) return false;
+    private boolean chargeSober(Map<String, String> apps, long duration, long now, ZoneId zone, String action) {
+        if (apps == null || apps.isEmpty() || duration <= 0 || !canStartSober(now, zone)) return false;
+        Map<String, String> cleaned = new LinkedHashMap<>();
+        for (var entry : apps.entrySet()) {
+            String pkg = entry.getKey();
+            if (pkg == null || pkg.isEmpty()) continue;
+            String label = entry.getValue();
+            cleaned.put(pkg, (label == null || label.isEmpty()) ? pkg : label);
+        }
+        if (cleaned.isEmpty()) return false;
         syncResetDay(now, zone);
         long paidFromVault = Math.max(0, duration - creditMs);
-        if (!spendTime(duration, "SOBER", action, label, now, zone)) return false;
-        soberPackage = pkg;
-        soberApp = label;
+        String summary = summarizeApps(cleaned);
+        if (!spendTime(duration, "SOBER", action, summary, now, zone)) return false;
+        soberApps.clear();
+        soberApps.putAll(cleaned);
+        soberPackage = cleaned.keySet().iterator().next();
+        soberApp = summary;
         soberVaultPaid = paidFromVault;
         soberPaidOn = date(now, zone);
         soberPausedMs = 0;
@@ -449,6 +496,7 @@ final class FocusState {
         soberPaidOn = "";
         soberPackage = "";
         soberApp = "";
+        soberApps.clear();
         return refunded;
     }
 
@@ -466,7 +514,7 @@ final class FocusState {
         creditMs += remaining - toVault;
         Day paidDay = days.get(soberPaidOn);
         if (paidDay != null) paidDay.spentMs = Math.max(0L, paidDay.spentMs - remaining);
-        logEvent(date(now, zone), now, "SOBER", action + " · 退回未用时长", soberApp, remaining);
+        logEvent(date(now, zone), now, "SOBER", action + " · 退回未用时长", soberSummaryLabel(), remaining);
         if (!soberWindows.isEmpty()) {
             int last = soberWindows.size() - 1;
             SoberWindow window = soberWindows.get(last);
@@ -479,7 +527,7 @@ final class FocusState {
     }
 
     boolean migrateLegacySober(long now, ZoneId zone) {
-        if (soberUntil == 0 || !soberPackage.isEmpty()) return false;
+        if (soberUntil == 0 || hasSoberApps()) return false;
         long remaining = soberRemaining(now);
         if (remaining > 0) {
             syncResetDay(now, zone);
@@ -855,7 +903,7 @@ final class FocusState {
             return (rule != null && rule.category == Category.LEARNING)
                     ? Restriction.NONE : Restriction.FOCUS;
         }
-        if (soberActive(now)) return soberPackage.equals(pkg) ? Restriction.NONE : Restriction.SOBER;
+        if (soberActive(now)) return isSoberAllowed(pkg) ? Restriction.NONE : Restriction.SOBER;
         if (rule == null || rule.category != Category.LIMITED) return Restriction.NONE;
         long free = freeRemainingMs(pkg, date(now, zone));
         return free <= 0 && creditMs == 0 ? Restriction.BUDGET : Restriction.NONE;

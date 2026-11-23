@@ -283,11 +283,38 @@ final class GardenUi {
         return row;
     }
 
+    static FrameLayout infoIcon(Activity activity, String title, String message) {
+        FrameLayout btn = new FrameLayout(activity);
+        btn.addView(iconView(activity, R.drawable.ic_info, 16, MUTED),
+                new FrameLayout.LayoutParams(dp(activity, 16), dp(activity, 16), Gravity.CENTER));
+        btn.setContentDescription(title.endsWith("说明") ? "查看" + title : "查看" + title + "说明");
+        btn.setOnClickListener(v -> {
+            tapHaptic(v);
+            infoDialog(activity, R.drawable.ic_info, BLUE_SOFT, BLUE, title, message, "知道了");
+        });
+        btn.setLayoutParams(new LinearLayout.LayoutParams(dp(activity, 24), dp(activity, 24)));
+        return btn;
+    }
+
+    static LinearLayout titleWithInfo(Activity activity, String title, int sp, int color,
+                                      String infoTitle, String infoMsg) {
+        LinearLayout line = row(activity);
+        line.addView(text(activity, title, sp, color, true));
+        space(line, 4);
+        line.addView(infoIcon(activity, infoTitle, infoMsg));
+        return line;
+    }
+
     static Dialog bottomSheet(Activity activity, String title, String subtitle, View body) {
-        return bottomSheet(activity, title, subtitle, body, true);
+        return bottomSheet(activity, title, subtitle, body, true, null, null);
     }
 
     static Dialog bottomSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody) {
+        return bottomSheet(activity, title, subtitle, body, scrollBody, null, null);
+    }
+
+    static Dialog bottomSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody,
+                              String infoTitle, String infoMsg) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
@@ -335,9 +362,17 @@ final class GardenUi {
 
         // Header
         LinearLayout head = row(activity);
-        head.setPadding(dp(activity, 20), dp(activity, 2), dp(activity, 16), dp(activity, 12));
+        head.setPadding(dp(activity, 20), dp(activity, 2), dp(activity, 20), dp(activity, 12));
         LinearLayout titles = column(activity);
-        titles.addView(text(activity, title, 19, INK, true));
+        if (infoTitle != null && !infoTitle.isEmpty()) {
+            LinearLayout titleRow = row(activity);
+            titleRow.addView(text(activity, title, 19, INK, true));
+            space(titleRow, 4);
+            titleRow.addView(infoIcon(activity, infoTitle, infoMsg));
+            titles.addView(titleRow);
+        } else {
+            titles.addView(text(activity, title, 19, INK, true));
+        }
         if (subtitle != null && !subtitle.isEmpty()) {
             gap(titles, 3);
             titles.addView(text(activity, subtitle, 12, MUTED, false));

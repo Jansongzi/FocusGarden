@@ -560,6 +560,44 @@ final class FocusStateCheck {
         equal(true, legacy.migrateLegacySober(noon, UTC));
         equal(5 * MINUTE, legacy.creditMs);
         equal(false, legacy.migrateLegacySober(noon, UTC));
+
+        // Multi-app Sober Mode: multiple purpose apps allowed (including restricted apps), all others & launcher blocked
+        var multi = new FocusState();
+        multi.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        multi.putRule("test.docs", new FocusState.Rule("Docs", LIMITED, 0));
+        multi.creditMs = 20 * MINUTE;
+        var chosen2 = new java.util.LinkedHashMap<String, String>();
+        chosen2.put(VIDEO, "Video");
+        chosen2.put("test.docs", "Docs");
+        equal(true, multi.startSober(chosen2, 10, noon, UTC));
+        equal(10 * MINUTE, multi.creditMs);
+        equal(true, multi.isSoberAllowed(VIDEO));
+        equal(true, multi.isSoberAllowed("test.docs"));
+        equal(false, multi.isSoberAllowed("com.android.launcher3"));
+        equal("Video、Docs", multi.soberSummaryLabel());
+        equal(NONE, multi.restriction(VIDEO, noon + MINUTE, UTC));
+        equal(NONE, multi.restriction("test.docs", noon + MINUTE, UTC));
+        equal(FocusState.Restriction.SOBER, multi.restriction("com.android.launcher3", noon + MINUTE, UTC));
+        equal(FocusState.Restriction.SOBER, multi.restriction("test.unconfigured", noon + MINUTE, UTC));
+
+        equal(7 * MINUTE, multi.pauseSober(noon + 3 * MINUTE, UTC));
+        equal(2, multi.soberApps.size());
+        equal(17 * MINUTE, multi.creditMs);
+        equal(true, multi.resumeSober(noon + 4 * MINUTE, UTC));
+        equal(10 * MINUTE, multi.creditMs);
+        equal(true, multi.isSoberAllowed("test.docs"));
+        equal(5 * MINUTE, multi.stopSober(noon + 6 * MINUTE, UTC));
+        equal(0, multi.soberApps.size());
+        equal("", multi.soberPackage);
+        equal("", multi.soberSummaryLabel());
+
+        var chosen3 = new java.util.LinkedHashMap<String, String>();
+        chosen3.put(VIDEO, "A");
+        chosen3.put("test.docs", "B");
+        chosen3.put(STUDY, "C");
+        multi.creditMs = 10 * MINUTE;
+        equal(true, multi.startSober(chosen3, 5, noon + 20 * MINUTE, UTC));
+        equal("A、B 等 3 个应用", multi.soberSummaryLabel());
     }
 
     private static long at(String instant) {

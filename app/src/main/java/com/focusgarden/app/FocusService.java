@@ -57,15 +57,18 @@ public final class FocusService extends AccessibilityService {
     private long lastHeartbeatSaved;
     private long lastUsageSync;
     private long settingsBypassUntil;
-    private final Set<String> exemptPackages = new HashSet<>();
+    private final Set<String> coreExemptPackages = new HashSet<>();
+    private final Set<String> launcherPackages = new HashSet<>();
+    private final Set<String> imePackages = new HashSet<>();
     private long lastExemptRefresh;
     private boolean usageDirty;
     private boolean screenListenerRegistered;
     private boolean refreshPending;
     private long recoverWindowUntil;
     private final SparseArray<String> windowPackages = new SparseArray<>();
-    private int resolvedWindowId = -1;
-    private String resolvedWindowPackage;
+    private String lastEventPackage;
+    private long lastEventAt;
+    private long soberLaunchGraceUntil;
     private final Runnable pulse = this::update;
     private final Runnable refreshWindows = () -> {
         refreshPending = false;
@@ -115,6 +118,29 @@ public final class FocusService extends AccessibilityService {
         if (connected != null) connected.requestWindowRefresh();
     }
 
+    static void syncNow() {
+        FocusService svc = connected;
+        if (svc == null) return;
+        svc.cancelRefresh();
+        svc.update();
+    }
+
+    static void prepareSoberLaunch(String pkg) {
+        FocusService svc = connected;
+        if (svc == null) return;
+        svc.beginSoberLaunch(pkg);
+    }
+
+    private void beginSoberLaunch(String pkg) {
+        hideOverlay();
+        blockedPackage = null;
+        soberLaunchGraceUntil = SystemClock.elapsedRealtime() + 2500L;
+        if (pkg != null && !pkg.isEmpty()) {
+            lastEventPackage = pkg;
+            lastEventAt = SystemClock.elapsedRealtime();
+        }
+    }
+
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         hideSoberPill();
@@ -124,16 +150,31 @@ public final class FocusService extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
         if (store == null) return;
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            if (event.getPackageName() != null && event.getWindowId() >= 0) {
+            CharSequence rawPkg = event.getPackageName();
+            String pkg = rawPkg == null ? null : rawPkg.toString();
+            if (pkg != null && event.getWindowId() >= 0) {
                 if (windowPackages.size() >= 64) windowPackages.clear();
-                windowPackages.put(event.getWindowId(), event.getPackageName().toString());
+                windowPackages.put(event.getWindowId(), pkg);
+            }
+            if (pkg != null && !isTransientEvent(event, pkg)) {
+                lastEventPackage = pkg;
+                lastEventAt = SystemClock.elapsedRealtime();
+                long now = System.currentTimeMillis();
+                if (store.state.soberActive(now) && store.state.isSoberAllowed(pkg)) {
+                    foreground = pkg;
+                    foregroundFocused = true;
+                    soberLaunchGraceUntil = Math.max(soberLaunchGraceUntil, SystemClock.elapsedRealtime() + 1200L);
+                    hideOverlay();
+                    cancelRefresh();
+                    requestWindowRefresh();
+                    return;
+                }
             }
             requestWindowRefresh();
         } else if (event.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             if (Build.VERSION.SDK_INT >= 28
                     && (event.getWindowChanges() & AccessibilityEvent.WINDOWS_CHANGE_REMOVED) != 0) {
                 windowPackages.remove(event.getWindowId());
-                if (resolvedWindowId == event.getWindowId()) resolvedWindowId = -1;
             }
             if (Build.VERSION.SDK_INT < 28 || (event.getWindowChanges()
                     & (AccessibilityEvent.WINDOWS_CHANGE_ADDED | AccessibilityEvent.WINDOWS_CHANGE_REMOVED
@@ -141,6 +182,28 @@ public final class FocusService extends AccessibilityService {
                 requestWindowRefresh();
             }
         }
+    }
+
+    private boolean isTransientEvent(AccessibilityEvent event, String pkg) {
+        if (isTransientSystemPackage(pkg)) return true;
+        CharSequence cls = event.getClassName();
+        if (cls != null) {
+            String name = cls.toString();
+            if (name.contains("Toast") || name.contains("PopupWindow")) return true;
+        }
+        return false;
+    }
+
+    private boolean isTransientSystemPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return true;
+        refreshExemptSets();
+        if (imePackages.contains(pkg)) return true;
+        return switch (pkg) {
+            case "android", "com.android.systemui",
+                    "com.android.permissioncontroller", "com.google.android.permissioncontroller",
+                    "com.android.intentresolver", "com.google.android.intentresolver" -> true;
+            default -> false;
+        };
     }
 
     private void requestWindowRefresh() {
@@ -156,47 +219,74 @@ public final class FocusService extends AccessibilityService {
         refreshPending = false;
     }
 
-    private String focusedApplicationPackage() {
-        // An input method, system panel or accessibility overlay can emit window events
-        // without changing the focused application underneath.
+    private String detectForegroundPackage() {
+        refreshExemptSets();
         var currentWindows = getWindows();
+        String focusedAppPkg = null;
+        String activeAppPkg = null;
+        String topLayerAppPkg = null;
+        int topLayer = Integer.MIN_VALUE;
         try {
             for (AccessibilityWindowInfo window : currentWindows) {
-                if (!window.isFocused()) continue;
-                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION || window.isInPictureInPictureMode()) return null;
-                String pkg = packageForWindow(window);
-                if (pkg == null) return null;
-                return switch (pkg) {
-                    case "android", "com.android.systemui", "com.android.permissioncontroller",
-                            "com.google.android.permissioncontroller" -> null;
-                    default -> pkg;
-                };
+                if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION || window.isInPictureInPictureMode()) {
+                    continue;
+                }
+                String pkg = resolveWindowPackage(window);
+                if (pkg == null || isTransientSystemPackage(pkg)) continue;
+                if (window.isFocused() && focusedAppPkg == null) focusedAppPkg = pkg;
+                if (window.isActive() && activeAppPkg == null) activeAppPkg = pkg;
+                if (window.getLayer() >= topLayer) {
+                    topLayer = window.getLayer();
+                    topLayerAppPkg = pkg;
+                }
             }
-            return null;
         } finally {
             if (Build.VERSION.SDK_INT < 33) {
                 for (AccessibilityWindowInfo window : currentWindows) window.recycle();
             }
         }
+        String chosen = focusedAppPkg != null ? focusedAppPkg
+                : activeAppPkg != null ? activeAppPkg : topLayerAppPkg;
+        if (chosen != null) return chosen;
+
+        AccessibilityNodeInfo activeRoot = getRootInActiveWindow();
+        if (activeRoot != null) {
+            try {
+                CharSequence name = activeRoot.getPackageName();
+                if (name != null) {
+                    String pkg = name.toString();
+                    if (!isTransientSystemPackage(pkg)) return pkg;
+                }
+            } finally {
+                activeRoot.recycle();
+            }
+        }
+
+        if (lastEventPackage != null && SystemClock.elapsedRealtime() - lastEventAt <= 1500L) {
+            return lastEventPackage;
+        }
+        return null;
     }
 
-    private String packageForWindow(AccessibilityWindowInfo window) {
+    private String resolveWindowPackage(AccessibilityWindowInfo window) {
         int id = window.getId();
-        if (id == resolvedWindowId) return resolvedWindowPackage;
         AccessibilityNodeInfo root = Build.VERSION.SDK_INT >= 33 ? window.getRoot(0) : window.getRoot();
         if (root != null) {
             try {
                 CharSequence name = root.getPackageName();
                 if (name != null) {
-                    resolvedWindowId = id;
-                    resolvedWindowPackage = name.toString();
-                    return resolvedWindowPackage;
+                    String pkg = name.toString();
+                    if (id >= 0) {
+                        if (windowPackages.size() >= 64) windowPackages.clear();
+                        windowPackages.put(id, pkg);
+                    }
+                    return pkg;
                 }
             } finally {
                 root.recycle();
             }
         }
-        return windowPackages.get(id);
+        return id >= 0 ? windowPackages.get(id) : null;
     }
 
     private boolean screenUsable() {
@@ -232,7 +322,7 @@ public final class FocusService extends AccessibilityService {
             if (SystemClock.elapsedRealtime() < recoverWindowUntil) main.postDelayed(pulse, 250);
             return;
         }
-        String focused = focusedApplicationPackage();
+        String focused = detectForegroundPackage();
         foregroundFocused = focused != null;
         if (focused != null && !focused.equals(foreground)) {
             flushUsage();
@@ -252,6 +342,23 @@ public final class FocusService extends AccessibilityService {
         }
         ZoneId zone = ZoneId.systemDefault();
         boolean sober = store.state.soberActive(now);
+        if (sober && SystemClock.elapsedRealtime() < soberLaunchGraceUntil) {
+            if (store.state.isSoberAllowed(foreground)) {
+                soberLaunchGraceUntil = 0L;
+            } else if (foreground == null || getPackageName().equals(foreground)
+                    || launcherPackages.contains(foreground) || coreExemptPackages.contains(foreground)) {
+                hideOverlay();
+                hideAwarenessBar();
+                hideSoberPill();
+                main.postDelayed(pulse, 150);
+                return;
+            } else {
+                soberLaunchGraceUntil = 0L;
+            }
+        } else if (!sober) {
+            soberLaunchGraceUntil = 0L;
+        }
+
         boolean focusGuardActive = store.state.guardSettingsDuringFocus
                 && (store.state.isDisciplineLocked(now) || store.state.bedtimeAt(now, zone))
                 && "com.android.settings".equals(foreground)
@@ -268,7 +375,7 @@ public final class FocusService extends AccessibilityService {
             return;
         }
 
-        boolean exempt = isSystemExempt(foreground) && !(sober && "com.android.settings".equals(foreground));
+        boolean exempt = isSystemExempt(foreground, sober);
         FocusState.Restriction reason = exempt
                 ? FocusState.Restriction.NONE
                 : store.state.restriction(foreground, now, zone);
@@ -298,7 +405,9 @@ public final class FocusService extends AccessibilityService {
             }
         }
 
-        if (sober && reason == FocusState.Restriction.NONE) updateSoberPill(now);
+        boolean showPill = sober && reason == FocusState.Restriction.NONE
+                && foreground != null && !getPackageName().equals(foreground);
+        if (showPill) updateSoberPill(now);
         else hideSoberPill();
 
         if (blockScreen != null) {
@@ -308,6 +417,7 @@ public final class FocusService extends AccessibilityService {
                         ? "自律正计时  " + GardenUi.countdown(state.offlineElapsed(now))
                         : "自律倒计时  " + GardenUi.countdown(state.remaining(now));
                 case BUDGET -> "可用时间已耗尽";
+                case SOBER -> "清醒模式进行中 · 剩余 " + SoberModeUi.clockText(state.soberRemaining(now));
                 default -> "";
             };
             blockScreen.setStatus(status);
@@ -320,11 +430,12 @@ public final class FocusService extends AccessibilityService {
         }
         boolean keepTicking = (foreground != null && (store.state.rules.containsKey(foreground)
                 || reason == FocusState.Restriction.FOCUS
-                || reason == FocusState.Restriction.BEDTIME))
+                || reason == FocusState.Restriction.BEDTIME
+                || reason == FocusState.Restriction.SOBER))
                 || sober
                 || store.state.isDisciplineLocked(now)
                 || store.state.bedtimeAt(now, zone);
-        if (focused == null && SystemClock.elapsedRealtime() < recoverWindowUntil) {
+        if (focused == null && (sober || SystemClock.elapsedRealtime() < recoverWindowUntil)) {
             main.postDelayed(pulse, 250);
         } else if (keepTicking) {
             main.postDelayed(pulse, 1000);
@@ -339,65 +450,80 @@ public final class FocusService extends AccessibilityService {
         }
     }
 
-    private boolean isSystemExempt(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return true;
-        if (pkg.equals(getPackageName())) return true;
+    private void refreshExemptSets() {
         long now = SystemClock.elapsedRealtime();
-        if (exemptPackages.isEmpty() || now - lastExemptRefresh >= 60_000L) {
-            exemptPackages.clear();
-            exemptPackages.add("android");
-            exemptPackages.add("com.android.systemui");
-            exemptPackages.add("com.android.settings");
-            exemptPackages.add("com.android.server.telecom");
-            exemptPackages.add("com.android.incallui");
-            exemptPackages.add("com.google.android.dialer");
-            exemptPackages.add("com.android.dialer");
-            exemptPackages.add("com.android.phone");
-            exemptPackages.add("com.android.packageinstaller");
-            exemptPackages.add("com.google.android.packageinstaller");
-            exemptPackages.add("com.android.permissioncontroller");
-            exemptPackages.add("com.google.android.permissioncontroller");
-            try {
-                PackageManager pm = getPackageManager();
-                Intent homeIntent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
-                for (ResolveInfo ri : pm.queryIntentActivities(homeIntent, 0)) {
-                    if (ri.activityInfo != null && ri.activityInfo.packageName != null) {
-                        exemptPackages.add(ri.activityInfo.packageName);
+        if (!coreExemptPackages.isEmpty() && now - lastExemptRefresh < 60_000L) return;
+        coreExemptPackages.clear();
+        launcherPackages.clear();
+        imePackages.clear();
+        coreExemptPackages.add("android");
+        coreExemptPackages.add("com.android.systemui");
+        coreExemptPackages.add("com.android.intentresolver");
+        coreExemptPackages.add("com.google.android.intentresolver");
+        coreExemptPackages.add("com.android.server.telecom");
+        coreExemptPackages.add("com.android.incallui");
+        coreExemptPackages.add("com.google.android.dialer");
+        coreExemptPackages.add("com.android.dialer");
+        coreExemptPackages.add("com.android.phone");
+        coreExemptPackages.add("com.android.packageinstaller");
+        coreExemptPackages.add("com.google.android.packageinstaller");
+        coreExemptPackages.add("com.android.permissioncontroller");
+        coreExemptPackages.add("com.google.android.permissioncontroller");
+        try {
+            PackageManager pm = getPackageManager();
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+            for (ResolveInfo ri : pm.queryIntentActivities(homeIntent, 0)) {
+                if (ri.activityInfo != null && ri.activityInfo.packageName != null) {
+                    launcherPackages.add(ri.activityInfo.packageName);
+                }
+            }
+            ResolveInfo defHome = pm.resolveActivity(homeIntent, 0);
+            if (defHome != null && defHome.activityInfo != null && defHome.activityInfo.packageName != null) {
+                launcherPackages.add(defHome.activityInfo.packageName);
+            }
+        } catch (Exception ignored) {}
+        try {
+            InputMethodManager imm = getSystemService(InputMethodManager.class);
+            if (imm != null) {
+                for (InputMethodInfo info : imm.getEnabledInputMethodList()) {
+                    if (info.getPackageName() != null) {
+                        imePackages.add(info.getPackageName());
+                        coreExemptPackages.add(info.getPackageName());
                     }
                 }
-                ResolveInfo defHome = pm.resolveActivity(homeIntent, 0);
-                if (defHome != null && defHome.activityInfo != null && defHome.activityInfo.packageName != null) {
-                    exemptPackages.add(defHome.activityInfo.packageName);
-                }
-            } catch (Exception ignored) {}
-            try {
-                InputMethodManager imm = getSystemService(InputMethodManager.class);
-                if (imm != null) {
-                    for (InputMethodInfo info : imm.getEnabledInputMethodList()) {
-                        if (info.getPackageName() != null) exemptPackages.add(info.getPackageName());
-                    }
-                }
-            } catch (Exception ignored) {}
-            try {
-                TelecomManager tm = getSystemService(TelecomManager.class);
-                if (tm != null && tm.getDefaultDialerPackage() != null) {
-                    exemptPackages.add(tm.getDefaultDialerPackage());
-                }
-            } catch (Exception ignored) {}
-            lastExemptRefresh = now;
-        }
-        return exemptPackages.contains(pkg);
+            }
+        } catch (Exception ignored) {}
+        try {
+            TelecomManager tm = getSystemService(TelecomManager.class);
+            if (tm != null && tm.getDefaultDialerPackage() != null) {
+                coreExemptPackages.add(tm.getDefaultDialerPackage());
+            }
+        } catch (Exception ignored) {}
+        lastExemptRefresh = now;
+    }
+
+    private boolean isSystemExempt(String pkg, boolean sober) {
+        if (pkg == null || pkg.isEmpty()) return !sober;
+        if (pkg.equals(getPackageName())) return true;
+        refreshExemptSets();
+        if (coreExemptPackages.contains(pkg)) return true;
+        if (!sober) return launcherPackages.contains(pkg) || "com.android.settings".equals(pkg);
+        return false;
     }
 
     private void updateSoberPill(long now) {
         String remaining = SoberModeUi.clockText(store.state.soberRemaining(now));
         if (soberPill == null) {
-            TextView pill = GardenUi.pillButton(this, remaining, 0xea173b31, GardenUi.CARD, 22, 38);
-            pill.setTypeface(android.graphics.Typeface.MONOSPACE);
+            TextView pill = GardenUi.pillButton(this, remaining, 0x994a5058, GardenUi.CARD, 19, 36);
+            pill.setBackground(GardenUi.touchCard(this, 0x994a5058, 0x44ffffff, 19));
+            pill.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
+            pill.setTextSize(13);
+            pill.setMinWidth(GardenUi.dp(this, 88));
+            pill.setPadding(GardenUi.dp(this, 14), 0, GardenUi.dp(this, 14), 0);
             pill.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)
                     .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)));
             WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                    GardenUi.dp(this, 104), GardenUi.dp(this, 38),
+                    WindowManager.LayoutParams.WRAP_CONTENT, GardenUi.dp(this, 36),
                     WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
             params.gravity = Gravity.TOP | Gravity.END;
@@ -547,7 +673,9 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void showOverlay(String pkg, FocusState.Restriction reason) {
-        boolean continuing = blockScreen != null && pkg.equals(blockedPackage);
+        boolean soberOverlay = reason == FocusState.Restriction.SOBER;
+        boolean continuing = blockScreen != null && pkg.equals(blockedPackage)
+                && soberOverlay == (showing == FocusState.Restriction.SOBER);
         blockedPackage = pkg;
         showing = reason;
         showingGuard = false;
@@ -560,9 +688,17 @@ public final class FocusService extends AccessibilityService {
         }
 
         FocusState.BlockAppearance appearance = state.nextBlockAppearance();
-        blockScreen = new BlockScreen(this, appearance, "返回桌面", () -> {
-            if (performGlobalAction(GLOBAL_ACTION_HOME)) requestWindowRefresh();
-        });
+        String buttonLabel = soberOverlay ? "返回清醒模式" : "返回桌面";
+        Runnable primaryAction = soberOverlay
+                ? () -> {
+                    startActivity(new Intent(this, MainActivity.class)
+                            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+                    requestWindowRefresh();
+                }
+                : () -> {
+                    if (performGlobalAction(GLOBAL_ACTION_HOME)) requestWindowRefresh();
+                };
+        blockScreen = new BlockScreen(this, appearance, buttonLabel, primaryAction);
         blockScreen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), state.blockTheme, reason));
         attachOverlay(blockScreen);
         if (overlay != null && state.rotateBlockAppearances && !appearance.id().equals(state.lastBlockAppearance)) {
@@ -634,8 +770,9 @@ public final class FocusService extends AccessibilityService {
         if (connected == this) connected = null;
         cancelRefresh();
         windowPackages.clear();
-        resolvedWindowId = -1;
-        resolvedWindowPackage = null;
+        lastEventPackage = null;
+        lastEventAt = 0L;
+        soberLaunchGraceUntil = 0L;
         if (store != null) accountUntilNow();
         flushUsage();
         foreground = null;

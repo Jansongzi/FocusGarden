@@ -28,10 +28,8 @@ final class BlockAppearanceSettings {
     static void show(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
         LinearLayout rotateRow = row(activity);
-        LinearLayout labels = column(activity);
-        labels.addView(text(activity, "轮换显示", 15, INK, true));
-        labels.addView(text(activity, "每次新拦截按列表顺序切换界面", 12, INK_SUB, false));
-        weight(rotateRow, labels);
+        weight(rotateRow, titleWithInfo(activity, "轮换显示", 15, INK,
+                "轮换显示说明", "开启后，每次触发新的应用拦截都会按下方列表顺序切换展示不同拦截界面。"));
         SwitchView rotation = new SwitchView(activity, state.rotateBlockAppearances);
         rotation.setContentDescription("轮换显示");
         rotation.setOnToggleListener(enabled -> {
@@ -186,7 +184,7 @@ final class BlockAppearanceSettings {
             gap(body, 8);
             body.addView(delete, -1, -2);
         }
-        Dialog sheet = bottomSheet(activity, title, "编辑拦截提示", body);
+        Dialog sheet = bottomSheet(activity, title, null, body);
         save.setOnClickListener(v -> {
             state.blockAppearances.put(id, draft.get());
             onChanged.run();

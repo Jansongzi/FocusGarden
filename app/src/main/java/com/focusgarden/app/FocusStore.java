@@ -87,6 +87,21 @@ final class FocusStore {
         state.soberPaidOn = root.optString("soberPaidOn", "");
         state.soberPackage = root.optString("soberPackage", "");
         state.soberApp = root.optString("soberApp", "");
+        state.soberApps.clear();
+        JSONObject soberAppsObj = root.optJSONObject("soberApps");
+        for (Iterator<String> i = keys(soberAppsObj); i.hasNext();) {
+            String pkg = i.next();
+            if (pkg == null || pkg.isEmpty()) continue;
+            String lbl = soberAppsObj.optString(pkg, "");
+            state.soberApps.put(pkg, lbl.isEmpty() ? pkg : lbl);
+        }
+        if (state.soberApps.isEmpty() && !state.soberPackage.isEmpty()) {
+            state.soberApps.put(state.soberPackage, state.soberApp.isEmpty() ? state.soberPackage : state.soberApp);
+        }
+        if (!state.soberApps.isEmpty()) {
+            state.soberPackage = state.soberApps.keySet().iterator().next();
+            state.soberApp = state.soberSummaryLabel();
+        }
         JSONArray soberWindows = root.optJSONArray("soberWindows");
         if (soberWindows != null) {
             for (int i = 0; i < soberWindows.length(); i++) {
@@ -356,7 +371,8 @@ final class FocusStore {
                     .put("soberVaultPaid", state.soberVaultPaid)
                     .put("soberPaidOn", state.soberPaidOn)
                     .put("soberPackage", state.soberPackage)
-                    .put("soberApp", state.soberApp)
+                    .put("soberApp", state.soberSummaryLabel())
+                    .put("soberApps", new JSONObject(state.soberApps))
                     .put("soberWindows", soberWindows)
                     .put("stepsPerReward", state.stepsPerReward)
                     .put("stepRewardMinutes", state.stepRewardMinutes)

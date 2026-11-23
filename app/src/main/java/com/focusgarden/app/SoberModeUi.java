@@ -7,6 +7,7 @@ import android.os.Build;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -19,6 +20,7 @@ import android.view.WindowManager;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -27,8 +29,10 @@ import android.widget.Toast;
 
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static com.focusgarden.app.GardenUi.*;
@@ -45,17 +49,47 @@ final class SoberModeUi {
 
         LinearLayout body = column(activity);
         body.addView(text(activity, "可支配 " + duration(state.totalSpendableMs()), 15, INK, true));
-        gap(body, 16);
+        gap(body, 14);
         body.addView(text(activity, "目的应用", 13, INK_SUB, true));
         gap(body, 8);
-        AppCatalog.Entry[] chosen = {null};
-        TextView app = secondaryButton(activity, "选择应用");
-        app.setOnClickListener(v -> pickApp(activity, entry -> {
-            chosen[0] = entry;
-            app.setText(entry.label());
-        }));
-        body.addView(app, -1, -2);
-        gap(body, 16);
+
+        final Map<String, String> chosen = new LinkedHashMap<>();
+        LinearLayout chosenPreview = row(activity);
+        chosenPreview.setPadding(0, 0, 0, dp(activity, 8));
+        chosenPreview.setVisibility(View.GONE);
+        TextView appBtn = secondaryButton(activity, "选择目的应用（可多选）");
+
+        Runnable refreshChosenUi = () -> {
+            if (chosen.isEmpty()) {
+                chosenPreview.setVisibility(View.GONE);
+                appBtn.setText("选择目的应用（可多选）");
+            } else {
+                chosenPreview.removeAllViews();
+                HorizontalScrollView scroller = new HorizontalScrollView(activity);
+                scroller.setHorizontalScrollBarEnabled(false);
+                LinearLayout icons = row(activity);
+                for (String pkg : chosen.keySet()) {
+                    icons.addView(appIcon(activity, pkg, 30, 8));
+                    space(icons, 6);
+                }
+                scroller.addView(icons);
+                chosenPreview.addView(scroller, new LinearLayout.LayoutParams(-1, -2));
+                chosenPreview.setVisibility(View.VISIBLE);
+                appBtn.setText("已选 " + chosen.size() + " 个应用 · 点击修改");
+            }
+        };
+
+        appBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            pickApps(activity, chosen, picked -> {
+                chosen.clear();
+                chosen.putAll(picked);
+                refreshChosenUi.run();
+            });
+        });
+        body.addView(chosenPreview);
+        body.addView(appBtn, -1, -2);
+        gap(body, 14);
 
         body.addView(text(activity, "使用时长（分钟）", 13, INK_SUB, true));
         gap(body, 8);
@@ -66,15 +100,17 @@ final class SoberModeUi {
         TextView start = primaryButton(activity, "开启清醒模式");
         body.addView(start, -1, -2);
 
-        Dialog sheet = bottomSheet(activity, "开启清醒模式", "先扣除等额时长，暂停或结束后退回未用时长。", body);
+        Dialog sheet = bottomSheet(activity, "开启清醒模式", null, body, true,
+                "清醒模式说明",
+                "开启时会先扣除等额可用时间（不足部分从储蓄罐扣除）；期间仅可使用所选目的应用，回到桌面或打开其他应用都会被拦截；暂停或提前结束会自动退回未用时长。");
         start.setOnClickListener(v -> {
-            if (chosen[0] == null) {
-                message(activity, "请先选择目的应用");
+            if (chosen.isEmpty()) {
+                message(activity, "请先选择至少一个目的应用");
                 return;
             }
             int count;
             try {
-                count = Integer.parseInt(minutes.getText().toString());
+                count = Integer.parseInt(minutes.getText().toString().trim());
             } catch (NumberFormatException e) {
                 count = 0;
             }
@@ -82,12 +118,22 @@ final class SoberModeUi {
                 minutes.setError("请输入 1 到 " + FocusState.MAX_SOBER_MINUTES + " 分钟");
                 return;
             }
-            var entry = chosen[0];
-            if (!canStart(activity, state) || purposeIntent(activity, entry.pkg()) == null) return;
-            if (!state.startSober(entry.pkg(), entry.label(), count, System.currentTimeMillis(), ZoneId.systemDefault())) {
+            if (!canStart(activity, state)) return;
+            Map<String, String> launchableApps = new LinkedHashMap<>();
+            for (var entry : chosen.entrySet()) {
+                if (activity.getPackageManager().getLaunchIntentForPackage(entry.getKey()) != null) {
+                    launchableApps.put(entry.getKey(), entry.getValue());
+                }
+            }
+            if (launchableApps.isEmpty()) {
+                message(activity, "所选应用当前无法打开");
+                return;
+            }
+            if (!state.startSober(launchableApps, count, System.currentTimeMillis(), ZoneId.systemDefault())) {
                 message(activity, "可支配时间不足");
                 return;
             }
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             sheet.dismiss();
             onChanged.run();
         });
@@ -107,60 +153,137 @@ final class SoberModeUi {
 
     private static void showPaused(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
-        body.addView(text(activity, state.soberApp + " · 剩余 " + clockText(state.soberPausedMs), 16, INK, true));
-        gap(body, 8);
-        body.addView(text(activity, "未用时长已退回，继续时重新扣除剩余时长。", 13, INK_SUB, false));
-        gap(body, 14);
+        if (!state.soberApps.isEmpty()) {
+            HorizontalScrollView scroller = new HorizontalScrollView(activity);
+            scroller.setHorizontalScrollBarEnabled(false);
+            LinearLayout icons = row(activity);
+            for (String pkg : state.soberApps.keySet()) {
+                icons.addView(appIcon(activity, pkg, 32, 9));
+                space(icons, 6);
+            }
+            scroller.addView(icons);
+            body.addView(scroller);
+            gap(body, 10);
+        }
+        body.addView(text(activity, state.soberSummaryLabel() + " · 剩余 " + clockText(state.soberPausedMs), 15, INK, true));
+        gap(body, 16);
         TextView resume = primaryButton(activity, "继续清醒模式");
         body.addView(resume, -1, -2);
         gap(body, 8);
         TextView finish = secondaryButton(activity, "结束清醒模式");
         body.addView(finish, -1, -2);
-        Dialog sheet = bottomSheet(activity, "清醒模式已暂停", null, body);
+        Dialog sheet = bottomSheet(activity, "清醒模式已暂停", null, body, true,
+                "清醒模式暂停说明",
+                "未用时长已退回余额，继续清醒模式时将重新扣除剩余时长。");
         resume.setOnClickListener(v -> {
-            if (!canStart(activity, state) || purposeIntent(activity, state.soberPackage) == null) return;
+            if (!canStart(activity, state)) return;
+            if (!hasAnyLaunchablePurposeApp(activity, state)) {
+                message(activity, "所选目的应用已不可用");
+                return;
+            }
             if (!state.resumeSober(System.currentTimeMillis(), ZoneId.systemDefault())) {
                 message(activity, "可支配时间不足");
                 return;
             }
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             sheet.dismiss();
             onChanged.run();
         });
         finish.setOnClickListener(v -> {
+            haptic(v, state.hapticFeedback, HapticKind.NAV);
             state.stopSober(System.currentTimeMillis(), ZoneId.systemDefault());
             sheet.dismiss();
             onChanged.run();
         });
     }
 
-    private static void pickApp(MainActivity activity, Consumer<AppCatalog.Entry> onPicked) {
+    private static boolean hasAnyLaunchablePurposeApp(MainActivity activity, FocusState state) {
+        if (!state.soberApps.isEmpty()) {
+            for (String pkg : state.soberApps.keySet()) {
+                if (activity.getPackageManager().getLaunchIntentForPackage(pkg) != null) return true;
+            }
+            return false;
+        }
+        return !state.soberPackage.isEmpty()
+                && activity.getPackageManager().getLaunchIntentForPackage(state.soberPackage) != null;
+    }
+
+    private static void pickApps(MainActivity activity, Map<String, String> initialSelected,
+                                 Consumer<Map<String, String>> onPicked) {
         List<AppCatalog.Entry> apps = AppCatalog.launchable(activity);
+        if (apps.isEmpty()) {
+            message(activity, "未找到可用应用");
+            return;
+        }
+        Map<String, String> selected = new LinkedHashMap<>();
+        for (AppCatalog.Entry e : apps) {
+            if (initialSelected.containsKey(e.pkg())) selected.put(e.pkg(), e.label());
+        }
+
         List<AppCatalog.Entry> filtered = new ArrayList<>(apps);
         LinearLayout body = column(activity);
         EditText search = styledInput(activity, "搜索应用名称", "", InputType.TYPE_CLASS_TEXT);
         body.addView(search, -1, -2);
+        gap(body, 10);
+
         ListView list = new ListView(activity);
         list.setDivider(null);
-        list.setSelector(touch(activity, SURFACE_SUBTLE, 12));
+        list.setDividerHeight(dp(activity, 8));
+        list.setVerticalScrollBarEnabled(false);
+
         BaseAdapter adapter = new BaseAdapter() {
             @Override public int getCount() { return filtered.size(); }
             @Override public AppCatalog.Entry getItem(int position) { return filtered.get(position); }
             @Override public long getItemId(int position) { return position; }
+
             @Override public View getView(int position, View view, ViewGroup parent) {
-                var entry = getItem(position);
+                AppCatalog.Entry entry = getItem(position);
+                boolean checked = selected.containsKey(entry.pkg());
                 LinearLayout row = row(activity);
-                row.setPadding(dp(activity, 8), dp(activity, 9), dp(activity, 8), dp(activity, 9));
-                row.addView(appIcon(activity, entry.pkg(), 34, 9));
+                row.setBackground(touchCard(activity, checked ? BLUE_SOFT : SURFACE_SUBTLE,
+                        checked ? BLUE : BORDER, 14));
+                row.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+                row.addView(appIcon(activity, entry.pkg(), 38, 10));
                 space(row, 12);
-                weight(row, text(activity, entry.label(), 15, INK, true));
+                TextView name = text(activity, entry.label(), 15, INK, true);
+                name.setSingleLine(true);
+                name.setEllipsize(TextUtils.TruncateAt.END);
+                weight(row, name);
+                space(row, 10);
+                if (checked) {
+                    row.addView(iconBadge(activity, R.drawable.ic_check, BLUE, CARD, 24, 14, 7));
+                } else {
+                    FrameLayout box = new FrameLayout(activity);
+                    box.setBackground(cardBg(activity, CARD, BORDER, 7));
+                    row.addView(box, dp(activity, 24), dp(activity, 24));
+                }
                 return row;
             }
         };
         list.setAdapter(adapter);
         body.addView(list, new LinearLayout.LayoutParams(-1, 0, 1f));
         TextView empty = text(activity, "未找到匹配的应用", 13, MUTED, false);
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(0, dp(activity, 24), 0, dp(activity, 24));
         body.addView(empty);
         list.setEmptyView(empty);
+        gap(body, 12);
+
+        TextView confirm = primaryButton(activity, "");
+        Runnable refreshConfirm = () -> {
+            if (selected.isEmpty()) {
+                confirm.setText("请勾选至少一个应用");
+                confirm.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
+                confirm.setTextColor(BLUE_DISABLED_TEXT);
+            } else {
+                confirm.setText("确认选择（" + selected.size() + " 个）");
+                confirm.setBackground(touch(activity, BLUE, 14));
+                confirm.setTextColor(CARD);
+            }
+        };
+        refreshConfirm.run();
+        body.addView(confirm, -1, -2);
+
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -173,9 +296,24 @@ final class SoberModeUi {
             }
             @Override public void afterTextChanged(Editable s) {}
         });
+
         Dialog picker = bottomSheet(activity, "选择目的应用", null, body, false);
         list.setOnItemClickListener((parent, row, position, id) -> {
-            onPicked.accept(filtered.get(position));
+            tapHaptic(row);
+            AppCatalog.Entry entry = filtered.get(position);
+            if (selected.containsKey(entry.pkg())) selected.remove(entry.pkg());
+            else selected.put(entry.pkg(), entry.label());
+            adapter.notifyDataSetChanged();
+            refreshConfirm.run();
+        });
+        confirm.setOnClickListener(v -> {
+            if (selected.isEmpty()) {
+                haptic(v, true, HapticKind.REJECT);
+                message(activity, "请先勾选至少一个目的应用");
+                return;
+            }
+            tapHaptic(v);
+            onPicked.accept(new LinkedHashMap<>(selected));
             picker.dismiss();
         });
     }
@@ -183,7 +321,16 @@ final class SoberModeUi {
     private static Intent purposeIntent(MainActivity activity, String pkg) {
         Intent intent = activity.getPackageManager().getLaunchIntentForPackage(pkg);
         if (intent == null) message(activity, "目的应用已不可用");
+        else intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;
+    }
+
+    private static void launchPurposeApp(MainActivity activity, String pkg) {
+        Intent launch = purposeIntent(activity, pkg);
+        if (launch != null) {
+            FocusService.prepareSoberLaunch(pkg);
+            activity.startActivity(launch);
+        }
     }
 
     private static void message(MainActivity activity, String text) {
@@ -230,6 +377,7 @@ final class SoberModeUi {
             dial.setGravity(Gravity.CENTER);
             center.addView(dial, -1, -2);
             layout.addView(center, new LinearLayout.LayoutParams(-1, 0, 1));
+
             LinearLayout tiles = row(activity);
             minutes = digit(activity);
             seconds = digit(activity);
@@ -238,17 +386,55 @@ final class SoberModeUi {
             tiles.addView(seconds, new LinearLayout.LayoutParams(0, dp(activity, 116), 1));
             dial.addView(tiles, -1, -2);
             gap(dial, 16);
-            TextView purpose = text(activity, state.soberApp, 23, CARD, true);
-            purpose.setGravity(Gravity.CENTER);
-            dial.addView(purpose, -1, -2);
-            gap(layout, 12);
 
-            TextView open = pillButton(activity, "打开目的应用", CARD, 0xff143b32, 20, 50);
-            open.setOnClickListener(v -> {
-                Intent launch = purposeIntent(activity, state.soberPackage);
-                if (launch != null) activity.startActivity(launch);
-            });
-            layout.addView(open, -1, -2);
+            Map<String, String> apps = new LinkedHashMap<>(state.soberApps);
+            if (apps.isEmpty() && !state.soberPackage.isEmpty()) {
+                apps.put(state.soberPackage, state.soberApp.isEmpty() ? state.soberPackage : state.soberApp);
+            }
+
+            if (apps.size() == 1) {
+                var single = apps.entrySet().iterator().next();
+                LinearLayout badge = column(activity);
+                badge.setGravity(Gravity.CENTER_HORIZONTAL);
+                badge.addView(appIcon(activity, single.getKey(), 48, 13));
+                gap(badge, 10);
+                TextView purpose = text(activity, single.getValue(), 22, CARD, true);
+                purpose.setGravity(Gravity.CENTER);
+                badge.addView(purpose, -1, -2);
+                dial.addView(badge, -1, -2);
+
+                gap(layout, 12);
+                TextView open = pillButton(activity, "打开 " + single.getValue(), CARD, 0xff143b32, 20, 50);
+                open.setOnClickListener(v -> launchPurposeApp(activity, single.getKey()));
+                layout.addView(open, -1, -2);
+            } else if (!apps.isEmpty()) {
+                TextView label = text(activity, "已选 " + apps.size() + " 个目的应用 · 点击进入", 14, PALE, false);
+                label.setGravity(Gravity.CENTER);
+                dial.addView(label, -1, -2);
+                gap(dial, 12);
+
+                LinearLayout appList = column(activity);
+                int idx = 0;
+                int total = apps.size();
+                for (var entry : apps.entrySet()) {
+                    LinearLayout item = row(activity);
+                    item.setBackground(touch(activity, 0xf2ffffff, 16));
+                    item.setPadding(dp(activity, 14), dp(activity, 11), dp(activity, 14), dp(activity, 11));
+                    item.addView(appIcon(activity, entry.getKey(), 34, 9));
+                    space(item, 12);
+                    TextView name = text(activity, entry.getValue(), 15, INK, true);
+                    name.setSingleLine(true);
+                    name.setEllipsize(TextUtils.TruncateAt.END);
+                    weight(item, name);
+                    space(item, 8);
+                    item.addView(iconView(activity, R.drawable.ic_chevron_right, 16, MUTED));
+                    item.setOnClickListener(v -> launchPurposeApp(activity, entry.getKey()));
+                    appList.addView(item, -1, -2);
+                    if (++idx < total) gap(appList, 8);
+                }
+                dial.addView(appList, -1, -2);
+            }
+
             gap(layout, 8);
             LinearLayout actions = row(activity);
             TextView pause = pillButton(activity, "暂停", 0xbb173b31, CARD, 16, 48);
