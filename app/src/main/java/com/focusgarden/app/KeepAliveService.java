@@ -239,7 +239,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
     @Override public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() != Sensor.TYPE_STEP_COUNTER || event.values.length == 0) return;
         FocusStore store = FocusStore.get(this);
-        if (store.state.recordStepCounter(event.values[0], LocalDate.now())) {
+        if (store.state.recordStepCounter(event.values[0], FocusState.today())) {
             store.save();
         }
     }

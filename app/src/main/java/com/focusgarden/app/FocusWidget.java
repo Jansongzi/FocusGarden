@@ -27,15 +27,17 @@ public final class FocusWidget extends AppWidgetProvider {
     }
 
     private static RemoteViews render(Context context) {
-        FocusState state = FocusStore.get(context).state;
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.focus_widget);
+        FocusStore store = FocusStore.get(context);
+        FocusState state = store.state;
         long now = System.currentTimeMillis();
+        if (state.syncResetDay(now, java.time.ZoneId.systemDefault())) store.save();
+        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.focus_widget);
         long remaining = state.remaining(now);
         boolean countingDown = !state.paused() && remaining > 0;
         boolean offlineUp = state.offlineRunning();
 
         String credit = "可用 " + GardenUi.duration(state.creditMs)
-                + (state.vaultMs > 0 ? " · 存 " + GardenUi.shortMinutes(state.vaultMs) + "分" : "");
+                + (state.vaultMs > 0 ? " · 存 " + GardenUi.shortMinutes(state.vaultMs) + "/120分" : "");
         if (countingDown) {
             views.setViewVisibility(R.id.widget_clock, View.VISIBLE);
             views.setViewVisibility(R.id.widget_value, View.GONE);

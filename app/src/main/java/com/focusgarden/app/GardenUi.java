@@ -274,7 +274,10 @@ final class GardenUi {
             chip.setPadding(dp(context, 10), dp(context, 6), dp(context, 10), dp(context, 6));
             chip.setBackground(touchCard(context, active ? BLUE_SOFT : SURFACE_SUBTLE,
                     active ? BLUE : BORDER, 12));
-            chip.setOnClickListener(v -> listener.accept(idx));
+            chip.setOnClickListener(v -> {
+                tapHaptic(v);
+                listener.accept(idx);
+            });
             weight(row, chip);
             if (i + 1 < labels.length) space(row, 8);
         }
@@ -314,7 +317,10 @@ final class GardenUi {
 
         FrameLayout close = iconBadge(activity, R.drawable.ic_close, SURFACE_SUBTLE, INK_SUB, 32, 16, 16);
         close.setContentDescription("关闭");
-        close.setOnClickListener(v -> dialog.dismiss());
+        close.setOnClickListener(v -> {
+            tapHaptic(v);
+            dialog.dismiss();
+        });
         head.addView(close);
         sheet.addView(head);
 
@@ -352,6 +358,131 @@ final class GardenUi {
                 .start();
         dialog.show();
         return dialog;
+    }
+
+    static Dialog cardDialog(Activity activity, int iconRes, int badgeBg, int badgeTint,
+                             String title, String message, View extraContent,
+                             String cancelLabel, String confirmLabel, boolean danger,
+                             boolean cancelable, Runnable onConfirm) {
+        Dialog dialog = new Dialog(activity);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCancelable(cancelable);
+        dialog.setCanceledOnTouchOutside(cancelable);
+
+        FrameLayout backdrop = new FrameLayout(activity);
+        int hPad = dp(activity, 24);
+        backdrop.setPadding(hPad, dp(activity, 24), hPad, dp(activity, 24));
+
+        LinearLayout card = column(activity);
+        card.setBackground(cardBg(activity, CARD, BORDER, 24));
+        card.setPadding(dp(activity, 20), dp(activity, 20), dp(activity, 20), dp(activity, 18));
+        elevate(card, 12);
+
+        LinearLayout header = row(activity);
+        if (iconRes != 0) {
+            header.addView(iconBadge(activity, iconRes, badgeBg, badgeTint, 38, 20, 12));
+            space(header, 12);
+        }
+        TextView titleView = text(activity, title, 18, INK, true);
+        weight(header, titleView);
+        card.addView(header);
+
+        int maxContentH = Math.max(dp(activity, 120),
+                Math.round(activity.getResources().getDisplayMetrics().heightPixels * 0.46f));
+        LinearLayout contentWrap = column(activity);
+        if (message != null && !message.isEmpty()) {
+            gap(contentWrap, 12);
+            TextView msgView = text(activity, message, 14, INK_SUB, false);
+            msgView.setLineSpacing(dp(activity, 2), 1.12f);
+            contentWrap.addView(msgView, -1, -2);
+        }
+        if (extraContent != null) {
+            gap(contentWrap, 12);
+            contentWrap.addView(extraContent, -1, -2);
+        }
+        if (contentWrap.getChildCount() > 0) {
+            ScrollView scroller = new MaxHeightScrollView(activity, maxContentH);
+            scroller.setVerticalScrollBarEnabled(false);
+            scroller.addView(contentWrap, -1, -2);
+            card.addView(scroller, -1, -2);
+        }
+
+        if (cancelLabel != null || confirmLabel != null) {
+            gap(card, 18);
+            LinearLayout btnRow = row(activity);
+            if (cancelLabel != null) {
+                TextView cancelBtn = pillButton(activity, cancelLabel, SURFACE_SUBTLE, INK_SUB, 13, 44);
+                cancelBtn.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 13));
+                cancelBtn.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    dialog.dismiss();
+                });
+                weight(btnRow, cancelBtn);
+                if (confirmLabel != null) space(btnRow, 10);
+            }
+            if (confirmLabel != null) {
+                TextView okBtn = pillButton(activity, confirmLabel,
+                        danger ? RED : BLUE, CARD, 13, 44);
+                okBtn.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    dialog.dismiss();
+                    if (onConfirm != null) onConfirm.run();
+                });
+                weight(btnRow, okBtn);
+            }
+            card.addView(btnRow);
+        }
+
+        backdrop.addView(card, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        dialog.setContentView(backdrop);
+
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawableResource(android.R.color.transparent);
+            win.setGravity(Gravity.CENTER);
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+            win.setDimAmount(0.45f);
+        }
+
+        card.setScaleX(0.94f);
+        card.setScaleY(0.94f);
+        card.setAlpha(0f);
+        card.animate()
+                .scaleX(1f)
+                .scaleY(1f)
+                .alpha(1f)
+                .setDuration(160)
+                .setInterpolator(new DecelerateInterpolator(1.6f))
+                .start();
+        dialog.show();
+        return dialog;
+    }
+
+    static Dialog infoDialog(Activity activity, int iconRes, int badgeBg, int badgeTint,
+                             String title, String message, String okLabel) {
+        return cardDialog(activity, iconRes, badgeBg, badgeTint, title, message, null,
+                null, okLabel == null ? "知道了" : okLabel, false, true, null);
+    }
+
+    static Dialog confirmDialog(Activity activity, int iconRes, int badgeBg, int badgeTint,
+                                String title, String message, String cancelLabel,
+                                String confirmLabel, boolean danger, Runnable onConfirm) {
+        return cardDialog(activity, iconRes, badgeBg, badgeTint, title, message, null,
+                cancelLabel == null ? "取消" : cancelLabel, confirmLabel, danger, true, onConfirm);
+    }
+
+    static Dialog loadingDialog(Activity activity, String title, String subtitle) {
+        LinearLayout extra = row(activity);
+        extra.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 14));
+        extra.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
+        android.widget.ProgressBar spinner = new android.widget.ProgressBar(activity);
+        spinner.setIndeterminateTintList(ColorStateList.valueOf(BLUE));
+        extra.addView(spinner, dp(activity, 26), dp(activity, 26));
+        space(extra, 12);
+        weight(extra, text(activity, subtitle == null || subtitle.isEmpty() ? "请稍候…" : subtitle,
+                14, INK_SUB, false));
+        return cardDialog(activity, R.drawable.ic_info, BLUE_SOFT, BLUE,
+                title, null, extra, null, null, false, false, null);
     }
 
     private static final class MaxHeightScrollView extends ScrollView {
@@ -401,7 +532,7 @@ final class GardenUi {
         return String.format(Locale.ROOT, "%02d:%02d", minutes / 60, minutes % 60);
     }
 
-    enum HapticKind { NAV, SWITCH, CONFIRM, REJECT }
+    enum HapticKind { TAP, NAV, SWITCH, CONFIRM, REJECT }
 
     private static long lastHapticMs;
     private static HapticKind lastHapticKind;
@@ -409,6 +540,12 @@ final class GardenUi {
     private static int hapticPriority(HapticKind kind) {
         if (kind == null) return 0;
         return (kind == HapticKind.CONFIRM || kind == HapticKind.REJECT) ? 2 : 1;
+    }
+
+    static void tapHaptic(View view) {
+        if (view != null) {
+            haptic(view, FocusStore.get(view.getContext()).state.hapticFeedback, HapticKind.TAP);
+        }
     }
 
     static void haptic(View view, boolean enabled, HapticKind kind) {
@@ -431,7 +568,7 @@ final class GardenUi {
                     int effectId = switch (kind) {
                         case CONFIRM -> VibrationEffect.EFFECT_CLICK;
                         case REJECT -> VibrationEffect.EFFECT_DOUBLE_CLICK;
-                        case NAV, SWITCH -> VibrationEffect.EFFECT_TICK;
+                        case TAP, NAV, SWITCH -> VibrationEffect.EFFECT_TICK;
                     };
                     vib.vibrate(VibrationEffect.createPredefined(effectId));
                 } else {
@@ -439,11 +576,13 @@ final class GardenUi {
                         case CONFIRM -> 14L;
                         case REJECT -> 22L;
                         case NAV, SWITCH -> 8L;
+                        case TAP -> 6L;
                     };
                     int amp = switch (kind) {
                         case CONFIRM -> 80;
                         case REJECT -> 110;
                         case NAV, SWITCH -> 40;
+                        case TAP -> 36;
                     };
                     vib.vibrate(VibrationEffect.createOneShot(ms, amp));
                 }

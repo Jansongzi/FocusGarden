@@ -30,20 +30,27 @@ public final class TimerReceiver extends BroadcastReceiver {
 
     static void advance(Context context, long now) {
         FocusStore store = FocusStore.get(context);
-        FocusState.Transition transition = store.state.advance(now, ZoneId.systemDefault());
-        if (transition == FocusState.Transition.NONE) return;
+        ZoneId zone = ZoneId.systemDefault();
+        long dayStart = FocusState.logicDayStartMs(FocusState.logicDate(now, zone), zone);
+        FocusState.Transition t1 = store.state.phaseEnd > 0 && store.state.phaseEnd < dayStart
+                ? store.state.advance(Math.min(now, dayStart - 1), zone)
+                : FocusState.Transition.NONE;
+        boolean resetChanged = store.state.syncResetDay(now, zone);
+        FocusState.Transition t2 = store.state.advance(now, zone);
+        FocusState.Transition transition = t2 != FocusState.Transition.NONE ? t2 : t1;
+        if (!resetChanged && transition == FocusState.Transition.NONE) return;
         store.save();
         KeepAliveManager.syncServiceState(context);
         schedule(context);
         FocusWidget.refresh(context);
-        notify(context, transition);
+        if (transition != FocusState.Transition.NONE) notify(context, transition);
     }
 
     static void schedule(Context context) {
         FocusState state = FocusStore.get(context).state;
         long now = System.currentTimeMillis();
-        long next = 0L;
-        if (state.phaseEnd > now) next = state.phaseEnd;
+        long next = FocusState.nextResetMs(now, ZoneId.systemDefault());
+        if (state.phaseEnd > now && (next == 0L || state.phaseEnd < next)) next = state.phaseEnd;
         if (state.soberUntil > now && (next == 0L || state.soberUntil < next)) {
             next = state.soberUntil;
         }

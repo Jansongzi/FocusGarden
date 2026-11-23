@@ -270,7 +270,7 @@ final class KeepAliveManager {
         if (usm == null || trackedPkgs.isEmpty()) return java.util.Collections.emptyMap();
         long now = System.currentTimeMillis();
         ZoneId zone = ZoneId.systemDefault();
-        long dayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli();
+        long dayStart = FocusState.logicDayStartMs(FocusState.logicDate(now, zone), zone);
         UsageEvents events = usm.queryEvents(dayStart, now);
         if (events == null) return java.util.Collections.emptyMap();
 

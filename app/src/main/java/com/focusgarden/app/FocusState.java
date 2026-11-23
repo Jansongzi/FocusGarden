@@ -22,11 +22,47 @@ final class FocusState {
     static final int MANUAL_STEP_DAILY_LIMIT = 4000;
     static final int EARLY_SLEEP_PRE_WINDOW_MIN = 60;
     static final int EARLY_SLEEP_POST_WINDOW_MIN = 240;
+    static final int RESET_HOUR = 4;
+    static final long MAX_VAULT_MS = 120 * MINUTE;
+    static final int MODE_SWITCH_COST_MINUTES = 30;
+    static final int INDULGENT_UNLOCK_DAYS = 5;
 
     enum Category { LEARNING, LIMITED }
     enum Restriction { NONE, FOCUS, BEDTIME, BUDGET }
     enum Transition { NONE, BREAK, WORK, FINISHED }
     enum CheckInResult { OK, OK_CAPPED, ALREADY_DONE, COOLING_DOWN, NOT_FOUND }
+    enum ModeSwitchCheck { OK, SAME_MODE, INDULGENT_LOCKED, DAILY_LIMIT_REACHED, INSUFFICIENT_TIME }
+
+    enum RateMode {
+        RELAXED("松弛模式", "1:1", "每专注 / 离线 1 分钟兑换 1 分钟", 1, 1, 100),
+        EASY("简单模式", "2:1", "每专注 / 离线 2 分钟兑换 1 分钟", 1, 2, 50),
+        MODERATE("适中模式", "3:1", "每专注 / 离线 3 分钟兑换 1 分钟", 1, 3, 33),
+        SCHOLAR("学霸模式", "4:1", "每专注 / 离线 4 分钟兑换 1 分钟", 1, 4, 25),
+        INDULGENT("放纵模式", "1:2", "每专注 / 离线 1 分钟兑换 2 分钟 · 累计自律 5 天解锁", 2, 1, 200);
+
+        final String label;
+        final String ratioText;
+        final String summary;
+        final int rewardNum;
+        final int rewardDen;
+        final int approxPercent;
+
+        RateMode(String label, String ratioText, String summary, int rewardNum, int rewardDen, int approxPercent) {
+            this.label = label;
+            this.ratioText = ratioText;
+            this.summary = summary;
+            this.rewardNum = rewardNum;
+            this.rewardDen = rewardDen;
+            this.approxPercent = approxPercent;
+        }
+
+        static RateMode fromName(String name) {
+            if (name != null) {
+                for (RateMode m : values()) if (m.name().equals(name)) return m;
+            }
+            return MODERATE;
+        }
+    }
 
     record Rule(String label, Category category, int dailyMinutes) {}
     record Event(long timeMs, String type, String title, String detail, long deltaMs) {}
@@ -145,9 +181,18 @@ final class FocusState {
     long vaultMs;
     int vaultStepMinutes = 10;
 
-    int learningPercent = 30;
-    int focusPercent = 25;
-    int offlinePercent = 35;
+    RateMode rateMode = RateMode.MODERATE;
+    RateMode previousMode = RateMode.MODERATE;
+    String modeSwitchDate = "";
+    String indulgentActiveDate = "";
+    int indulgentPasses;
+    int disciplinedProgress;
+    final TreeSet<String> disciplinedDays = new TreeSet<>();
+    String lastResetDate = "";
+
+    int learningPercent = 33;
+    int focusPercent = 33;
+    int offlinePercent = 33;
     boolean bedtime;
     int sleepStart = 23 * 60;
     int sleepEnd = 7 * 60;
@@ -194,6 +239,80 @@ final class FocusState {
 
     FocusState() {
         seedDefaultRewardsIfNeeded();
+        syncLegacyPercents();
+    }
+
+    void syncLegacyPercents() {
+        learningPercent = rateMode.approxPercent;
+        focusPercent = rateMode.approxPercent;
+        offlinePercent = rateMode.approxPercent;
+    }
+
+    static LocalDate logicDate(long now, ZoneId zone) {
+        ZonedDateTime zdt = Instant.ofEpochMilli(now).atZone(zone);
+        return zdt.getHour() < RESET_HOUR ? zdt.toLocalDate().minusDays(1) : zdt.toLocalDate();
+    }
+
+    static LocalDate today() {
+        return logicDate(System.currentTimeMillis(), ZoneId.systemDefault());
+    }
+
+    static String date(long now, ZoneId zone) {
+        return logicDate(now, zone).toString();
+    }
+
+    static long logicDayStartMs(LocalDate logicDay, ZoneId zone) {
+        return logicDay.atTime(RESET_HOUR, 0).atZone(zone).toInstant().toEpochMilli();
+    }
+
+    static long nextResetMs(long now, ZoneId zone) {
+        return logicDayStartMs(logicDate(now, zone).plusDays(1), zone);
+    }
+
+    boolean syncResetDay(long now, ZoneId zone) {
+        String todayStr = date(now, zone);
+        if (lastResetDate == null || lastResetDate.isEmpty()) {
+            lastResetDate = todayStr;
+            if (rateMode == RateMode.INDULGENT
+                    && !indulgentActiveDate.isEmpty()
+                    && !todayStr.equals(indulgentActiveDate)) {
+                restoreFromIndulgent(todayStr, now);
+                return true;
+            }
+            return false;
+        }
+        if (todayStr.equals(lastResetDate)) {
+            if (rateMode == RateMode.INDULGENT
+                    && !indulgentActiveDate.isEmpty()
+                    && !todayStr.equals(indulgentActiveDate)) {
+                restoreFromIndulgent(todayStr, now);
+                return true;
+            }
+            return false;
+        }
+        long clearedCredit = creditMs;
+        creditMs = 0L;
+        creditRemainder = 0;
+        if (rateMode == RateMode.INDULGENT && !todayStr.equals(indulgentActiveDate)) {
+            restoreFromIndulgent(todayStr, now);
+        }
+        lastResetDate = todayStr;
+        if (clearedCredit > 0L) {
+            logEvent(todayStr, now, "RESET", "凌晨 04:00 每日重置",
+                    "已清零上一周期剩余可用 " + (clearedCredit / MINUTE) + " 分钟（储蓄罐已保留）", -clearedCredit);
+        }
+        return true;
+    }
+
+    private void restoreFromIndulgent(String dateStr, long now) {
+        RateMode restore = (previousMode == null || previousMode == RateMode.INDULGENT)
+                ? RateMode.MODERATE : previousMode;
+        rateMode = restore;
+        indulgentActiveDate = "";
+        creditRemainder = 0;
+        syncLegacyPercents();
+        logEvent(dateStr, now, "CONFIG", "放纵模式到期恢复",
+                "次日 04:00 自动恢复为" + restore.label + "（" + restore.ratioText + "）", 0L);
     }
 
     void seedDefaultRewardsIfNeeded() {
@@ -205,10 +324,6 @@ final class FocusState {
         rewards.put("default_show", new Reward("default_show", "安心看一集剧 / 打一局游戏", 45, 0, 0L));
         rewards.put("default_treat", new Reward("default_treat", "买一件心愿小物 / 加餐", 90, 0, 0L));
         rewardsSeeded = true;
-    }
-
-    static String date(long now, ZoneId zone) {
-        return Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString();
     }
 
     Day day(String date) {
@@ -263,6 +378,7 @@ final class FocusState {
 
     boolean spendTime(long costMs, String eventType, String title, String detail, long now, ZoneId zone) {
         if (costMs <= 0L) return true;
+        syncResetDay(now, zone);
         if (totalSpendableMs() < costMs) return false;
         long fromCredit = Math.min(creditMs, costMs);
         creditMs -= fromCredit;
@@ -275,6 +391,98 @@ final class FocusState {
         else if ("CONFIG".equals(eventType)) stats.configSpentMs += costMs;
         logEvent(d, now, eventType, title, detail, -costMs);
         return true;
+    }
+
+    boolean hasSwitchedModeToday(long now, ZoneId zone) {
+        return date(now, zone).equals(modeSwitchDate);
+    }
+
+    ModeSwitchCheck checkSwitchMode(RateMode target, long now, ZoneId zone) {
+        if (target == null || target == rateMode) return ModeSwitchCheck.SAME_MODE;
+        if (target == RateMode.INDULGENT) return ModeSwitchCheck.INDULGENT_LOCKED;
+        syncResetDay(now, zone);
+        if (hasSwitchedModeToday(now, zone)) return ModeSwitchCheck.DAILY_LIMIT_REACHED;
+        if (!canAfford(MODE_SWITCH_COST_MINUTES * MINUTE)) return ModeSwitchCheck.INSUFFICIENT_TIME;
+        return ModeSwitchCheck.OK;
+    }
+
+    ModeSwitchCheck switchMode(RateMode target, long now, ZoneId zone) {
+        ModeSwitchCheck status = checkSwitchMode(target, now, zone);
+        if (status != ModeSwitchCheck.OK) return status;
+        String detail = rateMode.label + "（" + rateMode.ratioText + "）→ " + target.label + "（" + target.ratioText + "）";
+        if (!spendTime(MODE_SWITCH_COST_MINUTES * MINUTE, "CONFIG", "切换时间获取模式", detail, now, zone)) {
+            return ModeSwitchCheck.INSUFFICIENT_TIME;
+        }
+        rateMode = target;
+        previousMode = target;
+        indulgentActiveDate = "";
+        modeSwitchDate = date(now, zone);
+        creditRemainder = 0;
+        syncLegacyPercents();
+        return ModeSwitchCheck.OK;
+    }
+
+    boolean isDisciplinedDayQualified(String logicDateStr) {
+        if (logicDateStr == null || logicDateStr.isEmpty()) return false;
+        LocalDate ld;
+        try {
+            ld = LocalDate.parse(logicDateStr);
+        } catch (Exception e) {
+            return false;
+        }
+        if (earlySleepFailedOn(ld)) return false;
+        Day d = days.get(logicDateStr);
+        if (d == null) return false;
+        boolean hasPositive = (d.focusMs + d.offlineMs + d.learningMs >= 10 * MINUTE)
+                || d.checkIns > 0
+                || earlySleepChecked(ld)
+                || d.todoEarnedMs > 0
+                || d.stepsEarnedMs > 0;
+        return hasPositive && disciplineScore(ld) >= 80;
+    }
+
+    boolean evaluateDisciplinedDay(long now, ZoneId zone) {
+        String d = date(now, zone);
+        if (disciplinedDays.contains(d) || !isDisciplinedDayQualified(d)) return false;
+        disciplinedDays.add(d);
+        disciplinedProgress++;
+        boolean unlocked = false;
+        while (disciplinedProgress >= INDULGENT_UNLOCK_DAYS) {
+            disciplinedProgress -= INDULGENT_UNLOCK_DAYS;
+            indulgentPasses++;
+            unlocked = true;
+            logEvent(d, now, "HABIT", "解锁放纵模式机会",
+                    "累计自律满 " + INDULGENT_UNLOCK_DAYS + " 天 · 获得 1 天放纵模式（1:2）", 0L);
+        }
+        return unlocked;
+    }
+
+    boolean canActivateIndulgent(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        return rateMode != RateMode.INDULGENT && indulgentPasses > 0;
+    }
+
+    boolean activateIndulgentMode(long now, ZoneId zone) {
+        if (!canActivateIndulgent(now, zone)) return false;
+        previousMode = rateMode == RateMode.INDULGENT ? RateMode.MODERATE : rateMode;
+        rateMode = RateMode.INDULGENT;
+        indulgentActiveDate = date(now, zone);
+        indulgentPasses--;
+        creditRemainder = 0;
+        syncLegacyPercents();
+        logEvent(indulgentActiveDate, now, "CONFIG", "开启放纵模式（1:2）",
+                "明日凌晨 04:00 自动恢复为" + previousMode.label, 0L);
+        return true;
+    }
+
+    long convertByMode(long effortMs) {
+        if (effortMs <= 0L) return 0L;
+        return (effortMs * rateMode.rewardNum) / rateMode.rewardDen;
+    }
+
+    long effortConsumedForReward(long rewardMs) {
+        if (rewardMs <= 0L) return 0L;
+        return (rewardMs * rateMode.rewardDen + rateMode.rewardNum - 1L) / rateMode.rewardNum;
     }
 
     void addReward(String id, String title, int costMinutes) {
@@ -413,6 +621,7 @@ final class FocusState {
     }
 
     long stopOffline(long now, ZoneId zone) {
+        syncResetDay(now, zone);
         long elapsed = offlineElapsed(now);
         offlineStartMs = 0L;
         offlineAccumulatedMs = 0L;
@@ -423,6 +632,7 @@ final class FocusState {
         if (elapsed >= MINUTE) {
             logEvent(d, now, "OFFLINE", "完成离线锁机", "累计离线 " + (elapsed / MINUTE) + " 分钟", 0L);
         }
+        evaluateDisciplinedDay(now, zone);
         return elapsed;
     }
 
@@ -433,15 +643,15 @@ final class FocusState {
 
     long claimableOfflineMs(long now) {
         long total = offlineUnredeemedMs + offlineElapsed(now);
-        return (total * Math.max(0, offlinePercent)) / 100L;
+        return convertByMode(total);
     }
 
     long claimOffline(long now, ZoneId zone) {
+        syncResetDay(now, zone);
         long live = offlineElapsed(now);
-        int pct = Math.max(0, offlinePercent);
         long totalRaw = offlineUnredeemedMs + live;
-        if (pct == 0 || totalRaw < MIN_OFFLINE_CLAIM_MS) return 0L;
-        long rewardMs = (totalRaw * pct) / 100L;
+        if (totalRaw < MIN_OFFLINE_CLAIM_MS) return 0L;
+        long rewardMs = convertByMode(totalRaw);
         long granted = (rewardMs / MINUTE) * MINUTE;
         if (granted <= 0L) return 0L;
         String d = date(now, zone);
@@ -451,12 +661,14 @@ final class FocusState {
             if (offlineStartMs > 0L) offlineStartMs = now;
             offlineAccumulatedMs = 0L;
         }
-        long consumed = Math.min(offlineUnredeemedMs, (granted * 100L + pct - 1) / pct);
+        long consumed = Math.min(offlineUnredeemedMs, effortConsumedForReward(granted));
         offlineUnredeemedMs = Math.max(0L, offlineUnredeemedMs - consumed);
         Day stats = day(d);
         stats.offlineEarnedMs += granted;
         grant(stats, granted);
-        logEvent(d, now, "OFFLINE", "兑换离线锁机奖励", "结算 " + (consumed / MINUTE) + " 分钟离线", granted);
+        logEvent(d, now, "OFFLINE", "兑换离线锁机奖励",
+                rateMode.label + " " + rateMode.ratioText + " · 结算 " + (consumed / MINUTE) + " 分钟离线", granted);
+        evaluateDisciplinedDay(now, zone);
         return granted;
     }
 
@@ -473,12 +685,13 @@ final class FocusState {
     long syncUsageTotal(String pkg, long reportedTotalMs, long now, ZoneId zone) {
         Rule rule = rules.get(pkg);
         if (rule == null || reportedTotalMs <= 0L) return 0L;
-        String d = date(now, zone);
+        syncResetDay(now, zone);
+        LocalDate logicToday = logicDate(now, zone);
+        String d = logicToday.toString();
         long recorded = used(pkg, d);
         long delta = reportedTotalMs - recorded;
         if (delta < 5_000L) return 0L;
-        long dayStart = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-                .atStartOfDay(zone).toInstant().toEpochMilli();
+        long dayStart = logicDayStartMs(logicToday, zone);
         long start = Math.max(dayStart, now - delta);
         long actual = Math.max(0L, now - start);
         if (actual <= 0L) return 0L;
@@ -491,16 +704,17 @@ final class FocusState {
         if (rule == null || end <= start) return;
         long cursor = start;
         while (cursor < end) {
-            ZonedDateTime time = Instant.ofEpochMilli(cursor).atZone(zone);
-            LocalDate date = time.toLocalDate();
-            long nextDay = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
-            long sliceEnd = Math.min(end, nextDay);
+            syncResetDay(cursor, zone);
+            LocalDate logicDay = logicDate(cursor, zone);
+            long nextReset = logicDayStartMs(logicDay.plusDays(1), zone);
+            long sliceEnd = Math.min(end, nextReset);
             long duration = sliceEnd - cursor;
-            Day stats = day(date.toString());
+            Day stats = day(logicDay.toString());
             long previous = stats.usage.getOrDefault(pkg, 0L);
             if (rule.category == Category.LEARNING) {
                 stats.learningMs += duration;
-                stats.learningEarnedMs += earn(stats, duration, learningPercent);
+                stats.learningEarnedMs += earnByMode(stats, duration);
+                if (stats.learningMs >= 10 * MINUTE) evaluateDisciplinedDay(sliceEnd - 1, zone);
             } else {
                 long free = Math.max(0, rule.dailyMinutes * MINUTE - previous);
                 long unlocked = Math.max(0, Math.min(sliceEnd, soberUntil) - cursor);
@@ -515,10 +729,10 @@ final class FocusState {
         }
     }
 
-    private long earn(Day day, long duration, int percent) {
-        long numerator = duration * percent + creditRemainder;
-        creditRemainder = (int) (numerator % 100);
-        long value = numerator / 100;
+    private long earnByMode(Day day, long duration) {
+        long numerator = duration * rateMode.rewardNum + creditRemainder;
+        creditRemainder = (int) (numerator % rateMode.rewardDen);
+        long value = numerator / rateMode.rewardDen;
         grant(day, value);
         return value;
     }
@@ -528,16 +742,28 @@ final class FocusState {
         day.earnedMs += value;
     }
 
+    long vaultRemainingCapacityMs() {
+        return Math.max(0L, MAX_VAULT_MS - vaultMs);
+    }
+
+    boolean isVaultFull() {
+        return vaultMs >= MAX_VAULT_MS;
+    }
+
     long depositToVault(long requestedMs, long now, ZoneId zone) {
-        long moved = Math.max(0L, Math.min(requestedMs, creditMs));
+        syncResetDay(now, zone);
+        long cap = vaultRemainingCapacityMs();
+        long moved = Math.max(0L, Math.min(requestedMs, Math.min(creditMs, cap)));
         if (moved <= 0L) return 0L;
         creditMs -= moved;
         vaultMs += moved;
-        logEvent(date(now, zone), now, "VAULT", "存入时间储蓄罐", "转为永久储备时长", -moved);
+        logEvent(date(now, zone), now, "VAULT", "存入时间储蓄罐",
+                "已存 " + (vaultMs / MINUTE) + " / " + (MAX_VAULT_MS / MINUTE) + " 分钟", -moved);
         return moved;
     }
 
     long withdrawFromVault(long requestedMs, long now, ZoneId zone) {
+        syncResetDay(now, zone);
         long moved = Math.max(0L, Math.min(requestedMs, vaultMs));
         if (moved <= 0L) return 0L;
         vaultMs -= moved;
@@ -564,13 +790,14 @@ final class FocusState {
     CheckInResult checkInWithResult(String id, long now, ZoneId zone) {
         Habit habit = habits.get(id);
         if (habit == null) return CheckInResult.NOT_FOUND;
-        String date = date(now, zone);
+        syncResetDay(now, zone);
+        LocalDate today = logicDate(now, zone);
+        String date = today.toString();
         if (habit.checkIns.contains(date)) return CheckInResult.ALREADY_DONE;
         if (!habitMature(habit, now)) return CheckInResult.COOLING_DOWN;
         habit.checkIns.add(date);
         Day day = day(date);
         day.checkIns++;
-        LocalDate today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
         long capLeft = remainingHabitCapMs(today);
         long raw = Math.max(0, habit.rewardMinutes) * MINUTE;
         long reward = Math.min(raw, capLeft);
@@ -578,6 +805,7 @@ final class FocusState {
         if (reward > 0L) grant(day, reward);
         String detail = "连续 " + habit.streak(today) + " 天" + (reward < raw ? " · 今日习惯已达上限" : "");
         logEvent(date, now, "HABIT", "习惯打卡 · " + habit.name, detail, reward);
+        evaluateDisciplinedDay(now, zone);
         return reward < raw ? CheckInResult.OK_CAPPED : CheckInResult.OK;
     }
 
@@ -625,6 +853,7 @@ final class FocusState {
 
     boolean claimEarlySleep(long now, ZoneId zone) {
         if (!isEarlySleepClaimWindow(now, zone)) return false;
+        syncResetDay(now, zone);
         String date = date(now, zone);
         if (earlySleepFailed.contains(date) || !earlySleepDays.add(date)) return false;
         long reward = Math.max(0, earlySleepRewardMinutes) * MINUTE;
@@ -632,6 +861,7 @@ final class FocusState {
         grant(day, reward);
         String target = String.format(Locale.ROOT, "%02d:%02d", sleepStart / 60, sleepStart % 60);
         logEvent(date, now, "SLEEP", "早睡挑战打卡", "目标入睡 " + target, reward);
+        evaluateDisciplinedDay(now, zone);
         return true;
     }
 
@@ -681,7 +911,8 @@ final class FocusState {
     }
 
     long claimTodos(long now, ZoneId zone) {
-        LocalDate today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
+        syncResetDay(now, zone);
+        LocalDate today = logicDate(now, zone);
         long capLeft = remainingTodoCapMs(today);
         if (capLeft <= 0L) return 0L;
         long total = 0L;
@@ -697,11 +928,12 @@ final class FocusState {
             count++;
         }
         if (count == 0 || total <= 0L) return 0L;
-        String d = date(now, zone);
+        String d = today.toString();
         Day day = day(d);
         day.todoEarnedMs += total;
         grant(day, total);
         logEvent(d, now, "TODO", "领取待办奖励", "完成 " + count + " 项待办", total);
+        evaluateDisciplinedDay(now, zone);
         return total;
     }
 
@@ -760,7 +992,8 @@ final class FocusState {
     }
 
     long claimSteps(long now, ZoneId zone) {
-        LocalDate today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
+        syncResetDay(now, zone);
+        LocalDate today = logicDate(now, zone);
         int units = claimableStepUnits(today);
         if (units <= 0) return 0L;
         Day day = day(today.toString());
@@ -772,6 +1005,7 @@ final class FocusState {
         day.stepsEarnedMs += reward;
         grant(day, reward);
         logEvent(today.toString(), now, "STEPS", "兑换步数奖励", "兑换 " + consumed + " 步", reward);
+        evaluateDisciplinedDay(now, zone);
         return reward;
     }
 
@@ -814,6 +1048,8 @@ final class FocusState {
         if (earlySleepChecked(today)) score += 4;
         if (earlySleepFailedOn(today)) score -= 6;
         if (d.steps >= 3000) score += 2;
+        if (d.todoEarnedMs > 0) score += 3;
+        if (d.stepsEarnedMs > 0) score += 3;
         score -= (int) Math.min(48, d.limitedMs / (5 * MINUTE) * 3);
         return Math.max(0, Math.min(100, score));
     }
@@ -859,12 +1095,15 @@ final class FocusState {
         while (phaseEnd > 0 && phaseEnd <= now) {
             long completedAt = phaseEnd;
             if (!inBreak) {
+                syncResetDay(completedAt, zone);
                 String d = date(completedAt, zone);
                 Day stats = day(d);
                 stats.focusMs += phaseDuration;
-                long earned = earn(stats, phaseDuration, focusPercent);
+                long earned = earnByMode(stats, phaseDuration);
                 stats.focusEarnedMs += earned;
-                logEvent(d, completedAt, "FOCUS", "完成一次专注", (phaseDuration / MINUTE) + " 分钟专注", earned);
+                logEvent(d, completedAt, "FOCUS", "完成一次专注",
+                        rateMode.label + " " + rateMode.ratioText + " · " + (phaseDuration / MINUTE) + " 分钟专注", earned);
+                evaluateDisciplinedDay(completedAt, zone);
                 if (--roundsLeft == 0) {
                     cancel();
                     return Transition.FINISHED;

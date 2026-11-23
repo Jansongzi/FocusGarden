@@ -47,7 +47,7 @@ final class QuoteBank {
 
     static Quote quoteForOffset(Context context, int offset) {
         List<Quote> list = quotes(context);
-        int daySeed = LocalDate.now().getDayOfYear();
+        int daySeed = FocusState.today().getDayOfYear();
         int idx = Math.floorMod(daySeed + offset, list.size());
         return list.get(idx);
     }

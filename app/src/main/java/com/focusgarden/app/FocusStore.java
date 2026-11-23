@@ -36,9 +36,27 @@ final class FocusStore {
         state.vaultMs = root.optLong("vaultMs");
         state.vaultStepMinutes = root.optInt("vaultStepMinutes", 10);
 
-        state.learningPercent = root.optInt("learningPercent", 30);
-        state.focusPercent = root.optInt("focusPercent", 25);
-        state.offlinePercent = root.optInt("offlinePercent", 35);
+        state.rateMode = FocusState.RateMode.fromName(
+                root.optString("rateMode", FocusState.RateMode.MODERATE.name()));
+        state.previousMode = FocusState.RateMode.fromName(
+                root.optString("previousMode", state.rateMode.name()));
+        if (state.previousMode == FocusState.RateMode.INDULGENT) {
+            state.previousMode = FocusState.RateMode.MODERATE;
+        }
+        state.modeSwitchDate = root.optString("modeSwitchDate", "");
+        state.indulgentActiveDate = root.optString("indulgentActiveDate", "");
+        state.indulgentPasses = Math.max(0, root.optInt("indulgentPasses", 0));
+        state.disciplinedProgress = Math.max(0, root.optInt("disciplinedProgress", 0));
+        state.lastResetDate = root.optString("lastResetDate", "");
+        state.syncLegacyPercents();
+
+        JSONArray discDays = root.optJSONArray("disciplinedDays");
+        if (discDays != null) {
+            for (int i = 0; i < discDays.length(); i++) {
+                String d = discDays.optString(i);
+                if (!d.isEmpty()) state.disciplinedDays.add(d);
+            }
+        }
         state.bedtime = root.optBoolean("bedtime");
         state.sleepStart = root.optInt("sleepStart", 1380);
         state.sleepEnd = root.optInt("sleepEnd", 420);
@@ -235,16 +253,25 @@ final class FocusStore {
 
     void save() {
         try {
-            String cutoff = LocalDate.now().minusDays(90).toString();
+            String cutoff = FocusState.today().minusDays(90).toString();
             state.days.keySet().removeIf(date -> date.compareTo(cutoff) < 0);
             state.earlySleepDays.removeIf(date -> date.compareTo(cutoff) < 0);
             state.earlySleepFailed.removeIf(date -> date.compareTo(cutoff) < 0);
+            state.disciplinedDays.removeIf(date -> date.compareTo(cutoff) < 0);
 
             JSONObject root = new JSONObject()
                     .put("credit", state.creditMs)
                     .put("creditRemainder", state.creditRemainder)
                     .put("vaultMs", state.vaultMs)
                     .put("vaultStepMinutes", state.vaultStepMinutes)
+                    .put("rateMode", state.rateMode.name())
+                    .put("previousMode", state.previousMode.name())
+                    .put("modeSwitchDate", state.modeSwitchDate)
+                    .put("indulgentActiveDate", state.indulgentActiveDate)
+                    .put("indulgentPasses", state.indulgentPasses)
+                    .put("disciplinedProgress", state.disciplinedProgress)
+                    .put("disciplinedDays", new JSONArray(state.disciplinedDays))
+                    .put("lastResetDate", state.lastResetDate)
                     .put("learningPercent", state.learningPercent)
                     .put("focusPercent", state.focusPercent)
                     .put("offlinePercent", state.offlinePercent)
