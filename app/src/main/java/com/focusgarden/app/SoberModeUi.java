@@ -52,7 +52,7 @@ final class SoberModeUi {
         if (spendableMin < 1) {
             gap(body, 10);
             TextView tip = text(activity,
-                    "可用时长与储蓄罐均不足 1 分钟，请先通过自律模式或打卡赚取时长后再开启清醒模式",
+                    "可用时长与储蓄罐均不足 1 分钟，请先通过自律模式或打卡赚取时长后再开启目的模式",
                     12, AMBER, false);
             tip.setBackground(cardBg(activity, AMBER_SOFT, 0xfff5dcb1, 12));
             tip.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
@@ -108,12 +108,12 @@ final class SoberModeUi {
         body.addView(minutes, -1, -2);
         gap(body, 14);
         TextView start = spendableMin >= 1
-                ? primaryButton(activity, "开启清醒模式")
+                ? primaryButton(activity, "开启目的模式")
                 : pillButton(activity, "可支配时间不足", BLUE_DISABLED_BG, BLUE_DISABLED_TEXT, 14, 46);
         body.addView(start, -1, -2);
 
-        Dialog sheet = bottomSheet(activity, "开启清醒模式", null, body, true,
-                "清醒模式说明",
+        Dialog sheet = bottomSheet(activity, "开启目的模式", null, body, true,
+                "目的模式说明",
                 "开启时会先扣除等额可用时间（不足部分从储蓄罐扣除）；期间仅可使用所选目的应用，回到桌面或打开其他应用都会被拦截；暂停或提前结束会自动退回未用时长。");
         start.setOnClickListener(v -> {
             if (chosen.isEmpty()) {
@@ -179,14 +179,14 @@ final class SoberModeUi {
         }
         body.addView(text(activity, state.soberSummaryLabel() + " · 剩余 " + clockText(state.soberPausedMs), 15, INK, true));
         gap(body, 16);
-        TextView resume = primaryButton(activity, "继续清醒模式");
+        TextView resume = primaryButton(activity, "继续目的模式");
         body.addView(resume, -1, -2);
         gap(body, 8);
-        TextView finish = secondaryButton(activity, "结束清醒模式");
+        TextView finish = secondaryButton(activity, "结束目的模式");
         body.addView(finish, -1, -2);
-        Dialog sheet = bottomSheet(activity, "清醒模式已暂停", null, body, true,
-                "清醒模式暂停说明",
-                "未用时长已退回余额，继续清醒模式时将重新扣除剩余时长。");
+        Dialog sheet = bottomSheet(activity, "目的模式已暂停", null, body, true,
+                "目的模式暂停说明",
+                "未用时长已退回余额，继续目的模式时将重新扣除剩余时长。");
         resume.setOnClickListener(v -> {
             if (!canStart(activity, state)) return;
             if (!hasAnyLaunchablePurposeApp(activity, state)) {
@@ -378,7 +378,7 @@ final class SoberModeUi {
                 return insets;
             });
             layout.setPadding(gutter, gutter, gutter, gutter);
-            layout.addView(text(activity, "清醒模式", 20, CARD, true));
+            layout.addView(text(activity, "目的模式", 20, CARD, true));
 
             ScrollView center = new ScrollView(activity);
             center.setFillViewport(true);

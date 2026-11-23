@@ -36,12 +36,14 @@ public final class TimerReceiver extends BroadcastReceiver {
                 ? store.state.advance(Math.min(now, dayStart - 1), zone)
                 : FocusState.Transition.NONE;
         boolean resetChanged = store.state.syncResetDay(now, zone);
+        boolean sleepCompleted = store.state.evaluateEarlySleep(now, zone);
         boolean soberPaused = store.state.soberActive(now) && store.state.bedtimeAt(now, zone)
                 && store.state.pauseSober(now, zone) > 0;
         boolean soberExpired = store.state.expireSober(now, zone);
         FocusState.Transition t2 = store.state.advance(now, zone);
         FocusState.Transition transition = t2 != FocusState.Transition.NONE ? t2 : t1;
-        if (!resetChanged && !soberPaused && !soberExpired && transition == FocusState.Transition.NONE) return;
+        if (!resetChanged && !sleepCompleted && !soberPaused && !soberExpired
+                && transition == FocusState.Transition.NONE) return;
         store.save();
         KeepAliveManager.syncServiceState(context);
         schedule(context);
@@ -56,6 +58,9 @@ public final class TimerReceiver extends BroadcastReceiver {
         if (state.phaseEnd > now && (next == 0L || state.phaseEnd < next)) next = state.phaseEnd;
         if (state.soberUntil > now && (next == 0L || state.soberUntil < next)) {
             next = state.soberUntil;
+        }
+        if (state.bedtime && state.sleepTargetEndMs > now && (next == 0L || state.sleepTargetEndMs < next)) {
+            next = state.sleepTargetEndMs;
         }
         PendingIntent pending = PendingIntent.getBroadcast(context, 0, new Intent(context, TimerReceiver.class),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);

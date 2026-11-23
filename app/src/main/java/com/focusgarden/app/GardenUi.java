@@ -315,6 +315,11 @@ final class GardenUi {
 
     static Dialog bottomSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody,
                               String infoTitle, String infoMsg) {
+        return bottomSheet(activity, title, subtitle, body, scrollBody, infoTitle, infoMsg, null);
+    }
+
+    static Dialog bottomSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody,
+                              String infoTitle, String infoMsg, View leadingAction) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
@@ -363,6 +368,10 @@ final class GardenUi {
         // Header
         LinearLayout head = row(activity);
         head.setPadding(dp(activity, 20), dp(activity, 2), dp(activity, 20), dp(activity, 12));
+        if (leadingAction != null) {
+            head.addView(leadingAction);
+            space(head, 10);
+        }
         LinearLayout titles = column(activity);
         if (infoTitle != null && !infoTitle.isEmpty()) {
             LinearLayout titleRow = row(activity);

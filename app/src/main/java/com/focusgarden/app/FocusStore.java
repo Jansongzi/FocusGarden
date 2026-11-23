@@ -40,13 +40,16 @@ final class FocusStore {
                 root.optString("rateMode", FocusState.RateMode.MODERATE.name()));
         state.previousMode = FocusState.RateMode.fromName(
                 root.optString("previousMode", state.rateMode.name()));
-        if (state.previousMode == FocusState.RateMode.INDULGENT) {
+        if (!state.previousMode.isNormal()) {
             state.previousMode = FocusState.RateMode.MODERATE;
         }
         state.modeSwitchDate = root.optString("modeSwitchDate", "");
         state.indulgentActiveDate = root.optString("indulgentActiveDate", "");
-        state.indulgentPasses = Math.max(0, root.optInt("indulgentPasses", 0));
+        state.layFlatActiveDate = root.optString("layFlatActiveDate", "");
+        state.indulgentPasses = Math.max(0, Math.min(FocusState.MAX_INDULGENT_CARDS, root.optInt("indulgentPasses", 0)));
+        state.layFlatCards = Math.max(0, Math.min(FocusState.MAX_LAY_FLAT_CARDS, root.optInt("layFlatCards", 0)));
         state.disciplinedProgress = Math.max(0, root.optInt("disciplinedProgress", 0));
+        state.totalDisciplineSessions = Math.max(0, root.optInt("totalDisciplineSessions", 0));
         state.lastResetDate = root.optString("lastResetDate", "");
         state.syncLegacyPercents();
 
@@ -60,6 +63,11 @@ final class FocusStore {
         state.bedtime = root.optBoolean("bedtime");
         state.sleepStart = root.optInt("sleepStart", 1380);
         state.sleepEnd = root.optInt("sleepEnd", 420);
+        state.sleepTargetEndMs = Math.max(0L, root.optLong("sleepTargetEndMs", 0L));
+        if (state.bedtime && state.sleepTargetEndMs == 0L) {
+            state.sleepTargetEndMs = state.computeNextSleepEndMs(
+                    System.currentTimeMillis(), java.time.ZoneId.systemDefault());
+        }
         state.earlySleepRewardMinutes = root.optInt("earlySleepRewardMinutes", 10);
         state.todoDailyCapMinutes = root.optInt("todoDailyCapMinutes", 30);
         state.habitDailyCapMinutes = root.optInt("habitDailyCapMinutes", 25);
@@ -196,8 +204,24 @@ final class FocusStore {
             }
             state.habits.put(id, habit);
         }
+        JSONObject abstinences = root.optJSONObject("abstinences");
+        for (Iterator<String> i = keys(abstinences); i.hasNext();) {
+            String id = i.next();
+            JSONObject row = abstinences.getJSONObject(id);
+            state.abstinences.put(id, new FocusState.Abstinence(
+                    id,
+                    row.optString("name", ""),
+                    row.optLong("startedMs", System.currentTimeMillis()),
+                    row.optInt("targetHours", 24),
+                    row.optInt("rewardMinutes", 30),
+                    row.optInt("completedCount", 0),
+                    row.optInt("relapseCount", 0),
+                    row.optLong("longestMs", 0L),
+                    row.optBoolean("rewardClaimed", false)
+            ));
+        }
         if (state.learningRuleCount() > 0) state.freeLearningSlotUsed = true;
-        if (!state.habits.isEmpty()) state.freeHabitSlotUsed = true;
+        if (!state.habits.isEmpty() || !state.abstinences.isEmpty()) state.freeHabitSlotUsed = true;
 
         JSONObject todos = root.optJSONObject("todos");
         for (Iterator<String> i = keys(todos); i.hasNext();) {
@@ -279,6 +303,13 @@ final class FocusStore {
                 }
             }
         }
+        if (state.totalDisciplineSessions == 0) {
+            int fallbackSessions = 0;
+            for (FocusState.Day day : state.days.values()) {
+                if (day.focusMs + day.offlineMs > 0L) fallbackSessions++;
+            }
+            state.totalDisciplineSessions = fallbackSessions;
+        }
     }
 
     private static Iterator<String> keys(JSONObject o) {
@@ -311,11 +342,10 @@ final class FocusStore {
 
     void save() {
         try {
-            String cutoff = FocusState.today().minusDays(90).toString();
-            state.days.keySet().removeIf(date -> date.compareTo(cutoff) < 0);
-            state.earlySleepDays.removeIf(date -> date.compareTo(cutoff) < 0);
-            state.earlySleepFailed.removeIf(date -> date.compareTo(cutoff) < 0);
-            state.disciplinedDays.removeIf(date -> date.compareTo(cutoff) < 0);
+            String eventCutoff = FocusState.today().minusDays(90).toString();
+            for (var entry : state.days.entrySet()) {
+                if (entry.getKey().compareTo(eventCutoff) < 0) entry.getValue().events.clear();
+            }
 
             JSONArray blockAppearances = new JSONArray();
             for (FocusState.BlockAppearance appearance : state.blockAppearances.values()) {
@@ -338,8 +368,11 @@ final class FocusStore {
                     .put("previousMode", state.previousMode.name())
                     .put("modeSwitchDate", state.modeSwitchDate)
                     .put("indulgentActiveDate", state.indulgentActiveDate)
+                    .put("layFlatActiveDate", state.layFlatActiveDate)
                     .put("indulgentPasses", state.indulgentPasses)
+                    .put("layFlatCards", state.layFlatCards)
                     .put("disciplinedProgress", state.disciplinedProgress)
+                    .put("totalDisciplineSessions", state.totalDisciplineSessions)
                     .put("disciplinedDays", new JSONArray(state.disciplinedDays))
                     .put("lastResetDate", state.lastResetDate)
                     .put("learningPercent", state.learningPercent)
@@ -348,6 +381,7 @@ final class FocusStore {
                     .put("bedtime", state.bedtime)
                     .put("sleepStart", state.sleepStart)
                     .put("sleepEnd", state.sleepEnd)
+                    .put("sleepTargetEndMs", state.sleepTargetEndMs)
                     .put("earlySleepRewardMinutes", state.earlySleepRewardMinutes)
                     .put("todoDailyCapMinutes", state.todoDailyCapMinutes)
                     .put("habitDailyCapMinutes", state.habitDailyCapMinutes)
@@ -416,6 +450,20 @@ final class FocusStore {
                         .put("checkIns", new JSONArray(habit.checkIns)));
             }
 
+            JSONObject abstinences = new JSONObject();
+            for (var entry : state.abstinences.entrySet()) {
+                FocusState.Abstinence a = entry.getValue();
+                abstinences.put(entry.getKey(), new JSONObject()
+                        .put("name", a.name)
+                        .put("startedMs", a.startedMs)
+                        .put("targetHours", a.targetHours)
+                        .put("rewardMinutes", a.rewardMinutes)
+                        .put("completedCount", a.completedCount)
+                        .put("relapseCount", a.relapseCount)
+                        .put("longestMs", a.longestMs)
+                        .put("rewardClaimed", a.rewardClaimed));
+            }
+
             JSONObject todos = new JSONObject();
             for (var entry : state.todos.entrySet()) {
                 FocusState.Todo todo = entry.getValue();
@@ -474,8 +522,8 @@ final class FocusStore {
                         .put("events", events));
             }
 
-            root.put("rules", rules).put("habits", habits).put("todos", todos)
-                    .put("rewards", rewards).put("days", days);
+            root.put("rules", rules).put("habits", habits).put("abstinences", abstinences)
+                    .put("todos", todos).put("rewards", rewards).put("days", days);
             preferences.edit().putString("state", root.toString()).apply();
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not save state", e);

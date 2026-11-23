@@ -24,7 +24,10 @@ final class FocusStateCheck {
         equal(15 * MINUTE, FocusState.MAX_DAILY_BASE_FREE_MS);
         equal(35, FocusState.SLEEP_CONFIG_COST_MINUTES);
         equal(30, FocusState.MODE_SWITCH_COST_MINUTES);
-        equal(5, FocusState.INDULGENT_UNLOCK_DAYS);
+        equal(3, FocusState.INDULGENT_UNLOCK_DAYS);
+        equal(5, FocusState.MAX_INDULGENT_CARDS);
+        equal(2, FocusState.INDULGENT_CARDS_PER_LAY_FLAT);
+        equal(2, FocusState.MAX_LAY_FLAT_CARDS);
         equal(33, state.offlinePercent);
         equal(33, state.learningPercent);
         equal(33, state.focusPercent);
@@ -325,15 +328,15 @@ final class FocusStateCheck {
         equal(FocusState.RateMode.SCHOLAR, sw.rateMode);
         equal(5 * MINUTE, sw.creditMs);
 
-        // 5 cumulative disciplined days unlock INDULGENT (1:2), 1-day activation & auto-restore at next 04:00 AM
+        // 3 cumulative normal disciplined days unlock INDULGENT (1:2), 1-day activation & auto-restore at next 04:00 AM
         var ind = new FocusState();
         ind.rateMode = FocusState.RateMode.SCHOLAR;
         ind.previousMode = FocusState.RateMode.SCHOLAR;
-        for (int d = 0; d < 5; d++) {
+        for (int d = 0; d < 3; d++) {
             long t = at("2026-11-10T12:00:00Z") + d * 24L * 60 * MINUTE;
             ind.start(12, 0, 1, t);
             equal(FocusState.Transition.FINISHED, ind.advance(t + 12 * MINUTE, UTC));
-            if (d < 4) {
+            if (d < 2) {
                 equal(d + 1, ind.disciplinedProgress);
                 equal(0, ind.indulgentPasses);
             }
@@ -617,6 +620,115 @@ final class FocusStateCheck {
         equal(7 * MINUTE, restrictedSober.stopSober(noon + 3 * MINUTE, UTC));
         equal(17 * MINUTE, restrictedSober.vaultMs);
         equal(BUDGET, restrictedSober.restriction(VIDEO, noon + 4 * MINUTE, UTC));
+
+        // 1. Lay-flat card economy: 3d normal progress (max 5 indulgent), non-normal doesn't count, 2 indulgent -> 1 lay-flat (max 2)
+        var cards = new FocusState();
+        cards.rateMode = FocusState.RateMode.SCHOLAR;
+        cards.previousMode = FocusState.RateMode.SCHOLAR;
+        cards.indulgentPasses = 2;
+        equal(true, cards.canExchangeLayFlatCard());
+        equal(true, cards.exchangeLayFlatCard(at("2026-11-20T12:00:00Z"), UTC));
+        equal(0, cards.indulgentPasses);
+        equal(1, cards.layFlatCards);
+        cards.indulgentPasses = 4;
+        equal(true, cards.exchangeLayFlatCard(at("2026-11-20T12:01:00Z"), UTC));
+        equal(2, cards.layFlatCards);
+        equal(false, cards.canExchangeLayFlatCard()); // cap 2 lay-flat cards
+
+        // Activate INDULGENT then LAY_FLAT on same day; next 04:00 AM restores SCHOLAR (skipping INDULGENT)
+        long nov20 = at("2026-11-20T13:00:00Z");
+        cards.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        cards.creditMs = 0L;
+        equal(true, cards.activateIndulgentMode(nov20, UTC));
+        equal(FocusState.RateMode.INDULGENT, cards.rateMode);
+        equal(FocusState.RateMode.SCHOLAR, cards.previousMode);
+        // Disciplined session during INDULGENT must NOT increment normal-mode progress
+        cards.start(12, 0, 1, nov20);
+        equal(FocusState.Transition.FINISHED, cards.advance(nov20 + 12 * MINUTE, UTC));
+        equal(0, cards.disciplinedProgress);
+        // Switch directly from INDULGENT into LAY_FLAT -> still remembers SCHOLAR
+        cards.creditMs = 0L;
+        equal(true, cards.activateLayFlatMode(nov20 + 15 * MINUTE, UTC));
+        equal(FocusState.RateMode.LAY_FLAT, cards.rateMode);
+        equal(FocusState.RateMode.SCHOLAR, cards.previousMode);
+        equal(1, cards.layFlatCards);
+        // Everything unrestricted during LAY_FLAT (even bedtime & zero-budget restricted app)
+        cards.bedtime = true;
+        equal(NONE, cards.restriction(VIDEO, at("2026-11-21T01:00:00Z"), UTC));
+        cards.addUsage(VIDEO, nov20 + 20 * MINUTE, nov20 + 25 * MINUTE, UTC);
+        equal(0L, cards.creditMs);
+        equal(5 * MINUTE, cards.used(VIDEO, "2026-11-20"));
+        cards.syncResetDay(at("2026-11-21T04:00:00Z"), UTC);
+        equal(FocusState.RateMode.SCHOLAR, cards.rateMode);
+
+        // 2. Early Sleep automatic completion & failure on mid-night edit or mid-sleep enable
+        var sleep = new FocusState();
+        sleep.sleepStart = 1380; // 23:00
+        sleep.sleepEnd = 420;    // 07:00
+        sleep.enableBedtime(at("2026-11-24T22:00:00Z"), UTC);
+        equal(at("2026-11-25T07:00:00Z"), sleep.sleepTargetEndMs);
+        equal(false, sleep.evaluateEarlySleep(at("2026-11-25T06:59:59Z"), UTC));
+        equal(true, sleep.evaluateEarlySleep(at("2026-11-25T07:00:00Z"), UTC));
+        equal(true, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
+        equal(10 * MINUTE, sleep.creditMs);
+
+        // Enabling bedtime at 06:50 inside an existing sleep window must require the next full 23:00->07:00 cycle
+        var midEnable = new FocusState();
+        midEnable.sleepStart = 1380;
+        midEnable.sleepEnd = 420;
+        midEnable.enableBedtime(at("2026-11-26T06:50:00Z"), UTC);
+        equal(at("2026-11-27T07:00:00Z"), midEnable.sleepTargetEndMs);
+        equal(false, midEnable.evaluateEarlySleep(at("2026-11-26T07:00:00Z"), UTC));
+
+        // Modifying sleep window at 23:30 fails today and does NOT award tomorrow 07:00
+        var sleepFail = new FocusState();
+        sleepFail.sleepStart = 1380;
+        sleepFail.sleepEnd = 420;
+        sleepFail.enableBedtime(at("2026-11-27T22:00:00Z"), UTC);
+        sleepFail.sleepStart = 1320; // 22:00
+        equal(true, sleepFail.failEarlySleepByConfigChange(at("2026-11-27T23:30:00Z"), UTC, "调整入睡时间", false));
+        equal(true, sleepFail.earlySleepFailedOn(LocalDate.parse("2026-11-27")));
+        equal(false, sleepFail.evaluateEarlySleep(at("2026-11-28T07:05:00Z"), UTC));
+        equal(0L, sleepFail.creditMs);
+        // Next clean overnight cycle completes properly
+        equal(true, sleepFail.evaluateEarlySleep(at("2026-11-29T07:05:00Z"), UTC));
+        equal(true, sleepFail.earlySleepChecked(LocalDate.parse("2026-11-29")));
+
+        // 3. Abstinence lifecycle + anti-reclaim edit guard + permanent stats
+        var abs = new FocusState();
+        long startAbs = at("2026-11-20T08:00:00Z");
+        abs.addAbstinence("a1", "戒熬夜刷手机", startAbs, 24, 25);
+        var item = abs.abstinences.get("a1");
+        equal(false, abs.abstinenceReached(item, startAbs + 23 * 60 * MINUTE));
+        equal(0L, abs.claimAbstinence("a1", startAbs + 23 * 60 * MINUTE, UTC));
+        long hitAbs = startAbs + 24 * 60 * MINUTE;
+        equal(true, abs.canClaimAbstinence(item, hitAbs));
+        equal(25 * MINUTE, abs.claimAbstinence("a1", hitAbs, UTC));
+        equal(false, abs.canClaimAbstinence(item, hitAbs + MINUTE));
+        // Editing title while still past target must NOT allow claiming again
+        abs.updateAbstinence("a1", "戒熬夜", startAbs, 24, 30, hitAbs + 2 * MINUTE);
+        equal(false, abs.canClaimAbstinence(item, hitAbs + 2 * MINUTE));
+        equal(0L, abs.claimAbstinence("a1", hitAbs + 2 * MINUTE, UTC));
+        // Next round & relapse tracking
+        abs.resetAbstinence("a1", hitAbs + 3 * MINUTE, UTC, false);
+        equal(true, abs.longestAbstinenceMs(hitAbs + 3 * MINUTE) >= 24 * 60 * MINUTE);
+        abs.resetAbstinence("a1", hitAbs + 10 * MINUTE, UTC, true);
+        equal(1, item.relapseCount);
+        equal(1, abs.totalAbstinenceCompleted());
+
+        // 4. Permanent discipline stats (sessions + lifetime + month + streaks)
+        var perm = new FocusState();
+        perm.startOffline(at("2026-11-21T10:00:00Z"));
+        perm.stopOffline(at("2026-11-21T10:15:00Z"), UTC);
+        perm.start(10, 0, 1, at("2026-11-22T10:00:00Z"));
+        equal(FocusState.Transition.FINISHED, perm.advance(at("2026-11-22T10:10:00Z"), UTC));
+        equal(2, perm.totalDisciplineSessions);
+        equal(25 * MINUTE, perm.lifetimeDisciplineMs(at("2026-11-22T10:10:00Z")));
+        equal(25 * MINUTE, perm.monthDisciplineMs(LocalDate.parse("2026-11-22"), at("2026-11-22T10:10:00Z")));
+        equal(2, perm.activeDisciplineDaysCount());
+        equal(2, perm.lifetimeDisciplinedDaysCount());
+        equal(2, perm.currentDisciplinedStreak(LocalDate.parse("2026-11-22")));
+        equal(2, perm.bestDisciplinedStreak());
     }
 
     private static long at(String instant) {

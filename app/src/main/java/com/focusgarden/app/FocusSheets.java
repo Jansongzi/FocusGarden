@@ -1062,7 +1062,7 @@ final class FocusSheets {
         TextView heroTitle = text(activity, "连续早睡 " + state.earlySleepStreak(today) + " 天", 18, CARD, true);
         heroText.addView(heroTitle);
         gap(heroText, 4);
-        TextView heroSub = text(activity, "在 " + clock(state.sleepStart) + " 前放下手机并开启夜间锁屏", 12, PALE, false);
+        TextView heroSub = text(activity, "正常完成 " + clock(state.sleepStart) + " – " + clock(state.sleepEnd) + " 夜间锁机后自动结算", 12, PALE, false);
         heroText.addView(heroSub);
         weight(heroContent, heroText);
         ImageView sleepMascot = new ImageView(activity);
@@ -1077,7 +1077,7 @@ final class FocusSheets {
             LinearLayout warn = row(activity);
             warn.setBackground(cardBg(activity, RED_SOFT, 0xfffbd5d2, 14));
             warn.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
-            warn.addView(text(activity, "今日早睡挑战已失败：睡眠时段内使用了受限应用", 12, RED, true));
+            warn.addView(text(activity, "今日早睡挑战已失败：修改时间或关闭锁定", 12, RED, true));
             body.addView(warn);
             gap(body, 12);
         }
@@ -1086,13 +1086,13 @@ final class FocusSheets {
         lockRow.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
         lockRow.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
         weight(lockRow, titleWithInfo(activity, "睡眠时段强制锁定", 14, INK,
-                "睡眠时段锁定说明", "开启后在设定睡眠时段内强制锁定全部非系统核心应用；关闭锁定或调整入睡/起床时间需消耗 35 分钟。"));
+                "睡眠时段锁定说明", "开启后正常完成一个夜间锁机周期即自动达成早睡挑战并结算奖励；关闭锁定或调整睡眠时间会判定挑战失败（且调整需消耗 35 分钟）。"));
         SwitchView sw = new SwitchView(activity, state.bedtime);
         sw.setContentDescription("开关睡眠时段强制锁定");
         Runnable[] refreshClaim = new Runnable[1];
         sw.setOnToggleListener(on -> {
             if (on) {
-                state.bedtime = true;
+                state.enableBedtime(System.currentTimeMillis(), ZoneId.systemDefault());
                 onChanged.run();
                 if (refreshClaim[0] != null) refreshClaim[0].run();
                 return;
@@ -1100,12 +1100,14 @@ final class FocusSheets {
             sw.setChecked(true, false);
             int cost = state.earlySleepConfigCostMinutes(true, state.earlySleepRewardMinutes,
                     state.earlySleepRewardMinutes, false);
-            confirmPaidChange(activity, state, "放弃睡眠时段锁定", "关闭后将解除睡眠时段全应用强制锁定", cost, () -> {
-                state.bedtime = false;
-                sw.setChecked(false, true);
-                onChanged.run();
-                if (refreshClaim[0] != null) refreshClaim[0].run();
-            });
+            confirmPaidChange(activity, state, "关闭睡眠时段锁定",
+                    "关闭锁定将解除夜间强制锁，并判定今日早睡挑战失败", cost, () -> {
+                        state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
+                                "关闭了睡眠强制锁定", true);
+                        sw.setChecked(false, true);
+                        onChanged.run();
+                        if (refreshClaim[0] != null) refreshClaim[0].run();
+                    });
         });
         lockRow.addView(sw);
         lockRow.setOnClickListener(v -> sw.performClick());
@@ -1120,8 +1122,10 @@ final class FocusSheets {
             int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
                     state.earlySleepRewardMinutes, true);
             confirmPaidChange(activity, state, "调整入睡时间",
-                    "入睡时间调整为 " + clock(val), cost, () -> {
+                    "入睡时间调整为 " + clock(val) + "（修改时间将判定今日早睡挑战失败）", cost, () -> {
                         state.sleepStart = val;
+                        state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
+                                "修改了入睡时间", false);
                         startBtn.setText("入睡 " + clock(val));
                         onChanged.run();
                         if (refreshClaim[0] != null) refreshClaim[0].run();
@@ -1132,8 +1136,10 @@ final class FocusSheets {
             int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
                     state.earlySleepRewardMinutes, true);
             confirmPaidChange(activity, state, "调整起床时间",
-                    "起床时间调整为 " + clock(val), cost, () -> {
+                    "起床时间调整为 " + clock(val) + "（修改时间将判定今日早睡挑战失败）", cost, () -> {
                         state.sleepEnd = val;
+                        state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
+                                "修改了起床时间", false);
                         endBtn.setText("起床 " + clock(val));
                         onChanged.run();
                         if (refreshClaim[0] != null) refreshClaim[0].run();
@@ -1145,8 +1151,8 @@ final class FocusSheets {
         body.addView(timeRow);
         gap(body, 14);
 
-        body.addView(titleWithInfo(activity, "早睡打卡奖励", 13, INK_SUB,
-                "修改奖励说明", "提高早睡奖励时长或解锁开关调整需消耗对应自由时间。"));
+        body.addView(titleWithInfo(activity, "早睡挑战奖励", 13, INK_SUB,
+                "修改奖励说明", "正常完成夜间锁机后自动结算对应可用时长；提高奖励需消耗自由时间。"));
         gap(body, 8);
         LinearLayout rewardRow = row(activity);
         int[] options = {5, 10, 15, 20};
@@ -1183,60 +1189,38 @@ final class FocusSheets {
         body.addView(weekWrap);
         gap(body, 16);
 
-        TextView claimBtn = primaryButton(activity, "");
+        TextView statusBanner = text(activity, "", 13, INK, true);
+        statusBanner.setGravity(Gravity.CENTER);
+        statusBanner.setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 14), dp(activity, 14));
         refreshClaim[0] = () -> {
             long now = System.currentTimeMillis();
+            state.evaluateEarlySleep(now, ZoneId.systemDefault());
             boolean failed = state.earlySleepFailedOn(today);
             boolean checked = state.earlySleepChecked(today);
-            boolean inWin = state.isEarlySleepClaimWindow(now, ZoneId.systemDefault());
             heroTitle.setText("连续早睡 " + state.earlySleepStreak(today) + " 天");
-            heroSub.setText("在 " + clock(state.sleepStart) + " 前放下手机并开启睡眠强制锁定");
+            heroSub.setText("正常完成 " + clock(state.sleepStart) + " – " + clock(state.sleepEnd) + " 锁机后自动结算");
             weekWrap.removeAllViews();
             weekWrap.addView(weekSleepStrip(activity, state, today));
             if (failed) {
-                claimBtn.setText("今日早睡已失败");
-                claimBtn.setBackground(shape(activity, RED_SOFT, 14));
-                claimBtn.setTextColor(RED);
+                statusBanner.setText("今日早睡挑战已失败（修改时间或关闭了锁定）");
+                statusBanner.setBackground(shape(activity, RED_SOFT, 14));
+                statusBanner.setTextColor(RED);
             } else if (checked) {
-                claimBtn.setText("昨晚已完成早睡打卡 ✓");
-                claimBtn.setBackground(shape(activity, GREEN_SOFT, 14));
-                claimBtn.setTextColor(GREEN);
+                statusBanner.setText("本轮早睡挑战已完成，已自动发放 +" + state.earlySleepRewardMinutes + " 分钟 ✓");
+                statusBanner.setBackground(shape(activity, GREEN_SOFT, 14));
+                statusBanner.setTextColor(GREEN);
             } else if (!state.bedtime) {
-                claimBtn.setText("请先开启上方睡眠时段强制锁定");
-                claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
-                claimBtn.setTextColor(BLUE_DISABLED_TEXT);
-            } else if (!inWin) {
-                claimBtn.setText("限睡前1小时或醒后4小时内打卡");
-                claimBtn.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
-                claimBtn.setTextColor(BLUE_DISABLED_TEXT);
+                statusBanner.setText("开启上方「睡眠时段强制锁定」后，完成夜间锁机即自动达标");
+                statusBanner.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
+                statusBanner.setTextColor(BLUE_DISABLED_TEXT);
             } else {
-                claimBtn.setText("完成早睡打卡 (+" + state.earlySleepRewardMinutes + " 分钟)");
-                claimBtn.setBackground(touch(activity, BLUE, 14));
-                claimBtn.setTextColor(CARD);
+                statusBanner.setText("已开启夜间锁机 · 将在 " + clock(state.sleepEnd) + " 醒来后自动完成 +" + state.earlySleepRewardMinutes + " 分钟");
+                statusBanner.setBackground(cardBg(activity, BLUE_SOFT, 0xffcfe0ff, 14));
+                statusBanner.setTextColor(BLUE);
             }
         };
         refreshClaim[0].run();
-        claimBtn.setOnClickListener(v -> {
-            long now = System.currentTimeMillis();
-            if (state.earlySleepFailedOn(today) || state.earlySleepChecked(today)) return;
-            if (!state.bedtime) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                Toast.makeText(activity, "需先开启「睡眠时段强制锁定」才可参与早睡打卡", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (!state.isEarlySleepClaimWindow(now, ZoneId.systemDefault())) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                Toast.makeText(activity, "仅可在入睡前 1 小时或起床后 4 小时内打卡", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (state.claimEarlySleep(now, ZoneId.systemDefault())) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                onChanged.run();
-                refreshClaim[0].run();
-                Toast.makeText(activity, "早睡打卡成功，+" + state.earlySleepRewardMinutes + " 分钟", Toast.LENGTH_SHORT).show();
-            }
-        });
-        body.addView(claimBtn, -1, -2);
+        body.addView(statusBanner, -1, -2);
 
         bottomSheet(activity, "早睡挑战", null, body);
     }
@@ -1563,20 +1547,29 @@ final class FocusSheets {
         });
     }
 
-    static void showHabitEditor(MainActivity activity, FocusState state, String id, FocusState.Habit habit, Runnable onChanged) {
-        LinearLayout body = column(activity);
-        final int[] reward = {habit == null ? 5 : habit.rewardMinutes};
+    static String formatAbstinenceTarget(int hours) {
+        if (hours < 24) return hours + " 小时";
+        return hours % 24 == 0 ? (hours / 24) + " 天" : hours + " 小时";
+    }
 
-        EditText nameInput = styledInput(activity, "习惯名称，例如：阅读 10 页",
-                habit == null ? "" : habit.name, InputType.TYPE_CLASS_TEXT);
-        nameInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(40)});
+    static void showAbstinenceEditor(MainActivity activity, FocusState state, String id,
+                                     FocusState.Abstinence existing, Runnable onChanged) {
+        LinearLayout body = column(activity);
+        long nowInit = System.currentTimeMillis();
+        final int[] targetHours = {existing == null ? 24 : existing.targetHours};
+        final int[] rewardMinutes = {existing == null ? 30 : existing.rewardMinutes};
+        final long[] startedMs = {existing == null ? nowInit : existing.startedMs};
+
+        EditText nameInput = styledInput(activity, "戒断事件名称，例如：戒刷短视频",
+                existing == null ? "" : existing.name, InputType.TYPE_CLASS_TEXT);
+        nameInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
         body.addView(nameInput, -1, -2);
         gap(body, 10);
 
-        if (habit == null) {
-            body.addView(text(activity, "常用模板", 12, MUTED, true));
+        if (existing == null) {
+            body.addView(text(activity, "常见戒断目标", 12, MUTED, true));
             gap(body, 6);
-            String[] templates = {"阅读 10 页", "运动 30 分钟", "早起喝水", "复盘总结"};
+            String[] templates = {"戒刷短视频", "戒熬夜刷手机", "戒奶茶甜饮", "戒游戏沉迷"};
             LinearLayout tRow = null;
             for (int i = 0; i < templates.length; i++) {
                 if (i % 2 == 0) {
@@ -1595,70 +1588,163 @@ final class FocusSheets {
                 weight(tRow, chip);
                 if (i % 2 == 0) space(tRow, 6);
             }
-            gap(body, 12);
+            gap(body, 14);
         }
 
-        body.addView(titleWithInfo(activity, "打卡奖励时长", 13, INK_SUB,
-                "习惯奖励说明",
-                "单次打卡奖励上限 15 分钟；新建习惯需冷静 10 分钟后才可首次打卡；每日习惯兑换上限 "
-                        + state.habitDailyCapMinutes + " 分钟；提高奖励需消耗自由时间。"));
+        body.addView(text(activity, "戒断目标时长", 13, INK_SUB, true));
+        gap(body, 8);
+        LinearLayout targetRow = row(activity);
+        int[] hourPresets = {12, 24, 72, 168};
+        Runnable[] rebuildTargets = new Runnable[1];
+        rebuildTargets[0] = () -> {
+            targetRow.removeAllViews();
+            for (int h : hourPresets) {
+                boolean active = targetHours[0] == h;
+                String lbl = h < 24 ? h + "时" : (h / 24) + "天";
+                TextView c = pillButton(activity, lbl, active ? GREEN_SOFT : SURFACE_SUBTLE,
+                        active ? GREEN : INK_SUB, 10, 36);
+                c.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
+                if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+                c.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    targetHours[0] = h;
+                    rebuildTargets[0].run();
+                });
+                weight(targetRow, c);
+                space(targetRow, 6);
+            }
+            boolean isCustomH = targetHours[0] != 12 && targetHours[0] != 24
+                    && targetHours[0] != 72 && targetHours[0] != 168;
+            TextView customH = pillButton(activity,
+                    isCustomH ? formatAbstinenceTarget(targetHours[0]) : "自定",
+                    isCustomH ? GREEN_SOFT : SURFACE_SUBTLE, isCustomH ? GREEN : INK_SUB, 10, 36);
+            customH.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
+            if (!isCustomH) customH.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            customH.setOnClickListener(v -> {
+                tapHaptic(v);
+                askNumberSheet(activity, "自定义戒断时长（小时）", "1 到 8760 小时（如 720 小时即 30 天）",
+                        targetHours[0], 1, 8760, n -> {
+                            targetHours[0] = n;
+                            rebuildTargets[0].run();
+                        });
+            });
+            weight(targetRow, customH);
+        };
+        rebuildTargets[0].run();
+        body.addView(targetRow);
+        gap(body, 14);
+
+        body.addView(text(activity, "起始时间", 13, INK_SUB, true));
+        gap(body, 6);
+        TextView startSummary = text(activity, "", 13, GREEN, true);
+        startSummary.setBackground(cardBg(activity, GREEN_SOFT, 0xffbcecd3, 12));
+        startSummary.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+        body.addView(startSummary, -1, -2);
+        gap(body, 8);
+        LinearLayout startBtns = row(activity);
+        Runnable refreshStartLabel = () -> {
+            long curNow = System.currentTimeMillis();
+            if (Math.abs(curNow - startedMs[0]) < FocusState.MINUTE && existing == null) {
+                startSummary.setText("立即从现在开始计时");
+            } else {
+                var zdt = java.time.Instant.ofEpochMilli(startedMs[0]).atZone(ZoneId.systemDefault());
+                startSummary.setText("开始于 " + zdt.getMonthValue() + "月" + zdt.getDayOfMonth() + "日 "
+                        + String.format(Locale.ROOT, "%02d:%02d", zdt.getHour(), zdt.getMinute()));
+            }
+        };
+        refreshStartLabel.run();
+
+        TextView btnNow = pillButton(activity, "现在", SURFACE_SUBTLE, INK, 10, 34);
+        btnNow.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+        btnNow.setOnClickListener(v -> {
+            tapHaptic(v);
+            startedMs[0] = System.currentTimeMillis();
+            refreshStartLabel.run();
+        });
+        TextView btnBack1d = pillButton(activity, "前移1天", SURFACE_SUBTLE, INK, 10, 34);
+        btnBack1d.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+        btnBack1d.setOnClickListener(v -> {
+            tapHaptic(v);
+            startedMs[0] = Math.max(0L, startedMs[0] - 24L * 60 * FocusState.MINUTE);
+            refreshStartLabel.run();
+        });
+        TextView btnClock = pillButton(activity, "调时刻", SURFACE_SUBTLE, BLUE, 10, 34);
+        btnClock.setBackground(touchCard(activity, BLUE_SOFT, 0xffcfe0ff, 10));
+        btnClock.setOnClickListener(v -> {
+            tapHaptic(v);
+            var zdt = java.time.Instant.ofEpochMilli(startedMs[0]).atZone(ZoneId.systemDefault());
+            int curMin = zdt.getHour() * 60 + zdt.getMinute();
+            pickClock(activity, curMin, -1, val -> {
+                long picked = zdt.toLocalDate().atTime(val / 60, val % 60)
+                        .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                startedMs[0] = Math.min(System.currentTimeMillis(), picked);
+                refreshStartLabel.run();
+            });
+        });
+        weight(startBtns, btnNow);
+        space(startBtns, 6);
+        weight(startBtns, btnBack1d);
+        space(startBtns, 6);
+        weight(startBtns, btnClock);
+        body.addView(startBtns);
+        gap(body, 14);
+
+        body.addView(titleWithInfo(activity, "达成奖励（可用时长）", 13, INK_SUB,
+                "戒断奖励说明", "达成当前戒断目标时长后即可手动领取设定的可用时间奖励，领取后也可继续累积坚持记录或开启新一轮挑战。"));
         gap(body, 8);
         LinearLayout rRow = row(activity);
-        int[] presets = {2, 5, 8, 10};
-        TextView saveBtn = primaryButton(activity, habit == null ? "创建习惯" : "保存修改");
+        int[] rewardPresets = {15, 30, 60, 120};
         Runnable[] rebuildRewards = new Runnable[1];
         rebuildRewards[0] = () -> {
             rRow.removeAllViews();
-            for (int m : presets) {
-                boolean active = reward[0] == m;
+            for (int m : rewardPresets) {
+                boolean active = rewardMinutes[0] == m;
                 TextView c = pillButton(activity, "+" + m + "分", active ? BLUE_SOFT : SURFACE_SUBTLE,
-                        active ? BLUE : INK_SUB, 12, 38);
-                c.setPadding(dp(activity, 4), dp(activity, 6), dp(activity, 4), dp(activity, 6));
-                if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
+                        active ? BLUE : INK_SUB, 10, 36);
+                c.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
+                if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
                 c.setOnClickListener(v -> {
                     tapHaptic(v);
-                    reward[0] = m;
+                    rewardMinutes[0] = m;
                     rebuildRewards[0].run();
                 });
                 weight(rRow, c);
                 space(rRow, 6);
             }
-            boolean isCustom = reward[0] != 2 && reward[0] != 5 && reward[0] != 8 && reward[0] != 10;
-            TextView custom = pillButton(activity, isCustom ? "+" + reward[0] + "分" : "自定义",
-                    isCustom ? BLUE_SOFT : SURFACE_SUBTLE, isCustom ? BLUE : INK_SUB, 12, 38);
-            custom.setPadding(dp(activity, 4), dp(activity, 6), dp(activity, 4), dp(activity, 6));
-            if (!isCustom) custom.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
-            custom.setOnClickListener(v -> {
+            boolean isCustomR = rewardMinutes[0] != 15 && rewardMinutes[0] != 30
+                    && rewardMinutes[0] != 60 && rewardMinutes[0] != 120;
+            TextView customR = pillButton(activity, isCustomR ? "+" + rewardMinutes[0] + "分" : "自定",
+                    isCustomR ? BLUE_SOFT : SURFACE_SUBTLE, isCustomR ? BLUE : INK_SUB, 10, 36);
+            customR.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
+            if (!isCustomR) customR.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            customR.setOnClickListener(v -> {
                 tapHaptic(v);
-                askNumberSheet(activity, "打卡奖励（分钟）", "1 到 15 分钟",
-                        Math.min(15, Math.max(1, reward[0])), 1, 15, n -> {
-                            reward[0] = n;
+                askNumberSheet(activity, "设定达成奖励（分钟）", "5 到 480 分钟",
+                        rewardMinutes[0], 5, 480, n -> {
+                            rewardMinutes[0] = n;
                             rebuildRewards[0].run();
                         });
             });
-            weight(rRow, custom);
-
-            int cost = state.habitChangeCostMinutes(habit, reward[0]);
-            String baseLabel = habit == null ? "创建习惯" : "保存修改";
-            saveBtn.setText(cost > 0 ? "消耗 " + cost + " 分钟 · " + baseLabel : baseLabel);
+            weight(rRow, customR);
         };
         rebuildRewards[0].run();
         body.addView(rRow);
         gap(body, 18);
 
+        TextView saveBtn = primaryButton(activity, existing == null ? "开启戒断挑战" : "保存修改");
         body.addView(saveBtn, -1, -2);
 
         Dialog[] sheetRef = new Dialog[1];
-        if (habit != null) {
+        if (existing != null) {
             gap(body, 10);
-            TextView delBtn = dangerButton(activity, "移除此习惯");
+            TextView delBtn = dangerButton(activity, "删除此戒断项目");
             delBtn.setOnClickListener(v -> {
                 tapHaptic(v);
                 confirmDialog(activity, R.drawable.ic_close, RED_SOFT, RED,
-                        "移除「" + habit.name + "」？",
-                        "移除后该习惯的打卡记录将不再显示。",
-                        "取消", "移除", true, () -> {
-                            state.habits.remove(id);
+                        "删除「" + existing.name + "」？",
+                        "删除后该戒断项目的当前计数与配置将移除（历史统计仍保留）。",
+                        "取消", "删除", true, () -> {
+                            state.removeAbstinence(id);
                             onChanged.run();
                             if (sheetRef[0] != null) sheetRef[0].dismiss();
                         });
@@ -1666,33 +1752,27 @@ final class FocusSheets {
             body.addView(delBtn, -1, -2);
         }
 
-        Dialog sheet = bottomSheet(activity, habit == null ? "新建习惯" : "编辑习惯", null, body);
+        Dialog sheet = bottomSheet(activity, existing == null ? "新建戒断挑战" : "编辑戒断挑战", null, body);
         sheetRef[0] = sheet;
 
         saveBtn.setOnClickListener(v -> {
             String nameValue = nameInput.getText().toString().trim();
             if (nameValue.isEmpty()) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                nameInput.setError("请输入习惯名称");
+                nameInput.setError("请输入戒断事件名称");
                 return;
             }
-            int cost = state.habitChangeCostMinutes(habit, reward[0]);
-            String actionTitle = habit == null ? "新增习惯 · " + nameValue : "调整习惯奖励 · " + nameValue;
-            String actionDetail = habit == null
-                    ? "新增习惯「" + nameValue + "」（+" + reward[0] + " 分钟）"
-                    : "将习惯「" + nameValue + "」奖励改为 +" + reward[0] + " 分钟";
-            confirmPaidChange(activity, state, actionTitle, actionDetail, cost, () -> {
-                if (cost == 0) haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                if (habit == null) {
-                    state.addHabit(UUID.randomUUID().toString(),
-                            new FocusState.Habit(nameValue, reward[0], "", System.currentTimeMillis()));
-                } else {
-                    habit.name = nameValue;
-                    habit.rewardMinutes = reward[0];
-                }
-                onChanged.run();
-                sheet.dismiss();
-            });
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            long startVal = Math.min(System.currentTimeMillis(), startedMs[0]);
+            if (existing == null) {
+                state.addAbstinence(UUID.randomUUID().toString(), nameValue,
+                        startVal, targetHours[0], rewardMinutes[0]);
+            } else {
+                state.updateAbstinence(id, nameValue, startVal, targetHours[0], rewardMinutes[0],
+                        System.currentTimeMillis());
+            }
+            onChanged.run();
+            sheet.dismiss();
         });
     }
 
@@ -1900,7 +1980,7 @@ final class FocusSheets {
                 weight(card, text(activity, mode.label, 15, active ? BLUE : INK, true));
                 space(card, 8);
 
-                String rightText = active ? "当前" : switchedToday ? "今日已切" : "切 " + FocusState.MODE_SWITCH_COST_MINUTES + "分";
+                String rightText = active ? "当前" : switchedToday ? "今日已切" : "切换";
                 int rightBg = active ? BLUE : switchedToday ? SURFACE_SUBTLE : CARD;
                 int rightInk = active ? CARD : switchedToday ? MUTED : BLUE;
                 TextView statusBadge = text(activity, rightText, 11, rightInk, true);
@@ -1956,7 +2036,7 @@ final class FocusSheets {
                 gap(modesWrap, 8);
             }
 
-            // 5th special mode: 放纵模式 1:2
+            // 5th special mode: 放纵模式 1:2 (3d normal discipline -> 1 card, max 5)
             boolean indulgentActive = state.rateMode == FocusState.RateMode.INDULGENT;
             boolean hasPass = state.indulgentPasses > 0;
             LinearLayout indCard = column(activity);
@@ -1977,7 +2057,7 @@ final class FocusSheets {
             weight(indTop, titleWithInfo(activity, FocusState.RateMode.INDULGENT.label, 15,
                     indulgentActive ? AMBER : INK,
                     "放纵模式（1:2）",
-                    "累计达成 5 个自律日自动获得 1 次机会；开启后今日自律与正向学习按 1:2 双倍兑换，次日凌晨 04:00 自动恢复上一模式。"));
+                    "正常模式下累计达成 3 个自律日可兑换 1 张放纵卡（最多囤 5 张）；开启后今日按 1:2 双倍兑换，次日凌晨 04:00 自动恢复上一正常模式。"));
             space(indTop, 8);
 
             String indActionLabel = indulgentActive ? "生效中"
@@ -1993,7 +2073,7 @@ final class FocusSheets {
 
             CapsuleBar progressBar = new CapsuleBar(activity);
             progressBar.setColors(0xffe9e2d2, indulgentActive || hasPass ? AMBER : BLUE);
-            float pVal = (indulgentActive || hasPass)
+            float pVal = (indulgentActive || state.indulgentPasses >= FocusState.MAX_INDULGENT_CARDS)
                     ? 1f
                     : Math.min(1f, (float) state.disciplinedProgress / FocusState.INDULGENT_UNLOCK_DAYS);
             progressBar.setProgress(pVal);
@@ -2001,9 +2081,10 @@ final class FocusSheets {
             gap(indCard, 6);
 
             String indFoot = indulgentActive
-                    ? "生效中 · 明日凌晨 04:00 自动恢复为" + state.previousMode.label
-                    : "累计自律进度 " + state.disciplinedProgress + " / " + FocusState.INDULGENT_UNLOCK_DAYS
-                    + " 天 · 待用机会：" + state.indulgentPasses + " 次";
+                    ? "生效中 · 明日 04:00 恢复为" + state.previousMode.label + " · 余放纵卡 "
+                    + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + " 张"
+                    : "正常模式自律进度 " + state.disciplinedProgress + "/" + FocusState.INDULGENT_UNLOCK_DAYS
+                    + " 天 · 放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + " 张";
             indCard.addView(text(activity, indFoot, 11, indulgentActive ? AMBER : INK_SUB, indulgentActive || hasPass));
 
             indCard.setOnClickListener(v -> {
@@ -2017,10 +2098,11 @@ final class FocusSheets {
                     return;
                 }
                 if (state.indulgentPasses > 0) {
-                    FocusState.RateMode restoreTarget = state.rateMode;
+                    FocusState.RateMode restoreTarget = state.rateMode.isNormal()
+                            ? state.rateMode : state.previousMode;
                     confirmDialog(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
-                            "开启放纵模式（1:2）？",
-                            "消耗 1 次解锁机会，今日所有自律模式与正向学习都将按 1:2 双倍兑换；明日凌晨 04:00 自动恢复为「"
+                            "消耗 1 张放纵卡开启（1:2）？",
+                            "开启后今日所有自律与正向学习按 1:2 双倍兑换；明日凌晨 04:00 自动恢复为「"
                                     + restoreTarget.label + "」。",
                             "稍后", "立即开启（1 天）", false, () -> {
                                 if (state.activateIndulgentMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
@@ -2038,11 +2120,125 @@ final class FocusSheets {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
                 infoDialog(activity, R.drawable.ic_shield, AMBER_SOFT, AMBER,
                         "放纵模式尚未解锁",
-                        "放纵模式（1:2）不可手动切换。累计达成 5 个自律日（当日自律评分 ≥ 80% 且有正向自律记录，且未破早睡戒）后自动获得 1 次机会，开启后次日凌晨 04:00 自动恢复上一模式。\n\n"
-                                + "当前累计进度：" + state.disciplinedProgress + " / " + FocusState.INDULGENT_UNLOCK_DAYS + " 天。",
+                        "正常模式下累计达成 3 个自律日（当日评分 ≥ 80% 且有正向自律记录，未破早睡戒）自动获赠 1 张放纵卡，最多囤 5 张。\n\n"
+                                + "当前正常模式自律进度：" + state.disciplinedProgress + " / " + FocusState.INDULGENT_UNLOCK_DAYS + " 天。",
                         "知道了");
             });
             modesWrap.addView(indCard);
+            gap(modesWrap, 8);
+
+            // 6th special mode: 躺平模式 (all apps unrestricted today; 2 放纵卡 -> 1 躺平卡, max 2)
+            boolean layFlatActive = state.rateMode == FocusState.RateMode.LAY_FLAT;
+            boolean hasLayCard = state.layFlatCards > 0;
+            boolean canExchange = state.canExchangeLayFlatCard();
+            LinearLayout layCard = column(activity);
+            layCard.setBackground(touchCard(activity, layFlatActive || hasLayCard ? PURPLE_SOFT : SURFACE_SUBTLE,
+                    layFlatActive || hasLayCard ? PURPLE : BORDER, 16));
+            layCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
+
+            LinearLayout layTop = row(activity);
+            TextView layRatio = text(activity, FocusState.RateMode.LAY_FLAT.ratioText, 13,
+                    layFlatActive ? CARD : PURPLE, true);
+            layRatio.setGravity(Gravity.CENTER);
+            layRatio.setMinWidth(dp(activity, 46));
+            layRatio.setBackground(shape(activity, layFlatActive ? PURPLE : PURPLE_SOFT, 10));
+            layRatio.setPadding(dp(activity, 8), dp(activity, 7), dp(activity, 8), dp(activity, 7));
+            layTop.addView(layRatio);
+            space(layTop, 12);
+
+            weight(layTop, titleWithInfo(activity, FocusState.RateMode.LAY_FLAT.label, 15,
+                    layFlatActive ? PURPLE : INK,
+                    "躺平模式（全天免限）",
+                    "开启后一整天全部应用不受限（不扣除可用与基础免费额度），次日凌晨 04:00 自动恢复上一正常模式（若曾开启放纵模式则回退至放纵前模式）。每 2 张放纵卡可兑换 1 张躺平卡，最多囤 2 张。"));
+            space(layTop, 8);
+
+            String layActionLabel = layFlatActive ? "生效中"
+                    : hasLayCard ? "立即开启"
+                    : "待兑换";
+            TextView layBtn = text(activity, layActionLabel, 11,
+                    layFlatActive || hasLayCard ? CARD : MUTED, true);
+            layBtn.setBackground(shape(activity, layFlatActive ? PURPLE : hasLayCard ? PURPLE : CARD, 9));
+            layBtn.setPadding(dp(activity, 9), dp(activity, 5), dp(activity, 9), dp(activity, 5));
+            layTop.addView(layBtn);
+            layCard.addView(layTop);
+            gap(layCard, 10);
+
+            CapsuleBar layBar = new CapsuleBar(activity);
+            layBar.setColors(0xffe7e2f7, PURPLE);
+            layBar.setProgress(layFlatActive ? 1f : Math.min(1f, (float) state.layFlatCards / FocusState.MAX_LAY_FLAT_CARDS));
+            layCard.addView(layBar, -1, dp(activity, 6));
+            gap(layCard, 6);
+
+            LinearLayout layFootRow = row(activity);
+            String layFoot = layFlatActive
+                    ? "生效中 · 全天免限 · 明日 04:00 恢复为" + state.previousMode.label
+                    : "躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS
+                    + " 张 · " + FocusState.INDULGENT_CARDS_PER_LAY_FLAT + " 张放纵卡兑 1 张";
+            weight(layFootRow, text(activity, layFoot, 11, layFlatActive ? PURPLE : INK_SUB, layFlatActive || hasLayCard));
+            if (state.layFlatCards < FocusState.MAX_LAY_FLAT_CARDS) {
+                space(layFootRow, 6);
+                TextView exBtn = text(activity, "2放纵卡兑1张", 11,
+                        canExchange ? CARD : BLUE_DISABLED_TEXT, true);
+                exBtn.setBackground(canExchange
+                        ? touch(activity, BLUE, 8)
+                        : shape(activity, BLUE_DISABLED_BG, 8));
+                exBtn.setPadding(dp(activity, 9), dp(activity, 4), dp(activity, 9), dp(activity, 4));
+                exBtn.setOnClickListener(v -> {
+                    if (!state.canExchangeLayFlatCard()) {
+                        haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                        Toast.makeText(activity, "需至少 2 张放纵卡才可兑换 1 张躺平卡", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (state.exchangeLayFlatCard(System.currentTimeMillis(), ZoneId.systemDefault())) {
+                        haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                        onChanged.run();
+                        rebuild[0].run();
+                        Toast.makeText(activity, "已兑换 1 张躺平卡（当前 " + state.layFlatCards + "/"
+                                + FocusState.MAX_LAY_FLAT_CARDS + "）", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                layFootRow.addView(exBtn);
+            }
+            layCard.addView(layFootRow);
+
+            layCard.setOnClickListener(v -> {
+                tapHaptic(v);
+                if (state.rateMode == FocusState.RateMode.LAY_FLAT) {
+                    infoDialog(activity, R.drawable.ic_check, PURPLE_SOFT, PURPLE,
+                            "躺平模式生效中（全天免限）",
+                            "今日全天所有应用均不受限，明日凌晨 04:00 将自动恢复为「" + state.previousMode.label + "」。",
+                            "知道了");
+                    return;
+                }
+                if (state.layFlatCards > 0) {
+                    FocusState.RateMode restoreTarget = state.rateMode.isNormal()
+                            ? state.rateMode : state.previousMode;
+                    confirmDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
+                            "消耗 1 张躺平卡开启全天免限？",
+                            "开启后今天一整天所有应用不受限制；明日凌晨 04:00 自动恢复为「"
+                                    + restoreTarget.label + "」。",
+                            "稍后", "立即躺平（今天）", false, () -> {
+                                if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
+                                    haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
+                                    onChanged.run();
+                                    rebuild[0].run();
+                                    Toast.makeText(activity, "已开启躺平模式，今日全天应用不受限",
+                                            Toast.LENGTH_SHORT).show();
+                                } else {
+                                    haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
+                                }
+                            });
+                    return;
+                }
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                infoDialog(activity, R.drawable.ic_shield, PURPLE_SOFT, PURPLE,
+                        "躺平模式需要躺平卡解锁",
+                        "每 2 张放纵卡可兑换 1 张躺平卡（最多囤 2 张）；每连续 3 天正常自律可获 1 张放纵卡。\n\n"
+                                + "当前持有：放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
+                                + " 张，躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张。",
+                        "知道了");
+            });
+            modesWrap.addView(layCard);
 
             capsWrap.removeAllViews();
             capsWrap.addView(rateRow(activity, "待办每日上限", null,
@@ -2057,12 +2253,12 @@ final class FocusSheets {
                                         });
                             })));
             gap(capsWrap, 10);
-            capsWrap.addView(rateRow(activity, "习惯每日上限", null,
-                    state.habitDailyCapMinutes + " 分", () -> askNumberSheet(activity, "习惯每日上限（分钟）", "5 到 120 分钟",
+            capsWrap.addView(rateRow(activity, "戒断 / 习惯每日上限", null,
+                    state.habitDailyCapMinutes + " 分", () -> askNumberSheet(activity, "戒断 / 习惯每日上限（分钟）", "5 到 120 分钟",
                             state.habitDailyCapMinutes, 5, 120, n -> {
                                 int cost = state.dailyCapChangeCostMinutes(state.habitDailyCapMinutes, n);
-                                confirmPaidChange(activity, state, "调整习惯每日上限",
-                                        "习惯每日上限由 " + state.habitDailyCapMinutes + " 分改为 " + n + " 分", cost, () -> {
+                                confirmPaidChange(activity, state, "调整戒断每日上限",
+                                        "戒断 / 习惯每日上限由 " + state.habitDailyCapMinutes + " 分改为 " + n + " 分", cost, () -> {
                                             state.habitDailyCapMinutes = n;
                                             onChanged.run();
                                             rebuild[0].run();
@@ -2084,8 +2280,8 @@ final class FocusSheets {
         rebuild[0].run();
 
         bottomSheet(activity, "时间获取模式与上限", null, body, true,
-                "模式切换与重置规则",
-                "每日凌晨 04:00 重置周期；除放纵模式外，常规模式每日限切 1 次且消耗 30 分钟；累计 5 个达标自律日自动解锁 1 天 1:2 放纵模式，开启后次日 04:00 自动恢复上一模式。");
+                "模式切换与卡牌规则",
+                "每日 04:00 重置周期；常规模式每日限切 1 次且消耗 30 分钟；3 天正常自律进度兑 1 张放纵卡（最多 5 张），2 张放纵卡兑 1 张躺平卡（最多 2 张）；放纵与躺平次日 04:00 自动恢复上一正常模式。");
     }
 
     private static LinearLayout rateRow(Activity activity, String title, String sub, String val, Runnable onTap) {
@@ -2244,44 +2440,16 @@ final class FocusSheets {
         body.addView(summary);
         gap(body, 14);
 
-        body.addView(text(activity, "添加自定义奖励", 13, INK_SUB, true));
-        gap(body, 6);
-        EditText titleInput = styledInput(activity, "自定义奖励名称，例如：喝一杯冰美式", "", InputType.TYPE_CLASS_TEXT);
-        titleInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
-        body.addView(titleInput, -1, -2);
-        gap(body, 8);
-
-        LinearLayout tplRow = row(activity);
-        String[] templates = {"喝一杯饮品", "看一集剧", "加餐犒劳", "自由放空"};
-        for (int i = 0; i < templates.length; i++) {
-            String tpl = templates[i];
-            TextView c = pillButton(activity, tpl, SURFACE_SUBTLE, INK_SUB, 10, 32);
-            c.setTextSize(11);
-            c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
-            c.setOnClickListener(v -> {
-                tapHaptic(v);
-                titleInput.setText(tpl);
-            });
-            weight(tplRow, c);
-            if (i + 1 < templates.length) space(tplRow, 6);
-        }
-        body.addView(tplRow);
-        gap(body, 10);
-
-        final int[] costChoice = {30};
-        body.addView(rewardCostChips(activity, costChoice));
-        gap(body, 10);
-
-        TextView addBtn = primaryButton(activity, "添加奖励");
-        body.addView(addBtn, -1, -2);
-        gap(body, 16);
-
         body.addView(text(activity, "我的奖励列表", 13, INK_SUB, true));
         gap(body, 8);
         LinearLayout listWrap = column(activity);
         body.addView(listWrap, -1, -2);
 
         Runnable[] rebuild = new Runnable[1];
+        Runnable openAddReward = () -> showAddRewardSheet(activity, state, () -> {
+            onChanged.run();
+            rebuild[0].run();
+        });
         rebuild[0] = () -> {
             FocusState.Day day = state.days.getOrDefault(FocusState.today().toString(), new FocusState.Day());
             bigSpendable.setText(duration(state.totalSpendableMs()));
@@ -2291,12 +2459,16 @@ final class FocusSheets {
             listWrap.removeAllViews();
             if (state.rewards.isEmpty()) {
                 LinearLayout empty = column(activity);
-                empty.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
-                empty.setPadding(dp(activity, 16), dp(activity, 18), dp(activity, 16), dp(activity, 18));
+                empty.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 16));
+                empty.setPadding(dp(activity, 16), dp(activity, 20), dp(activity, 16), dp(activity, 20));
                 empty.setGravity(Gravity.CENTER);
                 empty.addView(text(activity, "还没有奖励项目", 15, INK, true));
                 gap(empty, 4);
-                empty.addView(text(activity, "添加一个现实小奖励，让赚取的时间更有价值", 12, MUTED, false));
+                empty.addView(text(activity, "点按左上角 + 或此处，添加一个现实小奖励", 12, MUTED, false));
+                empty.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    openAddReward.run();
+                });
                 listWrap.addView(empty);
                 return;
             }
@@ -2370,6 +2542,53 @@ final class FocusSheets {
             }
         };
 
+        FrameLayout addHeaderBtn = iconBadge(activity, R.drawable.ic_plus, BLUE_SOFT, BLUE, 34, 17, 11);
+        addHeaderBtn.setContentDescription("新增奖励");
+        addHeaderBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            openAddReward.run();
+        });
+
+        rebuild[0].run();
+        bottomSheet(activity, "奖励兑换", null, body, true,
+                "奖励兑换说明", "消耗可用自由时间兑换现实奖励（优先扣除今日可用，不足部分自动从储蓄罐扣除）；点按左上角 + 可添加自定义奖励，点按列表项可编辑。",
+                addHeaderBtn);
+    }
+
+    private static void showAddRewardSheet(MainActivity activity, FocusState state, Runnable onAdded) {
+        LinearLayout body = column(activity);
+        body.addView(text(activity, "奖励名称", 13, INK_SUB, true));
+        gap(body, 6);
+        EditText titleInput = styledInput(activity, "自定义奖励名称，例如：喝一杯冰美式", "", InputType.TYPE_CLASS_TEXT);
+        titleInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(32)});
+        body.addView(titleInput, -1, -2);
+        gap(body, 8);
+
+        LinearLayout tplRow = row(activity);
+        String[] templates = {"喝一杯饮品", "看一集剧", "加餐犒劳", "自由放空"};
+        for (int i = 0; i < templates.length; i++) {
+            String tpl = templates[i];
+            TextView c = pillButton(activity, tpl, SURFACE_SUBTLE, INK_SUB, 10, 32);
+            c.setTextSize(11);
+            c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            c.setOnClickListener(v -> {
+                tapHaptic(v);
+                titleInput.setText(tpl);
+            });
+            weight(tplRow, c);
+            if (i + 1 < templates.length) space(tplRow, 6);
+        }
+        body.addView(tplRow);
+        gap(body, 10);
+
+        final int[] costChoice = {30};
+        body.addView(rewardCostChips(activity, costChoice));
+        gap(body, 16);
+
+        TextView addBtn = primaryButton(activity, "添加奖励");
+        body.addView(addBtn, -1, -2);
+
+        Dialog sheet = bottomSheet(activity, "添加自定义奖励", null, body);
         addBtn.setOnClickListener(v -> {
             String title = titleInput.getText().toString().trim();
             if (title.isEmpty()) {
@@ -2379,14 +2598,10 @@ final class FocusSheets {
             }
             haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             state.addReward(UUID.randomUUID().toString(), title, costChoice[0]);
-            titleInput.setText("");
-            onChanged.run();
-            rebuild[0].run();
+            onAdded.run();
+            sheet.dismiss();
+            Toast.makeText(activity, "已添加奖励「" + title + "」", Toast.LENGTH_SHORT).show();
         });
-
-        rebuild[0].run();
-        bottomSheet(activity, "奖励兑换", null, body, true,
-                "奖励兑换说明", "消耗可用自由时间兑换现实奖励（优先扣除今日可用，不足部分自动从储蓄罐扣除）；点按列表项可编辑。");
     }
 
     private static LinearLayout rewardCostChips(Activity activity, int[] costChoice) {
@@ -2465,9 +2680,9 @@ final class FocusSheets {
                 {"apps", "学习应用", "统计正向应用并自动赚取时间"},
                 {"timer", "自律模式", "正计时与倒计时自律锁定控制"},
                 {"rewards", "奖励兑换", "设置现实奖励并主动消耗可用时间"},
-                {"sleep", "早睡挑战", "睡眠时段强制全锁与早睡连续打卡"},
+                {"sleep", "早睡挑战", "睡眠时段强制全锁，正常完成自动结算"},
                 {"todos", "待办清单", "完成日常任务兑换时间奖励"},
-                {"habits", "习惯快打", "快速完成每日习惯打卡"},
+                {"habits", "戒断挑战", "自定义戒断目标与持续打卡"},
                 {"steps", "步数兑换", "同步步行数兑换放松时间"}
         };
         for (int i = 0; i < defs.length; i++) {
@@ -2526,9 +2741,12 @@ final class FocusSheets {
                 }));
         gap(body, 8);
 
+        boolean layFlat = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgent = state.rateMode == FocusState.RateMode.INDULGENT;
+        int rateBg = layFlat ? PURPLE_SOFT : indulgent ? AMBER_SOFT : BLUE_SOFT;
+        int rateFg = layFlat ? PURPLE : indulgent ? AMBER : BLUE;
         body.addView(settingRow(activity, R.drawable.ic_tune,
-                indulgent ? AMBER_SOFT : BLUE_SOFT, indulgent ? AMBER : BLUE,
+                rateBg, rateFg,
                 "时间获取模式与上限", null,
                 state.rateMode.label, null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
@@ -2594,6 +2812,7 @@ final class FocusSheets {
         gap(body, 14);
 
         TextView passBtn = secondaryButton(activity, "");
+        TextView layBtn = secondaryButton(activity, "");
         Runnable[] refreshStatus = new Runnable[1];
         refreshStatus[0] = () -> {
             long now = System.currentTimeMillis();
@@ -2606,9 +2825,10 @@ final class FocusSheets {
             if (state.offlineActive()) locks.append("自律正计时 ");
             if (state.active()) locks.append("自律倒计时 ");
             if (state.bedtime) locks.append("睡眠锁定 ");
-            if (state.soberActive(now)) locks.append("清醒模式 ");
+            if (state.soberActive(now)) locks.append("目的模式 ");
             lockTv.setText("状态：" + (locks.length() == 0 ? "未处于任何锁定" : locks.toString().trim()));
-            passBtn.setText("发放 1 次放纵机会（当前 " + state.indulgentPasses + " 次）");
+            passBtn.setText("发放 +1 放纵卡（当前 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + "）");
+            layBtn.setText("发放 +1 躺平卡（当前 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + "）");
         };
 
         body.addView(text(activity, "调节今日可用时间", 13, INK_SUB, true));
@@ -2706,25 +2926,43 @@ final class FocusSheets {
 
         body.addView(text(activity, "快速解锁与状态重置", 13, INK_SUB, true));
         gap(body, 8);
-        TextView unlockBtn = dangerButton(activity, "一键解除全部锁定（正计时/倒计时/睡眠/清醒）");
+        TextView unlockBtn = dangerButton(activity, "一键解除全部锁定（正计时/倒计时/睡眠/目的）");
         unlockBtn.setOnClickListener(v -> {
             haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             state.debugUnlockAll(System.currentTimeMillis(), ZoneId.systemDefault());
             onChanged.run();
             refreshStatus[0].run();
-            Toast.makeText(activity, "已解除全部自律模式、睡眠与清醒锁定", Toast.LENGTH_SHORT).show();
+            Toast.makeText(activity, "已解除全部自律、睡眠与目的模式锁定", Toast.LENGTH_SHORT).show();
         });
         body.addView(unlockBtn, -1, -2);
         gap(body, 8);
 
         passBtn.setOnClickListener(v -> {
             tapHaptic(v);
-            state.indulgentPasses++;
-            onChanged.run();
-            refreshStatus[0].run();
-            Toast.makeText(activity, "已发放 1 次放纵模式解锁机会", Toast.LENGTH_SHORT).show();
+            if (state.indulgentPasses < FocusState.MAX_INDULGENT_CARDS) {
+                state.indulgentPasses++;
+                onChanged.run();
+                refreshStatus[0].run();
+                Toast.makeText(activity, "已发放 1 张放纵卡", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(activity, "放纵卡已达囤卡上限 5 张", Toast.LENGTH_SHORT).show();
+            }
         });
         body.addView(passBtn, -1, -2);
+        gap(body, 8);
+
+        layBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            if (state.layFlatCards < FocusState.MAX_LAY_FLAT_CARDS) {
+                state.layFlatCards++;
+                onChanged.run();
+                refreshStatus[0].run();
+                Toast.makeText(activity, "已发放 1 张躺平卡", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(activity, "躺平卡已达囤卡上限 2 张", Toast.LENGTH_SHORT).show();
+            }
+        });
+        body.addView(layBtn, -1, -2);
         gap(body, 8);
 
         TextView resetSwitchBtn = secondaryButton(activity, "重置今日切换模式次数");

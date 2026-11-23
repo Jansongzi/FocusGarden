@@ -10,6 +10,7 @@ import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.PixelFormat;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -17,6 +18,7 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 import android.telecom.TelecomManager;
 import android.util.SparseArray;
+import android.util.SparseBooleanArray;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
@@ -66,6 +68,8 @@ public final class FocusService extends AccessibilityService {
     private boolean refreshPending;
     private long recoverWindowUntil;
     private final SparseArray<String> windowPackages = new SparseArray<>();
+    private final SparseBooleanArray floatingWindowIds = new SparseBooleanArray();
+    private final Rect tmpBounds = new Rect();
     private String lastEventPackage;
     private long lastEventAt;
     private long soberLaunchGraceUntil;
@@ -163,8 +167,11 @@ public final class FocusService extends AccessibilityService {
                 windowPackages.put(event.getWindowId(), pkg);
             }
             if (pkg != null && !isTransientEvent(event, pkg)) {
-                lastEventPackage = pkg;
-                lastEventAt = SystemClock.elapsedRealtime();
+                boolean isKnownFloating = event.getWindowId() >= 0 && floatingWindowIds.get(event.getWindowId());
+                if (!isKnownFloating) {
+                    lastEventPackage = pkg;
+                    lastEventAt = SystemClock.elapsedRealtime();
+                }
                 long now = System.currentTimeMillis();
                 if (store.state.soberActive(now)) {
                     if (store.state.isSoberAllowed(pkg)) {
@@ -187,6 +194,7 @@ public final class FocusService extends AccessibilityService {
             if (Build.VERSION.SDK_INT >= 28
                     && (event.getWindowChanges() & AccessibilityEvent.WINDOWS_CHANGE_REMOVED) != 0) {
                 windowPackages.remove(event.getWindowId());
+                floatingWindowIds.delete(event.getWindowId());
             }
             if (Build.VERSION.SDK_INT < 28 || (event.getWindowChanges()
                     & (AccessibilityEvent.WINDOWS_CHANGE_ADDED | AccessibilityEvent.WINDOWS_CHANGE_REMOVED
@@ -214,9 +222,37 @@ public final class FocusService extends AccessibilityService {
             case "android", "com.android.systemui",
                     "com.android.permissioncontroller", "com.google.android.permissioncontroller",
                     "com.android.intentresolver", "com.google.android.intentresolver",
-                    "com.lbe.security.miui" -> true;
+                    "com.lbe.security.miui", "com.miui.securitycenter", "com.miui.freeform",
+                    "com.oplus.securitypermission", "com.coloros.securitypermission",
+                    "com.oplus.smartsidebar", "com.coloros.smartsidebar",
+                    "com.coloros.floatassistant", "com.oplus.floatassistant",
+                    "com.oplus.exsystemservice", "com.oplus.safecenter", "com.coloros.safecenter",
+                    "com.samsung.android.app.cocktailbarservice" -> true;
             default -> false;
         };
+    }
+
+    private boolean isFloatingOverlayBounds(AccessibilityWindowInfo window) {
+        if (window == null) return false;
+        window.getBoundsInScreen(tmpBounds);
+        int bw = tmpBounds.width();
+        int bh = tmpBounds.height();
+        if (bw <= 0 || bh <= 0) return false;
+        int screenW;
+        int screenH;
+        if (Build.VERSION.SDK_INT >= 30 && windows != null) {
+            Rect displayBounds = windows.getCurrentWindowMetrics().getBounds();
+            screenW = displayBounds.width();
+            screenH = displayBounds.height();
+        } else {
+            var dm = getResources().getDisplayMetrics();
+            screenW = dm.widthPixels;
+            screenH = dm.heightPixels;
+        }
+        if (screenW <= 0 || screenH <= 0) return false;
+        return (bw < screenW * 0.45f && bh < screenH * 0.45f)
+                || (bw < screenW * 0.65f && bh < screenH * 0.14f)
+                || (bw < screenW * 0.16f && bh < screenH * 0.85f);
     }
 
     private void requestWindowRefresh() {
@@ -235,6 +271,7 @@ public final class FocusService extends AccessibilityService {
     private String detectForegroundPackage() {
         refreshExemptSets();
         var currentWindows = getWindows();
+        boolean soberNow = store != null && store.state.soberActive(System.currentTimeMillis());
         String focusedPkg = null;
         boolean focusedSeen = false;
         String activePkg = null;
@@ -242,11 +279,22 @@ public final class FocusService extends AccessibilityService {
         String topPkg = null;
         boolean topSeen = false;
         int topLayer = Integer.MIN_VALUE;
+        String allowedAppPkg = null;
+        int allowedAppLayer = Integer.MIN_VALUE;
         try {
             for (AccessibilityWindowInfo window : currentWindows) {
                 if (window.getType() != AccessibilityWindowInfo.TYPE_APPLICATION || window.isInPictureInPictureMode()) {
                     continue;
                 }
+                int winId = window.getId();
+                if (isFloatingOverlayBounds(window)) {
+                    if (winId >= 0) {
+                        if (floatingWindowIds.size() >= 64) floatingWindowIds.clear();
+                        floatingWindowIds.put(winId, true);
+                    }
+                    continue;
+                }
+                if (winId >= 0) floatingWindowIds.delete(winId);
                 String pkg = resolveWindowPackage(window);
                 if (pkg != null && isTransientSystemPackage(pkg)) continue;
                 if (window.isFocused() && !focusedSeen) {
@@ -257,10 +305,16 @@ public final class FocusService extends AccessibilityService {
                     activeSeen = true;
                     activePkg = pkg;
                 }
-                if (!topSeen || window.getLayer() >= topLayer) {
+                int layer = window.getLayer();
+                if (!topSeen || layer >= topLayer) {
                     topSeen = true;
-                    topLayer = window.getLayer();
+                    topLayer = layer;
                     topPkg = pkg;
+                }
+                if (soberNow && pkg != null && store.state.isSoberAllowed(pkg)
+                        && (allowedAppPkg == null || layer >= allowedAppLayer)) {
+                    allowedAppPkg = pkg;
+                    allowedAppLayer = layer;
                 }
             }
         } finally {
@@ -268,8 +322,15 @@ public final class FocusService extends AccessibilityService {
                 for (AccessibilityWindowInfo window : currentWindows) window.recycle();
             }
         }
+        if (soberNow && allowedAppPkg != null) {
+            boolean blockedAbove = (focusedPkg != null && !store.state.isSoberAllowed(focusedPkg) && !getPackageName().equals(focusedPkg))
+                    || (activePkg != null && !store.state.isSoberAllowed(activePkg) && !getPackageName().equals(activePkg))
+                    || (topPkg != null && !store.state.isSoberAllowed(topPkg) && !getPackageName().equals(topPkg) && topLayer > allowedAppLayer);
+            if (!blockedAbove) return allowedAppPkg;
+        }
         if (focusedSeen) {
             if (focusedPkg != null) return focusedPkg;
+            if (soberNow && foreground != null && store.state.isSoberAllowed(foreground)) return foreground;
         } else if (activeSeen) {
             if (activePkg != null) return activePkg;
         } else if (topSeen) {
@@ -279,8 +340,9 @@ public final class FocusService extends AccessibilityService {
         AccessibilityNodeInfo activeRoot = getRootInActiveWindow();
         if (activeRoot != null) {
             try {
+                int rootWinId = activeRoot.getWindowId();
                 CharSequence name = activeRoot.getPackageName();
-                if (name != null) {
+                if (name != null && (rootWinId < 0 || !floatingWindowIds.get(rootWinId))) {
                     String pkg = name.toString();
                     if (!isTransientSystemPackage(pkg)) return pkg;
                 }
@@ -391,7 +453,9 @@ public final class FocusService extends AccessibilityService {
             soberTargetSeen = false;
         }
 
-        boolean focusGuardActive = store.state.guardSettingsDuringFocus
+        boolean layFlatNow = store.state.rateMode == FocusState.RateMode.LAY_FLAT;
+        boolean focusGuardActive = !layFlatNow
+                && store.state.guardSettingsDuringFocus
                 && (store.state.isDisciplineLocked(now) || store.state.bedtimeAt(now, zone))
                 && "com.android.settings".equals(foreground)
                 && now > settingsBypassUntil;
@@ -413,7 +477,7 @@ public final class FocusService extends AccessibilityService {
                 : store.state.restriction(foreground, now, zone);
 
         // Bedtime violation tracking if limited app is ever foregrounded during bedtime
-        if (reason == FocusState.Restriction.NONE && foreground != null) {
+        if (!layFlatNow && reason == FocusState.Restriction.NONE && foreground != null) {
             FocusState.Rule rule = store.state.rules.get(foreground);
             if (rule != null && rule.category() == FocusState.Category.LIMITED
                     && store.state.bedtimeAt(now, zone)) {
@@ -449,7 +513,7 @@ public final class FocusService extends AccessibilityService {
                         ? "自律正计时  " + GardenUi.countdown(state.offlineElapsed(now))
                         : "自律倒计时  " + GardenUi.countdown(state.remaining(now));
                 case BUDGET -> "可用时间已耗尽";
-                case SOBER -> "清醒模式进行中 · 剩余 " + SoberModeUi.clockText(state.soberRemaining(now));
+                case SOBER -> "目的模式进行中 · 剩余 " + SoberModeUi.clockText(state.soberRemaining(now));
                 default -> "";
             };
             blockScreen.setStatus(status);
@@ -502,6 +566,18 @@ public final class FocusService extends AccessibilityService {
         coreExemptPackages.add("com.android.permissioncontroller");
         coreExemptPackages.add("com.google.android.permissioncontroller");
         coreExemptPackages.add("com.lbe.security.miui");
+        coreExemptPackages.add("com.miui.securitycenter");
+        coreExemptPackages.add("com.miui.freeform");
+        coreExemptPackages.add("com.oplus.securitypermission");
+        coreExemptPackages.add("com.coloros.securitypermission");
+        coreExemptPackages.add("com.oplus.smartsidebar");
+        coreExemptPackages.add("com.coloros.smartsidebar");
+        coreExemptPackages.add("com.coloros.floatassistant");
+        coreExemptPackages.add("com.oplus.floatassistant");
+        coreExemptPackages.add("com.oplus.exsystemservice");
+        coreExemptPackages.add("com.oplus.safecenter");
+        coreExemptPackages.add("com.coloros.safecenter");
+        coreExemptPackages.add("com.samsung.android.app.cocktailbarservice");
         try {
             PackageManager pm = getPackageManager();
             Intent homeIntent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
@@ -573,7 +649,7 @@ public final class FocusService extends AccessibilityService {
                 int status = getResources().getIdentifier("status_bar_height", "dimen", "android");
                 params.y += status == 0 ? GardenUi.dp(this, 24) : getResources().getDimensionPixelSize(status);
             }
-            params.setTitle("清醒模式悬浮计时");
+            params.setTitle("目的模式悬浮计时");
             try {
                 windows.addView(pill, params);
                 soberPill = pill;
@@ -584,7 +660,7 @@ public final class FocusService extends AccessibilityService {
         if (!remaining.contentEquals(soberPill.getText())) {
             soberPill.setText(remaining);
         }
-        soberPill.setContentDescription("清醒模式剩余 " + remaining + "，返回倒计时");
+        soberPill.setContentDescription("目的模式剩余 " + remaining + "，返回倒计时");
     }
 
     private void hideSoberPill() {
@@ -596,7 +672,8 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void updateAwarenessBar(long now) {
-        if (!store.state.timeAwarenessBar || foreground == null) {
+        if (!store.state.timeAwarenessBar || foreground == null
+                || store.state.rateMode == FocusState.RateMode.LAY_FLAT) {
             hideAwarenessBar();
             return;
         }
@@ -721,7 +798,7 @@ public final class FocusService extends AccessibilityService {
         }
 
         FocusState.BlockAppearance appearance = state.nextBlockAppearance();
-        String buttonLabel = soberOverlay ? "返回清醒模式" : "返回桌面";
+        String buttonLabel = soberOverlay ? "返回目的模式" : "返回桌面";
         Runnable primaryAction = soberOverlay
                 ? () -> {
                     startActivity(new Intent(this, MainActivity.class)
@@ -803,6 +880,7 @@ public final class FocusService extends AccessibilityService {
         if (connected == this) connected = null;
         cancelRefresh();
         windowPackages.clear();
+        floatingWindowIds.clear();
         lastEventPackage = null;
         lastEventAt = 0L;
         soberLaunchGraceUntil = 0L;
