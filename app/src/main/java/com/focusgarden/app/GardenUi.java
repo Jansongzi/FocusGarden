@@ -192,6 +192,7 @@ final class GardenUi {
 
     static void applySystemBars(Window win, boolean darkBackground) {
         if (win == null) return;
+        View decor = win.getDecorView();
         if (Build.VERSION.SDK_INT >= 30) {
             var controller = win.getInsetsController();
             if (controller != null) {
@@ -200,7 +201,6 @@ final class GardenUi {
                 controller.setSystemBarsAppearance(darkBackground ? 0 : mask, mask);
             }
         } else {
-            View decor = win.getDecorView();
             int current = decor.getSystemUiVisibility();
             int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             decor.setSystemUiVisibility(darkBackground ? (current & ~mask) : (current | mask));
@@ -452,6 +452,15 @@ final class GardenUi {
 
     static Dialog bottomSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody,
                               String infoTitle, String infoMsg, View leadingAction) {
+        return edgeSheet(activity, title, subtitle, body, scrollBody, infoTitle, infoMsg, leadingAction, false);
+    }
+
+    static Dialog rightSheet(Activity activity, String title, View body) {
+        return edgeSheet(activity, title, null, body, true, null, null, null, true);
+    }
+
+    private static Dialog edgeSheet(Activity activity, String title, String subtitle, View body, boolean scrollBody,
+                                    String infoTitle, String infoMsg, View leadingAction, boolean fromRight) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCanceledOnTouchOutside(true);
@@ -460,34 +469,43 @@ final class GardenUi {
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(CARD);
         float r = dp(activity, 24);
-        bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
+        bg.setCornerRadii(fromRight
+                ? new float[]{r, r, 0, 0, 0, 0, r, r}
+                : new float[]{r, r, r, r, 0, 0, 0, 0});
         sheet.setBackground(bg);
 
         FrameLayout grip = new FrameLayout(activity);
-        grip.setContentDescription("向下拖动关闭面板");
+        grip.setContentDescription(fromRight ? "向右拖动关闭面板" : "向下拖动关闭面板");
         grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         View handle = new View(activity);
         handle.setBackground(shape(activity, darkTheme ? 0xff3a4860 : 0xffd5dde9, 3));
-        grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, 42), dp(activity, 4), Gravity.CENTER));
+        grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, fromRight ? 4 : 42),
+                dp(activity, fromRight ? 18 : 4), Gravity.CENTER));
         sheet.addView(grip, -1, dp(activity, 34));
         int touchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
         grip.setOnTouchListener(new View.OnTouchListener() {
-            private float downY;
+            private float down;
 
             @Override public boolean onTouch(View view, MotionEvent event) {
+                float position = fromRight ? event.getRawX() : event.getRawY();
                 switch (event.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN -> {
                         sheet.animate().cancel();
-                        downY = event.getRawY() - sheet.getTranslationY();
+                        down = position - (fromRight ? sheet.getTranslationX() : sheet.getTranslationY());
                     }
-                    case MotionEvent.ACTION_MOVE ->
-                            sheet.setTranslationY(Math.max(0f, event.getRawY() - downY - touchSlop));
+                    case MotionEvent.ACTION_MOVE -> {
+                        float distance = Math.max(0f, position - down - touchSlop);
+                        if (fromRight) sheet.setTranslationX(distance);
+                        else sheet.setTranslationY(distance);
+                    }
                     case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        float distance = fromRight ? sheet.getTranslationX() : sheet.getTranslationY();
+                        int size = fromRight ? sheet.getWidth() : sheet.getHeight();
                         if (event.getActionMasked() == MotionEvent.ACTION_UP
-                                && sheet.getTranslationY() >= Math.min(dp(activity, 96), sheet.getHeight() * 0.2f)) {
+                                && distance >= Math.min(dp(activity, 96), size * 0.2f)) {
                             dialog.dismiss();
                         } else {
-                            sheet.animate().translationY(0f).setDuration(180)
+                            sheet.animate().translationX(0f).translationY(0f).setDuration(180)
                                     .setInterpolator(new DecelerateInterpolator()).start();
                         }
                     }
@@ -546,15 +564,25 @@ final class GardenUi {
         Window win = dialog.getWindow();
         if (win != null) {
             win.setBackgroundDrawableResource(android.R.color.transparent);
-            win.setGravity(Gravity.BOTTOM);
-            int viewport = activity.findViewById(android.R.id.content).getHeight();
-            if (viewport <= 0) viewport = activity.getResources().getDisplayMetrics().heightPixels;
-            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, Math.round(viewport * 0.8f));
+            View viewport = activity.findViewById(android.R.id.content);
+            if (fromRight) {
+                int width = viewport.getWidth();
+                if (width <= 0) width = activity.getResources().getDisplayMetrics().widthPixels;
+                win.setGravity(Gravity.RIGHT);
+                win.setLayout(Math.min(dp(activity, 420), Math.round(width * 0.88f)),
+                        WindowManager.LayoutParams.MATCH_PARENT);
+            } else {
+                int height = viewport.getHeight();
+                if (height <= 0) height = activity.getResources().getDisplayMetrics().heightPixels;
+                win.setGravity(Gravity.BOTTOM);
+                win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, Math.round(height * 0.8f));
+            }
             win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                     | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
             win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
             win.setDimAmount(darkTheme ? 0.62f : 0.42f);
-            win.setWindowAnimations(R.style.Animation_FocusGarden_BottomSheet);
+            win.setWindowAnimations(fromRight
+                    ? R.style.Animation_FocusGarden_RightSheet : R.style.Animation_FocusGarden_BottomSheet);
         }
         dialog.show();
         return dialog;

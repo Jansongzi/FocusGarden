@@ -33,8 +33,6 @@ final class FocusState {
     static final int MAX_STREAK_PROTECT_CARDS = 10;
     static final int VAULT_EXPAND_CARD_COST_MINUTES = 60;
     static final int INDULGENT_INSTALLMENT_TOTAL_MINUTES = 20 * 60;
-    static final int MAX_DAILY_BASE_FREE_MINUTES = 15;
-    static final long MAX_DAILY_BASE_FREE_MS = MAX_DAILY_BASE_FREE_MINUTES * MINUTE;
     static final int SLEEP_CONFIG_COST_MINUTES = 35;
     static final int MODE_SWITCH_COST_MINUTES = 30;
     static final int DAILY_CAP_CHANGE_COST_MINUTES = 30;
@@ -45,6 +43,12 @@ final class FocusState {
     static final int THEME_SYSTEM = 0;
     static final int THEME_LIGHT = 1;
     static final int THEME_DARK = 2;
+    static final int[] ABSTINENCE_STAGE_HOURS = {24, 72, 168, 360, 720, 1440, 2160, 4320, 6480, 8760};
+    static final int MAX_ABSTINENCE_UI_REWARD_MINUTES = 30;
+    static final long ABSTINENCE_BACKDATE_GUARD_MS = 24L * 60 * MINUTE;
+    static final long ABSTINENCE_BACKDATE_GRACE_MS = 5L * MINUTE;
+    static final int ABSTINENCE_CONFIG_CHANGE_COST_MINUTES = 15;
+    static final int MAX_ABSTINENCE_RUNS = 40;
 
     enum Category { LEARNING, LIMITED }
     enum Restriction { NONE, FOCUS, BEDTIME, BUDGET, SOBER }
@@ -89,7 +93,7 @@ final class FocusState {
         }
     }
 
-    record Rule(String label, Category category, int dailyMinutes) {}
+    record Rule(String label, Category category) {}
     record Event(long timeMs, String type, String title, String detail, long deltaMs) {}
     record SoberWindow(long start, long end) {}
 
@@ -209,6 +213,12 @@ final class FocusState {
         }
     }
 
+    record AbstinenceRun(long startedMs, long endedMs, boolean relapsed, String triggerTag, String note) {
+        long durationMs() {
+            return Math.max(0L, endedMs - startedMs);
+        }
+    }
+
     static final class Abstinence {
         String id;
         String name;
@@ -222,8 +232,17 @@ final class FocusState {
         String reason;
         double dailySavingYuan;
         int iconIndex;
+        long createdMs;
+        long rewardGuardUntilMs;
+        int totalEarnedMinutes;
+        long previousStartedMs;
+        String previousStartedForDate = "";
+        int previouslyClaimedTargetHours;
         final TreeSet<String> relapseDates = new TreeSet<>();
         final Map<String, String> diaryNotes = new LinkedHashMap<>();
+        final Map<String, String> diaryTriggers = new LinkedHashMap<>();
+        final LinkedHashSet<String> linkedPackages = new LinkedHashSet<>();
+        final List<AbstinenceRun> runs = new ArrayList<>();
 
         Abstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
                    int completedCount, int relapseCount, long longestMs, boolean rewardClaimed) {
@@ -237,12 +256,14 @@ final class FocusState {
             this.id = id;
             this.name = name;
             this.startedMs = startedMs;
+            this.createdMs = startedMs;
             this.targetHours = Math.max(1, Math.min(8760, targetHours));
             this.rewardMinutes = Math.max(5, Math.min(480, rewardMinutes));
             this.completedCount = Math.max(0, completedCount);
             this.relapseCount = Math.max(0, relapseCount);
             this.longestMs = Math.max(0L, longestMs);
             this.rewardClaimed = rewardClaimed;
+            this.totalEarnedMinutes = this.completedCount * this.rewardMinutes;
             this.reason = reason == null ? "" : reason.trim();
             this.dailySavingYuan = (Double.isFinite(dailySavingYuan) && dailySavingYuan > 0.0)
                     ? Math.min(100_000.0, dailySavingYuan) : 0.0;
@@ -269,7 +290,6 @@ final class FocusState {
         long stepsEarnedMs;
         long rewardSpentMs;
         long configSpentMs;
-        long baseFreeUsedMs;
         final List<Event> events = new ArrayList<>();
     }
 
@@ -1222,12 +1242,8 @@ final class FocusState {
 
     void putRule(String pkg, Rule rule) {
         if (pkg == null || rule == null) return;
-        Rule normalized = rule.category == Category.LIMITED
-                ? new Rule(rule.label, rule.category,
-                        Math.max(0, Math.min(MAX_DAILY_BASE_FREE_MINUTES, rule.dailyMinutes)))
-                : new Rule(rule.label, rule.category, 0);
-        rules.put(pkg, normalized);
-        if (normalized.category == Category.LEARNING) freeLearningSlotUsed = true;
+        rules.put(pkg, rule);
+        if (rule.category == Category.LEARNING) freeLearningSlotUsed = true;
     }
 
     int batchRuleChangeCostMinutes(Collection<String> pkgs, boolean targetLearning) {
@@ -1244,10 +1260,6 @@ final class FocusState {
                     total += 15;
                     freeUsed = true;
                 }
-            } else {
-                int targetLimit = existing != null && existing.category == Category.LIMITED
-                        ? existing.dailyMinutes : 0;
-                total += ruleChangeCostMinutes(existing, false, targetLimit);
             }
         }
         return total;
@@ -1281,21 +1293,12 @@ final class FocusState {
         return 0;
     }
 
-    int ruleChangeCostMinutes(Rule existing, boolean newIsLearning, int newLimit) {
+    int ruleChangeCostMinutes(Rule existing, boolean newIsLearning) {
+        if (!newIsLearning) return 0;
         if (existing == null) {
-            if (!newIsLearning) return 0;
             return (!freeLearningSlotUsed && learningRuleCount() == 0) ? 0 : 10;
         }
-        boolean wasLearning = existing.category == Category.LEARNING;
-        if (wasLearning == newIsLearning && (wasLearning || existing.dailyMinutes == newLimit)) return 0;
-        if (!wasLearning && newIsLearning) return 15;
-        if (!wasLearning && !newIsLearning) {
-            if (newLimit > existing.dailyMinutes) {
-                return Math.min(30, 15 + ((newLimit - existing.dailyMinutes) / 15) * 5);
-            }
-            return 0;
-        }
-        return 0;
+        return existing.category == Category.LIMITED ? 15 : 0;
     }
 
     int removeRuleCostMinutes(Rule existing) {
@@ -1399,20 +1402,6 @@ final class FocusState {
         return offlineRunning() || ((phaseEnd > now || paused()) && !inBreak);
     }
 
-    long dailyBaseFreeRemainingMs(String date) {
-        Day d = days.get(date);
-        long usedFree = d == null ? 0L : d.baseFreeUsedMs;
-        return Math.max(0L, MAX_DAILY_BASE_FREE_MS - usedFree);
-    }
-
-    long freeRemainingMs(String pkg, String date) {
-        Rule rule = rules.get(pkg);
-        if (rule == null || rule.category != Category.LIMITED || rule.dailyMinutes <= 0) return 0L;
-        int cappedMin = Math.min(MAX_DAILY_BASE_FREE_MINUTES, rule.dailyMinutes);
-        long appLeft = Math.max(0L, cappedMin * MINUTE - used(pkg, date));
-        return Math.min(appLeft, dailyBaseFreeRemainingMs(date));
-    }
-
     Restriction restriction(String pkg, long now, ZoneId zone) {
         if (pkg == null || pkg.isEmpty()) return Restriction.NONE;
         if (rateMode == RateMode.LAY_FLAT) return Restriction.NONE;
@@ -1424,8 +1413,7 @@ final class FocusState {
         }
         if (soberActive(now)) return isSoberAllowed(pkg) ? Restriction.NONE : Restriction.SOBER;
         if (rule == null || rule.category != Category.LIMITED) return Restriction.NONE;
-        long free = freeRemainingMs(pkg, date(now, zone));
-        return free <= 0 && creditMs == 0 ? Restriction.BUDGET : Restriction.NONE;
+        return creditMs <= 0L ? Restriction.BUDGET : Restriction.NONE;
     }
 
     long syncUsageTotal(String pkg, long reportedTotalMs, long now, ZoneId zone) {
@@ -1469,13 +1457,9 @@ final class FocusState {
             } else if (rateMode == RateMode.LAY_FLAT) {
                 stats.limitedMs += duration;
             } else {
-                long free = freeRemainingMs(pkg, dayStr);
-                duration = Math.min(duration, free + creditMs);
-                long freeUsedNow = Math.min(free, duration);
-                long spent = Math.min(creditMs, Math.max(0L, duration - freeUsedNow));
-                stats.baseFreeUsedMs += freeUsedNow;
-                creditMs -= spent;
-                stats.spentMs += spent;
+                duration = Math.min(duration, Math.max(0L, creditMs));
+                creditMs -= duration;
+                stats.spentMs += duration;
                 stats.limitedMs += duration;
             }
             if (duration > 0) stats.usage.put(pkg, previous + duration);
@@ -1800,8 +1784,13 @@ final class FocusState {
         return a != null && abstinenceElapsedMs(a, now) >= abstinenceTargetMs(a);
     }
 
+    long abstinenceGuardRemainingMs(Abstinence a, long now) {
+        if (a == null || a.rewardGuardUntilMs <= now) return 0L;
+        return a.rewardGuardUntilMs - now;
+    }
+
     boolean canClaimAbstinence(Abstinence a, long now) {
-        return abstinenceReached(a, now) && !a.rewardClaimed;
+        return abstinenceReached(a, now) && !a.rewardClaimed && abstinenceGuardRemainingMs(a, now) <= 0L;
     }
 
     void addAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes) {
@@ -1818,6 +1807,38 @@ final class FocusState {
         freeHabitSlotUsed = true;
     }
 
+    void addAbstinenceTracked(String id, String name, long startedMs, int targetHours, int rewardMinutes,
+                              String reason, double dailySavingYuan, int iconIndex,
+                              Collection<String> linkedPackages, long now) {
+        if (id == null || name == null) return;
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) return;
+        Abstinence a = new Abstinence(id, trimmed, startedMs, targetHours, rewardMinutes,
+                0, 0, 0L, false, reason, dailySavingYuan, iconIndex);
+        a.createdMs = now;
+        if (startedMs < now - ABSTINENCE_BACKDATE_GRACE_MS) {
+            long guardSpan = Math.min(abstinenceTargetMs(a), ABSTINENCE_BACKDATE_GUARD_MS);
+            a.rewardGuardUntilMs = now + guardSpan;
+        }
+        if (linkedPackages != null) {
+            for (String p : linkedPackages) {
+                if (p != null && !p.trim().isEmpty()) a.linkedPackages.add(p.trim());
+            }
+        }
+        abstinences.put(id, a);
+        freeHabitSlotUsed = true;
+    }
+
+    int abstinenceConfigCostMinutes(Abstinence existing, int newTargetHours, int newRewardMinutes) {
+        if (existing == null) return 0;
+        int clampedTarget = Math.max(1, Math.min(8760, newTargetHours));
+        int clampedReward = Math.max(5, Math.min(480, newRewardMinutes));
+        if (clampedTarget < existing.targetHours || clampedReward > existing.rewardMinutes) {
+            return ABSTINENCE_CONFIG_CHANGE_COST_MINUTES;
+        }
+        return 0;
+    }
+
     void updateAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes, long now) {
         Abstinence a = abstinences.get(id);
         if (a == null) return;
@@ -1826,18 +1847,43 @@ final class FocusState {
 
     void updateAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
                           String reason, double dailySavingYuan, int iconIndex, long now) {
+        updateAbstinence(id, name, startedMs, targetHours, rewardMinutes, reason, dailySavingYuan, iconIndex,
+                null, now, false);
+    }
+
+    void updateAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
+                          String reason, double dailySavingYuan, int iconIndex,
+                          Collection<String> linkedPackages, long now, boolean protectBackdate) {
         Abstinence a = abstinences.get(id);
         if (a == null || name == null) return;
         String trimmed = name.trim();
         if (trimmed.isEmpty()) return;
+        int clampedTarget = Math.max(1, Math.min(8760, targetHours));
+        boolean backdatedOrShortened = protectBackdate
+                && (startedMs < a.startedMs - ABSTINENCE_BACKDATE_GRACE_MS || clampedTarget < a.targetHours);
         a.name = trimmed;
+        if (startedMs != a.startedMs) {
+            a.previousStartedMs = 0L;
+            a.previousStartedForDate = "";
+            a.previouslyClaimedTargetHours = 0;
+        }
         a.startedMs = startedMs;
-        a.targetHours = Math.max(1, Math.min(8760, targetHours));
+        a.targetHours = clampedTarget;
         a.rewardMinutes = Math.max(5, Math.min(480, rewardMinutes));
         a.reason = reason == null ? "" : reason.trim();
         a.dailySavingYuan = (Double.isFinite(dailySavingYuan) && dailySavingYuan > 0.0)
                 ? Math.min(100_000.0, dailySavingYuan) : 0.0;
         a.iconIndex = Math.max(0, iconIndex);
+        if (linkedPackages != null) {
+            a.linkedPackages.clear();
+            for (String p : linkedPackages) {
+                if (p != null && !p.trim().isEmpty()) a.linkedPackages.add(p.trim());
+            }
+        }
+        if (backdatedOrShortened) {
+            long guardSpan = Math.min(abstinenceTargetMs(a), ABSTINENCE_BACKDATE_GUARD_MS);
+            a.rewardGuardUntilMs = Math.max(a.rewardGuardUntilMs, now + guardSpan);
+        }
         if (abstinenceElapsedMs(a, now) < abstinenceTargetMs(a)) {
             a.rewardClaimed = false;
         }
@@ -1848,10 +1894,21 @@ final class FocusState {
     }
 
     long pendingAbstinenceRewardMs(long now) {
+        return pendingAbstinenceRewardMs(now, ZoneId.systemDefault());
+    }
+
+    long pendingAbstinenceRewardMs(long now, ZoneId zone) {
         if (rateMode == RateMode.LAY_FLAT) return 0L;
+        long capLeft = remainingHabitCapMs(logicDate(now, zone));
+        if (capLeft <= 0L) return 0L;
         long sum = 0L;
         for (Abstinence a : abstinences.values()) {
-            if (canClaimAbstinence(a, now)) sum += Math.max(0, a.rewardMinutes) * MINUTE;
+            if (canClaimAbstinence(a, now)) {
+                long raw = Math.max(0, a.rewardMinutes) * MINUTE;
+                long grantable = Math.min(raw, capLeft - sum);
+                if (grantable <= 0L) break;
+                sum += grantable;
+            }
         }
         return sum;
     }
@@ -1882,7 +1939,7 @@ final class FocusState {
         long sleepMs = (!hiddenCards.contains("sleep") && hasPendingEarlySleepReward(now, zone))
                 ? Math.max(0, earlySleepRewardMinutes) * MINUTE : 0L;
         long todoMs = !hiddenCards.contains("todos") ? pendingTodoRewardMs(now, today) : 0L;
-        long abstinenceMs = !hiddenCards.contains("habits") ? pendingAbstinenceRewardMs(now) : 0L;
+        long abstinenceMs = !hiddenCards.contains("habits") ? pendingAbstinenceRewardMs(now, zone) : 0L;
         int units = !hiddenCards.contains("steps") ? claimableStepUnits(today) : 0;
         long stepMs = units > 0
                 ? Math.min((long) units * Math.max(0, stepRewardMinutes) * MINUTE, remainingStepCapMs(today))
@@ -1909,63 +1966,130 @@ final class FocusState {
         return new ClaimAllResult(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, claimed);
     }
 
+    private static void addAbstinenceRun(Abstinence a, AbstinenceRun run) {
+        if (a == null || run == null) return;
+        a.runs.add(run);
+        while (a.runs.size() > MAX_ABSTINENCE_RUNS) {
+            a.runs.remove(0);
+        }
+    }
+
+    static int nextAbstinenceStageHours(int currentHours) {
+        for (int h : ABSTINENCE_STAGE_HOURS) {
+            if (h > currentHours) return h;
+        }
+        if (currentHours < 8760) {
+            return Math.min(8760, currentHours + 720);
+        }
+        return 8760;
+    }
+
+    int advanceAbstinenceStage(String id, long now, ZoneId zone) {
+        Abstinence a = abstinences.get(id);
+        if (a == null) return 0;
+        long elapsed = abstinenceElapsedMs(a, now);
+        a.longestMs = Math.max(a.longestMs, elapsed);
+        int next = nextAbstinenceStageHours(a.targetHours);
+        if (next > a.targetHours) {
+            a.targetHours = next;
+            a.rewardClaimed = false;
+            syncResetDay(now, zone);
+            logEvent(date(now, zone), now, "HABIT", "进阶下一阶段 · " + a.name,
+                    "保持连胜推进至 " + next + " 小时目标", 0L);
+        } else {
+            resetAbstinence(id, now, zone, false, "", "");
+        }
+        return a.targetHours;
+    }
+
     long claimAbstinence(String id, long now, ZoneId zone) {
         Abstinence a = abstinences.get(id);
         syncResetDay(now, zone);
         if (rateMode == RateMode.LAY_FLAT) return 0L;
         if (!canClaimAbstinence(a, now)) return 0L;
+        LocalDate today = logicDate(now, zone);
+        long capLeft = remainingHabitCapMs(today);
+        if (capLeft <= 0L) return 0L;
+        long raw = Math.max(0, a.rewardMinutes) * MINUTE;
+        long reward = Math.min(raw, capLeft);
+        if (reward <= 0L) return 0L;
         long elapsed = abstinenceElapsedMs(a, now);
         a.rewardClaimed = true;
         a.completedCount++;
         a.longestMs = Math.max(a.longestMs, elapsed);
-        long reward = Math.max(0, a.rewardMinutes) * MINUTE;
+        a.totalEarnedMinutes += (int) (reward / MINUTE);
         String d = date(now, zone);
         Day day = day(d);
         day.checkIns++;
         day.habitEarnedMs += reward;
-        if (reward > 0L) grant(day, reward);
+        grant(day, reward);
+        String capNote = reward < raw ? "（受每日戒断 " + habitDailyCapMinutes + "m 上限约束）" : "";
         logEvent(d, now, "HABIT", "达成戒断目标 · " + a.name,
-                "已坚持 " + a.targetHours + " 小时（第 " + a.completedCount + " 次达成）", reward);
+                "已坚持 " + a.targetHours + " 小时（第 " + a.completedCount + " 次达成）" + capNote, reward);
         evaluateDisciplinedDay(now, zone);
         return reward;
     }
 
     void resetAbstinence(String id, long now, ZoneId zone, boolean relapse) {
-        resetAbstinence(id, now, zone, relapse, "");
+        resetAbstinence(id, now, zone, relapse, "", "");
     }
 
     void resetAbstinence(String id, long now, ZoneId zone, boolean relapse, String diaryNote) {
+        resetAbstinence(id, now, zone, relapse, diaryNote, "");
+    }
+
+    void resetAbstinence(String id, long now, ZoneId zone, boolean relapse, String diaryNote, String triggerTag) {
         Abstinence a = abstinences.get(id);
         if (a == null) return;
+        long prevStart = a.startedMs;
         long elapsed = abstinenceElapsedMs(a, now);
         a.longestMs = Math.max(a.longestMs, elapsed);
+        String note = diaryNote == null ? "" : diaryNote.trim();
+        String trig = triggerTag == null ? "" : triggerTag.trim();
+        if (prevStart > 0L && now > prevStart) {
+            addAbstinenceRun(a, new AbstinenceRun(prevStart, now, relapse, trig, note));
+        }
         if (relapse) {
             String calDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString();
-            if (a.relapseDates.add(calDate) || elapsed >= 0L) {
-                a.relapseCount++;
-            }
-            if (diaryNote != null && !diaryNote.trim().isEmpty()) {
-                a.diaryNotes.put(calDate, diaryNote.trim());
-            }
+            a.previousStartedMs = prevStart;
+            a.previousStartedForDate = calDate;
+            a.previouslyClaimedTargetHours = a.rewardClaimed ? a.targetHours : 0;
+            a.relapseDates.add(calDate);
+            a.relapseCount++;
+            if (!note.isEmpty()) a.diaryNotes.put(calDate, note);
+            if (!trig.isEmpty()) a.diaryTriggers.put(calDate, trig);
+        } else {
+            a.previousStartedMs = 0L;
+            a.previousStartedForDate = "";
+            a.previouslyClaimedTargetHours = 0;
         }
         a.startedMs = now;
         a.rewardClaimed = false;
         syncResetDay(now, zone);
         logEvent(date(now, zone), now, "HABIT",
                 (relapse ? "戒断破戒重计 · " : "开启新一轮戒断 · ") + a.name,
-                elapsed >= MINUTE ? "本轮坚持 " + (elapsed / MINUTE) + " 分钟" : "重新开始计时", 0L);
+                (elapsed >= MINUTE ? "本轮坚持 " + (elapsed / MINUTE) + " 分钟" : "重新开始计时")
+                        + (trig.isEmpty() ? "" : " · 诱因：" + trig), 0L);
     }
 
     void setAbstinenceCalendarRecord(String id, LocalDate targetDate, boolean relapsed,
                                      String note, long now, ZoneId zone) {
+        setAbstinenceCalendarRecord(id, targetDate, relapsed, note, "", now, zone);
+    }
+
+    void setAbstinenceCalendarRecord(String id, LocalDate targetDate, boolean relapsed,
+                                     String note, String triggerTag, long now, ZoneId zone) {
         Abstinence a = abstinences.get(id);
         if (a == null || targetDate == null) return;
         LocalDate calToday = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
         if (targetDate.isAfter(calToday)) return;
         String key = targetDate.toString();
         String trimmedNote = note == null ? "" : note.trim();
+        String trimmedTrig = triggerTag == null ? "" : triggerTag.trim();
         if (trimmedNote.isEmpty()) a.diaryNotes.remove(key);
         else a.diaryNotes.put(key, trimmedNote);
+        if (trimmedTrig.isEmpty()) a.diaryTriggers.remove(key);
+        else a.diaryTriggers.put(key, trimmedTrig);
 
         boolean wasRelapsed = a.relapseDates.contains(key);
         if (relapsed && !wasRelapsed) {
@@ -1973,24 +2097,79 @@ final class FocusState {
             a.relapseCount++;
             LocalDate startDay = Instant.ofEpochMilli(a.startedMs).atZone(zone).toLocalDate();
             if (!targetDate.isBefore(startDay)) {
-                a.longestMs = Math.max(a.longestMs, abstinenceElapsedMs(a, now));
-                if (targetDate.equals(calToday)) {
-                    a.startedMs = now;
-                    a.rewardClaimed = false;
-                } else {
-                    a.startedMs = Math.min(now, targetDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli());
-                    if (abstinenceElapsedMs(a, now) < abstinenceTargetMs(a)) {
-                        a.rewardClaimed = false;
-                    }
+                long prevStart = a.startedMs;
+                long relapseAt = targetDate.equals(calToday)
+                        ? now
+                        : Math.min(now, targetDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli());
+                a.longestMs = Math.max(a.longestMs, Math.max(0L, relapseAt - prevStart));
+                if (prevStart > 0L && relapseAt > prevStart) {
+                    addAbstinenceRun(a, new AbstinenceRun(prevStart, relapseAt, true, trimmedTrig, trimmedNote));
                 }
+                a.previousStartedMs = prevStart;
+                a.previousStartedForDate = key;
+                a.previouslyClaimedTargetHours = a.rewardClaimed ? a.targetHours : 0;
+                a.startedMs = relapseAt;
+                if (abstinenceElapsedMs(a, now) < abstinenceTargetMs(a)) a.rewardClaimed = false;
             }
             syncResetDay(now, zone);
             logEvent(date(now, zone), now, "HABIT", "记录戒断复发 · " + a.name,
-                    key + (trimmedNote.isEmpty() ? "" : " · " + trimmedNote), 0L);
+                    key + (trimmedTrig.isEmpty() ? "" : " · " + trimmedTrig)
+                            + (trimmedNote.isEmpty() ? "" : " · " + trimmedNote), 0L);
         } else if (!relapsed && wasRelapsed) {
             a.relapseDates.remove(key);
             a.relapseCount = Math.max(0, a.relapseCount - 1);
+            a.diaryTriggers.remove(key);
+            if (key.equals(a.previousStartedForDate) && a.previousStartedMs > 0L && a.previousStartedMs <= now) {
+                long restartedAt = a.startedMs;
+                a.startedMs = a.previousStartedMs;
+                a.previousStartedMs = 0L;
+                a.previousStartedForDate = "";
+                a.rewardClaimed = a.rewardClaimed || a.previouslyClaimedTargetHours == a.targetHours;
+                a.previouslyClaimedTargetHours = 0;
+                if (!a.runs.isEmpty()) {
+                    AbstinenceRun last = a.runs.get(a.runs.size() - 1);
+                    if (last.relapsed() && last.startedMs() == a.startedMs && last.endedMs() == restartedAt) {
+                        a.runs.remove(a.runs.size() - 1);
+                    }
+                }
+                if (abstinenceElapsedMs(a, now) < abstinenceTargetMs(a)) {
+                    a.rewardClaimed = false;
+                }
+            }
         }
+    }
+
+    Abstinence linkedAbstinenceForPackage(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return null;
+        for (Abstinence a : abstinences.values()) {
+            if (a.linkedPackages.contains(pkg)) return a;
+        }
+        return null;
+    }
+
+    LocalDate abstinenceFirstTrackedDay(Abstinence a, ZoneId zone) {
+        long earliestMs = a.startedMs;
+        for (AbstinenceRun run : a.runs) {
+            if (run.startedMs() > 0L && (earliestMs <= 0L || run.startedMs() < earliestMs)) {
+                earliestMs = run.startedMs();
+            }
+        }
+        return earliestMs > 0L ? Instant.ofEpochMilli(earliestMs).atZone(zone).toLocalDate() : null;
+    }
+
+    int abstinenceCleanDaysLast30(Abstinence a, long now, ZoneId zone) {
+        if (a == null) return 0;
+        LocalDate calToday = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
+        LocalDate windowStart = calToday.minusDays(29);
+        LocalDate earliestDay = abstinenceFirstTrackedDay(a, zone);
+        if (earliestDay == null) return 0;
+        LocalDate start = earliestDay.isAfter(windowStart) ? earliestDay : windowStart;
+        if (start.isAfter(calToday)) return 0;
+        int clean = 0;
+        for (LocalDate d = start; !d.isAfter(calToday); d = d.plusDays(1)) {
+            if (!a.relapseDates.contains(d.toString())) clean++;
+        }
+        return clean;
     }
 
     int totalAbstinenceCompleted() {

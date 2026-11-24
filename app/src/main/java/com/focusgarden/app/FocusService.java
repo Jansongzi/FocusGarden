@@ -292,7 +292,10 @@ public final class FocusService extends AccessibilityService {
                     continue;
                 }
                 int winId = window.getId();
-                if (isFloatingOverlayBounds(window)) {
+                String pkg = resolveWindowPackage(window);
+                if (pkg != null && isTransientSystemPackage(pkg)) continue;
+                if (isFloatingOverlayBounds(window) && (getPackageName().equals(pkg)
+                        || (!window.isFocused() && !window.isActive()))) {
                     if (winId >= 0) {
                         if (floatingWindowIds.size() >= 64) floatingWindowIds.clear();
                         floatingWindowIds.put(winId, true);
@@ -300,8 +303,6 @@ public final class FocusService extends AccessibilityService {
                     continue;
                 }
                 if (winId >= 0) floatingWindowIds.delete(winId);
-                String pkg = resolveWindowPackage(window);
-                if (pkg != null && isTransientSystemPackage(pkg)) continue;
                 if (window.isFocused() && !focusedSeen) {
                     focusedSeen = true;
                     focusedPkg = pkg;
@@ -333,14 +334,9 @@ public final class FocusService extends AccessibilityService {
                     || (topPkg != null && !store.state.isSoberAllowed(topPkg) && !getPackageName().equals(topPkg) && topLayer > allowedAppLayer);
             if (!blockedAbove) return allowedAppPkg;
         }
-        if (focusedSeen) {
-            if (focusedPkg != null) return focusedPkg;
-            if (soberNow && foreground != null && store.state.isSoberAllowed(foreground)) return foreground;
-        } else if (activeSeen) {
-            if (activePkg != null) return activePkg;
-        } else if (topSeen) {
-            if (topPkg != null) return topPkg;
-        }
+        if (focusedPkg != null) return focusedPkg;
+        if (activePkg != null) return activePkg;
+        if (!focusedSeen && !activeSeen && topPkg != null) return topPkg;
 
         AccessibilityNodeInfo activeRoot = getRootInActiveWindow();
         if (activeRoot != null) {
@@ -363,7 +359,7 @@ public final class FocusService extends AccessibilityService {
                 return lastEventPackage;
             }
         }
-        return null;
+        return focusedSeen && soberNow && store.state.isSoberAllowed(foreground) ? foreground : null;
     }
 
     private String resolveWindowPackage(AccessibilityWindowInfo window) {
@@ -496,7 +492,7 @@ public final class FocusService extends AccessibilityService {
 
         if (reason == FocusState.Restriction.NONE) {
             hideOverlay();
-            if (sober || sleepLock) hideAwarenessBar();
+            if (sober || sleepLock || exempt) hideAwarenessBar();
             else updateAwarenessBar(now);
         } else {
             hideSoberPill();
@@ -524,6 +520,16 @@ public final class FocusService extends AccessibilityService {
                 case BEDTIME -> "早睡锁机中 · 明早 " + GardenUi.clock(state.sleepEnd) + " 解锁";
                 default -> "";
             };
+            FocusState.Abstinence linkedAbs = state.linkedAbstinenceForPackage(blockedPackage);
+            if (linkedAbs != null && !status.isEmpty()) {
+                StringBuilder absLine = new StringBuilder();
+                absLine.append("\n关联戒断「").append(linkedAbs.name).append("」已坚持 ")
+                        .append(AbstinenceUi.formatSummaryDuration(state.abstinenceElapsedMs(linkedAbs, now)));
+                if (!linkedAbs.reason.isEmpty()) {
+                    absLine.append("\n初心：").append(linkedAbs.reason);
+                }
+                status = status + absLine;
+            }
             blockScreen.setStatus(status);
         }
 
@@ -767,23 +773,22 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void updateAwarenessBar(long now) {
-        if (!store.state.timeAwarenessBar || foreground == null
-                || store.state.rateMode == FocusState.RateMode.LAY_FLAT) {
+        FocusState state = store.state;
+        if (!state.timeAwarenessBar || !foregroundFocused || foreground == null
+                || state.isLayFlat()) {
             hideAwarenessBar();
             return;
         }
-        FocusState.Rule rule = store.state.rules.get(foreground);
+        FocusState.Rule rule = state.rules.get(foreground);
         if (rule == null || rule.category() != FocusState.Category.LIMITED) {
             hideAwarenessBar();
             return;
         }
 
-        String todayStr = FocusState.date(now, ZoneId.systemDefault());
-        long used = store.state.used(foreground, todayStr);
-        long freeLeft = store.state.freeRemainingMs(foreground, todayStr);
-        long totalLeft = freeLeft + store.state.creditMs;
-        long totalBudget = Math.max(FocusState.MINUTE, totalLeft + used);
-        float ratio = Math.min(1f, (float) totalLeft / totalBudget);
+        FocusState.Day day = state.days.get(FocusState.date(now, ZoneId.systemDefault()));
+        long totalLeft = state.creditMs;
+        long totalBudget = totalLeft + (day == null ? 0L : day.limitedMs);
+        float ratio = totalBudget > 0L ? (float) totalLeft / totalBudget : 0f;
         int barColor = totalLeft <= FocusState.MINUTE ? GardenUi.RED
                 : ratio < 0.2f ? GardenUi.AMBER
                 : ratio < 0.5f ? GardenUi.BLUE
@@ -800,6 +805,10 @@ public final class FocusService extends AccessibilityService {
                             | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSLUCENT);
             params.gravity = Gravity.TOP;
+            if (Build.VERSION.SDK_INT >= 30) params.setFitInsetsTypes(0);
+            if (Build.VERSION.SDK_INT >= 28) {
+                params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            }
             params.setTitle("留白时间感知条");
             try {
                 windows.addView(bar, params);

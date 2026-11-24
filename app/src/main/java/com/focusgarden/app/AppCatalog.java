@@ -37,4 +37,14 @@ final class AppCatalog {
         list.sort((a, b) -> collator.compare(a.label(), b.label()));
         return list;
     }
+
+    static String labelOf(Context context, String pkg) {
+        if (context == null || pkg == null || pkg.isEmpty()) return "应用";
+        try {
+            PackageManager pm = context.getPackageManager();
+            CharSequence lbl = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+            if (lbl != null && lbl.length() > 0) return lbl.toString();
+        } catch (PackageManager.NameNotFoundException ignored) {}
+        return "已配置应用";
+    }
 }

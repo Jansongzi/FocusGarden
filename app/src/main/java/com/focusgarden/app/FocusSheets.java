@@ -506,6 +506,7 @@ final class FocusSheets {
         rebuildSetup[0].run();
         refresh.run();
 
+        dialog.setContentView(root);
         Window win = dialog.getWindow();
         if (win != null) {
             win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
@@ -513,11 +514,10 @@ final class FocusSheets {
             win.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
             if (Build.VERSION.SDK_INT >= 29) win.setNavigationBarContrastEnforced(false);
             if (Build.VERSION.SDK_INT >= 30) win.setDecorFitsSystemWindows(false);
-            applySystemBars(win, isDark());
         }
-        dialog.setContentView(root);
-        root.requestApplyInsets();
         dialog.show();
+        applySystemBars(win, isDark());
+        root.requestApplyInsets();
 
         return new LiveRefresh() {
             @Override public void refresh() { refresh.run(); }
@@ -913,7 +913,7 @@ final class FocusSheets {
         body.addView(manageLimited, -1, -2);
 
         sheetRef[0] = bottomSheet(activity, "可用时长明细", null, body, true,
-                "时间消耗", "受限应用先扣 15 分钟共享免费额度，超出后扣今日可用时长。");
+                "时间消耗", "所有受限应用共用今日可用时长，用完后统一拦截。");
     }
 
     static void showTodos(MainActivity activity, FocusState state, Runnable onChanged) {
@@ -1440,9 +1440,7 @@ final class FocusSheets {
                 FocusState.Rule existing = state.rules.get(entry.pkg());
                 if (existing != null) {
                     boolean learning = existing.category() == FocusState.Category.LEARNING;
-                    String statusText = learning ? "当前：正向学习"
-                            : (existing.dailyMinutes() <= 0 ? "当前：完全由可用时长决定"
-                            : "当前：每日免费 " + existing.dailyMinutes() + " 分");
+                    String statusText = learning ? "当前：正向学习" : "当前：受限管控";
                     TextView sub = text(activity, statusText, 11, learning ? GREEN : BLUE, false);
                     info.addView(sub);
                 }
@@ -1526,21 +1524,15 @@ final class FocusSheets {
             }
             int cost = state.batchRuleChangeCostMinutes(selected.keySet(), targetLearning[0]);
             String typeLabel = targetLearning[0] ? "正向学习应用" : "受限管控应用";
-            String detail = "将已选 " + selected.size() + " 个应用设为" + typeLabel
-                    + (targetLearning[0] ? "" : "（未自定义时长时完全由可用时长决定）");
+            String detail = "将已选 " + selected.size() + " 个应用设为" + typeLabel;
             confirmPaidChange(activity, state, "app_rule", "批量添加" + typeLabel, detail, cost, false, () -> {
                 if (cost == 0) haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 for (Map.Entry<String, String> item : selected.entrySet()) {
                     String pkg = item.getKey();
                     String lbl = item.getValue();
-                    FocusState.Rule prev = state.rules.get(pkg);
-                    if (targetLearning[0]) {
-                        state.putRule(pkg, new FocusState.Rule(lbl, FocusState.Category.LEARNING, 0));
-                    } else {
-                        int limitMin = (prev != null && prev.category() == FocusState.Category.LIMITED)
-                                ? prev.dailyMinutes() : 0;
-                        state.putRule(pkg, new FocusState.Rule(lbl, FocusState.Category.LIMITED, limitMin));
-                    }
+                    FocusState.Category category = targetLearning[0]
+                            ? FocusState.Category.LEARNING : FocusState.Category.LIMITED;
+                    state.putRule(pkg, new FocusState.Rule(lbl, category));
                 }
                 activity.setRuleCategory(targetLearning[0] ? 0 : 1);
                 onChanged.run();
@@ -1552,8 +1544,6 @@ final class FocusSheets {
     static void showRuleEditor(MainActivity activity, FocusState state, String pkg, String label, Runnable onChanged) {
         FocusState.Rule existing = state.rules.get(pkg);
         final boolean[] isLearning = {existing != null && existing.category() == FocusState.Category.LEARNING};
-        final int[] minutes = {existing != null && existing.category() == FocusState.Category.LIMITED
-                ? Math.min(FocusState.MAX_DAILY_BASE_FREE_MINUTES, existing.dailyMinutes()) : 0};
 
         LinearLayout body = column(activity);
 
@@ -1610,7 +1600,7 @@ final class FocusSheets {
                     });
             typeWrap.addView(seg);
 
-            int cost = state.ruleChangeCostMinutes(existing, isLearning[0], minutes[0]);
+            int cost = state.ruleChangeCostMinutes(existing, isLearning[0]);
             saveBtn.setText(cost > 0
                     ? (state.isFirstConfigModifyFree("app_rule") ? "首次免费 · 保存规则" : "消耗 " + cost + " 分钟 · 保存规则")
                     : "保存规则");
@@ -1627,44 +1617,7 @@ final class FocusSheets {
                         13, GREEN, true));
                 quotaArea.addView(tip);
             } else {
-                quotaArea.addView(titleWithInfo(activity, "每日基础免费额度", 13, INK_SUB,
-                        "基础免费额度",
-                        "全受限应用每日共享最多 " + FocusState.MAX_DAILY_BASE_FREE_MINUTES
-                                + " 分钟免费额度；设为 0 则仅按可用时长控制。"));
-                gap(quotaArea, 8);
-                int[] presets = {0, 5, 10, 15};
-                LinearLayout qRow1 = row(activity);
-                for (int i = 0; i < presets.length; i++) {
-                    int m = presets[i];
-                    boolean active = minutes[0] == m;
-                    String chipTxt = m == 0 ? "0分(可用)" : m + "分";
-                    TextView chip = pillButton(activity, chipTxt, active ? BLUE_SOFT : SURFACE_SUBTLE,
-                            active ? BLUE : INK_SUB, 12, 38);
-                    if (!active) chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
-                    chip.setOnClickListener(v -> {
-                        tapHaptic(v);
-                        minutes[0] = m;
-                        rebuild[0].run();
-                    });
-                    weight(qRow1, chip);
-                    if (i + 1 < presets.length) space(qRow1, 6);
-                }
-                quotaArea.addView(qRow1);
-                gap(quotaArea, 8);
-                String customLabel = minutes[0] == 0
-                        ? "当前：不设免费额度（完全由可用时长决定）"
-                        : "自定义分钟数（当前 " + minutes[0] + " 分钟）";
-                TextView customBtn = secondaryButton(activity, customLabel);
-                customBtn.setOnClickListener(v -> {
-                    tapHaptic(v);
-                    askNumberSheet(activity, "每日基础免费分钟数",
-                            "0 到 " + FocusState.MAX_DAILY_BASE_FREE_MINUTES + " 分钟（0=完全由可用时长决定）",
-                            minutes[0], 0, FocusState.MAX_DAILY_BASE_FREE_MINUTES, n -> {
-                                minutes[0] = n;
-                                rebuild[0].run();
-                            });
-                });
-                quotaArea.addView(customBtn, -1, -2);
+                quotaArea.addView(text(activity, "与其他受限应用共用今日可用时长。", 13, INK_SUB, false));
             }
         };
         rebuild[0].run();
@@ -1673,19 +1626,18 @@ final class FocusSheets {
         sheetRef[0] = sheet;
 
         saveBtn.setOnClickListener(v -> {
-            int cost = state.ruleChangeCostMinutes(existing, isLearning[0], minutes[0]);
+            int cost = state.ruleChangeCostMinutes(existing, isLearning[0]);
             String actionTitle = (existing == null ? "新增应用规则 · " : "修改应用规则 · ") + label;
             String actionDetail = isLearning[0]
                     ? "将「" + label + "」设为正向学习应用"
-                    : (minutes[0] == 0 ? "将「" + label + "」设为完全由可用时长决定"
-                    : "将「" + label + "」每日免费额度设为 " + minutes[0] + " 分钟");
+                    : "将「" + label + "」设为受限应用，共用今日可用时长";
             confirmPaidChange(activity, state, "app_rule", actionTitle, actionDetail, cost, false, () -> {
                 if (cost == 0) haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 if (isLearning[0]) {
-                    state.putRule(pkg, new FocusState.Rule(label, FocusState.Category.LEARNING, 0));
+                    state.putRule(pkg, new FocusState.Rule(label, FocusState.Category.LEARNING));
                     activity.setRuleCategory(0);
                 } else {
-                    state.putRule(pkg, new FocusState.Rule(label, FocusState.Category.LIMITED, minutes[0]));
+                    state.putRule(pkg, new FocusState.Rule(label, FocusState.Category.LIMITED));
                     activity.setRuleCategory(1);
                 }
                 onChanged.run();
@@ -1704,9 +1656,11 @@ final class FocusSheets {
         LinearLayout body = column(activity);
         long nowInit = System.currentTimeMillis();
         final int[] targetHours = {existing == null ? 24 : existing.targetHours};
-        final int[] rewardMinutes = {existing == null ? 30 : existing.rewardMinutes};
+        final int[] rewardMinutes = {existing == null ? 15 : existing.rewardMinutes};
         final long[] startedMs = {existing == null ? nowInit : existing.startedMs};
         final int[] iconChoice = {existing == null ? 0 : existing.iconIndex};
+        final java.util.LinkedHashSet<String> selectedLinks = new java.util.LinkedHashSet<>();
+        if (existing != null) selectedLinks.addAll(existing.linkedPackages);
 
         EditText nameInput = styledInput(activity, "戒断事件名称，例如：戒刷短视频",
                 existing == null ? "" : existing.name, InputType.TYPE_CLASS_TEXT);
@@ -1748,12 +1702,12 @@ final class FocusSheets {
             int nIcons = AbstinenceUi.iconCount();
             for (int i = 0; i < nIcons; i++) {
                 int idx = i;
-                boolean active = (iconChoice[0] % nIcons) == idx;
+                boolean active = Math.floorMod(iconChoice[0], nIcons) == idx;
                 FrameLayout badge = iconBadge(activity, AbstinenceUi.iconForIndex(idx),
-                        active ? GREEN_SOFT : SURFACE_SUBTLE,
-                        active ? GREEN : MUTED, 40, 20, 12);
-                badge.setBackground(touchCard(activity, active ? GREEN_SOFT : SURFACE_SUBTLE,
-                        active ? GREEN : BORDER, 12));
+                        active ? AbstinenceUi.badgeBg(idx) : SURFACE_SUBTLE,
+                        active ? AbstinenceUi.badgeTint(idx) : MUTED, 38, 18, 11);
+                badge.setBackground(touchCard(activity, active ? AbstinenceUi.badgeBg(idx) : SURFACE_SUBTLE,
+                        active ? AbstinenceUi.badgeTint(idx) : BORDER, 11));
                 badge.setContentDescription("选择戒断图标 " + (idx + 1));
                 badge.setOnClickListener(v -> {
                     tapHaptic(v);
@@ -1761,7 +1715,7 @@ final class FocusSheets {
                     rebuildIcons[0].run();
                 });
                 iconRow.addView(badge);
-                if (i + 1 < nIcons) space(iconRow, 8);
+                if (i + 1 < nIcons) space(iconRow, 6);
             }
         };
         rebuildIcons[0].run();
@@ -1770,7 +1724,7 @@ final class FocusSheets {
 
         body.addView(text(activity, "想改变的理由（选填）", 13, INK_SUB, true));
         gap(body, 6);
-        EditText reasonInput = styledInput(activity, "写下一句想坚持的理由，例如：恢复专注力与精力",
+        EditText reasonInput = styledInput(activity, "写下一句想坚持的理由，冲动救急时将显示",
                 existing == null ? "" : existing.reason,
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         reasonInput.setSingleLine(false);
@@ -1784,7 +1738,7 @@ final class FocusSheets {
         String initSaving = existing != null && existing.dailySavingYuan > 0.001
                 ? String.format(Locale.ROOT, "%.2f", existing.dailySavingYuan).replaceAll("\\.?0+$", "")
                 : "";
-        EditText savingInput = styledInput(activity, "若不涉及花费可留空（详情卡片将显示达成奖励）",
+        EditText savingInput = styledInput(activity, "若不涉及花费可留空",
                 initSaving, InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         savingInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(10)});
         body.addView(savingInput, -1, -2);
@@ -1793,17 +1747,18 @@ final class FocusSheets {
         body.addView(text(activity, "戒断目标时长", 13, INK_SUB, true));
         gap(body, 8);
         LinearLayout targetRow = row(activity);
-        int[] hourPresets = {12, 24, 72, 168};
+        int[] hourPresets = {24, 72, 168, 360};
         Runnable[] rebuildTargets = new Runnable[1];
         rebuildTargets[0] = () -> {
             targetRow.removeAllViews();
             for (int h : hourPresets) {
                 boolean active = targetHours[0] == h;
-                String lbl = h < 24 ? h + "时" : (h / 24) + "天";
-                TextView c = pillButton(activity, lbl, active ? GREEN_SOFT : SURFACE_SUBTLE,
-                        active ? GREEN : INK_SUB, 10, 36);
+                String lbl = (h / 24) + "天";
+                TextView c = pillButton(activity, lbl, active ? BLUE_SOFT : SURFACE_SUBTLE,
+                        active ? BLUE : INK_SUB, 10, 36);
                 c.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-                if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+                c.setBackground(touchCard(activity, active ? BLUE_SOFT : SURFACE_SUBTLE,
+                        active ? blueStroke() : BORDER, 10));
                 c.setOnClickListener(v -> {
                     tapHaptic(v);
                     targetHours[0] = h;
@@ -1812,13 +1767,14 @@ final class FocusSheets {
                 weight(targetRow, c);
                 space(targetRow, 6);
             }
-            boolean isCustomH = targetHours[0] != 12 && targetHours[0] != 24
-                    && targetHours[0] != 72 && targetHours[0] != 168;
+            boolean isCustomH = targetHours[0] != 24 && targetHours[0] != 72
+                    && targetHours[0] != 168 && targetHours[0] != 360;
             TextView customH = pillButton(activity,
                     isCustomH ? formatAbstinenceTarget(targetHours[0]) : "自定",
-                    isCustomH ? GREEN_SOFT : SURFACE_SUBTLE, isCustomH ? GREEN : INK_SUB, 10, 36);
+                    isCustomH ? BLUE_SOFT : SURFACE_SUBTLE, isCustomH ? BLUE : INK_SUB, 10, 36);
             customH.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-            if (!isCustomH) customH.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            customH.setBackground(touchCard(activity, isCustomH ? BLUE_SOFT : SURFACE_SUBTLE,
+                    isCustomH ? blueStroke() : BORDER, 10));
             customH.setOnClickListener(v -> {
                 tapHaptic(v);
                 askNumberSheet(activity, "自定义戒断时长（小时）", "1 到 8760 小时（如 720 小时即 30 天）",
@@ -1835,10 +1791,15 @@ final class FocusSheets {
 
         body.addView(text(activity, "起始时间", 13, INK_SUB, true));
         gap(body, 6);
-        TextView startSummary = text(activity, "", 13, GREEN, true);
-        startSummary.setBackground(cardBg(activity, GREEN_SOFT, greenStroke(), 12));
+        TextView startSummary = text(activity, "", 13, BLUE, true);
+        startSummary.setBackground(cardBg(activity, BLUE_SOFT, blueStroke(), 12));
         startSummary.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
         body.addView(startSummary, -1, -2);
+        gap(body, 6);
+        TextView guardNotice = text(activity, "回溯起始时间或缩短目标将启用 24h 防刷护盾，期间仍累计天数与里程碑",
+                11, AMBER, false);
+        guardNotice.setVisibility(View.GONE);
+        body.addView(guardNotice);
         gap(body, 8);
         LinearLayout startBtns = row(activity);
         Runnable refreshStartLabel = () -> {
@@ -1850,6 +1811,10 @@ final class FocusSheets {
                 startSummary.setText("开始于 " + zdt.getMonthValue() + "月" + zdt.getDayOfMonth() + "日 "
                         + String.format(Locale.ROOT, "%02d:%02d", zdt.getHour(), zdt.getMinute()));
             }
+            boolean willGuard = existing == null
+                    ? startedMs[0] < curNow - FocusState.ABSTINENCE_BACKDATE_GRACE_MS
+                    : startedMs[0] < existing.startedMs - FocusState.ABSTINENCE_BACKDATE_GRACE_MS;
+            guardNotice.setVisibility(willGuard ? View.VISIBLE : View.GONE);
         };
         refreshStartLabel.run();
 
@@ -1867,7 +1832,7 @@ final class FocusSheets {
             startedMs[0] = Math.max(0L, startedMs[0] - 24L * 60 * FocusState.MINUTE);
             refreshStartLabel.run();
         });
-        TextView btnClock = pillButton(activity, "调时刻", SURFACE_SUBTLE, BLUE, 10, 34);
+        TextView btnClock = pillButton(activity, "调时刻", BLUE_SOFT, BLUE, 10, 34);
         btnClock.setBackground(touchCard(activity, BLUE_SOFT, blueStroke(), 10));
         btnClock.setOnClickListener(v -> {
             tapHaptic(v);
@@ -1889,10 +1854,10 @@ final class FocusSheets {
         gap(body, 14);
 
         body.addView(titleWithInfo(activity, "达成奖励（可用时长）", 13, INK_SUB,
-                "戒断奖励", "坚持满目标时长后可手动领奖，领后可开启新一轮。"));
+                "防通胀规则", "阶段达成后按设定奖励发放，并受每日戒断 " + state.habitDailyCapMinutes + " 分钟总上限约束；上限为单次 30 分钟。"));
         gap(body, 8);
         LinearLayout rRow = row(activity);
-        int[] rewardPresets = {15, 30, 60, 120};
+        int[] rewardPresets = {5, 10, 15, 20};
         Runnable[] rebuildRewards = new Runnable[1];
         rebuildRewards[0] = () -> {
             rRow.removeAllViews();
@@ -1901,7 +1866,8 @@ final class FocusSheets {
                 TextView c = pillButton(activity, "+" + m + "分", active ? BLUE_SOFT : SURFACE_SUBTLE,
                         active ? BLUE : INK_SUB, 10, 36);
                 c.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-                if (!active) c.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+                c.setBackground(touchCard(activity, active ? BLUE_SOFT : SURFACE_SUBTLE,
+                        active ? blueStroke() : BORDER, 10));
                 c.setOnClickListener(v -> {
                     tapHaptic(v);
                     rewardMinutes[0] = m;
@@ -1910,16 +1876,19 @@ final class FocusSheets {
                 weight(rRow, c);
                 space(rRow, 6);
             }
-            boolean isCustomR = rewardMinutes[0] != 15 && rewardMinutes[0] != 30
-                    && rewardMinutes[0] != 60 && rewardMinutes[0] != 120;
+            boolean isCustomR = rewardMinutes[0] != 5 && rewardMinutes[0] != 10
+                    && rewardMinutes[0] != 15 && rewardMinutes[0] != 20;
             TextView customR = pillButton(activity, isCustomR ? "+" + rewardMinutes[0] + "分" : "自定",
                     isCustomR ? BLUE_SOFT : SURFACE_SUBTLE, isCustomR ? BLUE : INK_SUB, 10, 36);
             customR.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-            if (!isCustomR) customR.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+            customR.setBackground(touchCard(activity, isCustomR ? BLUE_SOFT : SURFACE_SUBTLE,
+                    isCustomR ? blueStroke() : BORDER, 10));
             customR.setOnClickListener(v -> {
                 tapHaptic(v);
-                askNumberSheet(activity, "设定达成奖励（分钟）", "5 到 480 分钟",
-                        rewardMinutes[0], 5, 480, n -> {
+                int clampedInit = Math.min(FocusState.MAX_ABSTINENCE_UI_REWARD_MINUTES, Math.max(5, rewardMinutes[0]));
+                askNumberSheet(activity, "设定达成奖励（分钟）",
+                        "5 到 " + FocusState.MAX_ABSTINENCE_UI_REWARD_MINUTES + " 分钟",
+                        clampedInit, 5, FocusState.MAX_ABSTINENCE_UI_REWARD_MINUTES, n -> {
                             rewardMinutes[0] = n;
                             rebuildRewards[0].run();
                         });
@@ -1928,6 +1897,21 @@ final class FocusSheets {
         };
         rebuildRewards[0].run();
         body.addView(rRow);
+        gap(body, 14);
+
+        body.addView(text(activity, "关联拦截应用（选填）", 13, INK_SUB, true));
+        gap(body, 6);
+        TextView linkPickBtn = pillButton(activity, "", SURFACE_SUBTLE, INK, 12, 38);
+        linkPickBtn.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
+        Runnable refreshLinkText = () -> linkPickBtn.setText(selectedLinks.isEmpty()
+                ? "+ 选择要提醒的受限应用（拦截页展示初心）"
+                : "已关联 " + selectedLinks.size() + " 个应用 · 点击调整");
+        refreshLinkText.run();
+        linkPickBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            showAbstinenceAppLinker(activity, state, selectedLinks, refreshLinkText);
+        });
+        body.addView(linkPickBtn, -1, -2);
         gap(body, 18);
 
         TextView saveBtn = primaryButton(activity, existing == null ? "开启戒断挑战" : "保存修改");
@@ -1961,8 +1945,8 @@ final class FocusSheets {
                 nameInput.setError("请输入戒断事件名称");
                 return;
             }
-            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-            long startVal = Math.min(System.currentTimeMillis(), startedMs[0]);
+            long curNow = System.currentTimeMillis();
+            long startVal = Math.min(curNow, startedMs[0]);
             String reasonVal = reasonInput.getText().toString().trim();
             double savingVal = 0.0;
             String savingRaw = savingInput.getText().toString().trim();
@@ -1972,14 +1956,114 @@ final class FocusSheets {
                 } catch (NumberFormatException ignored) {}
             }
             if (existing == null) {
-                state.addAbstinence(UUID.randomUUID().toString(), nameValue,
-                        startVal, targetHours[0], rewardMinutes[0], reasonVal, savingVal, iconChoice[0]);
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                state.addAbstinenceTracked(UUID.randomUUID().toString(), nameValue,
+                        startVal, targetHours[0], rewardMinutes[0], reasonVal, savingVal,
+                        iconChoice[0], selectedLinks, curNow);
+                onChanged.run();
+                sheet.dismiss();
             } else {
-                state.updateAbstinence(id, nameValue, startVal, targetHours[0], rewardMinutes[0],
-                        reasonVal, savingVal, iconChoice[0], System.currentTimeMillis());
+                int cost = state.abstinenceConfigCostMinutes(existing, targetHours[0], rewardMinutes[0]);
+                double finalSaving = savingVal;
+                String detail = "调整「" + nameValue + "」目标时长或奖励，需确保不被用于反复缩短周期刷分。";
+                confirmPaidChange(activity, state, "abstinence_config", "调整戒断目标/奖励", detail, cost, false, () -> {
+                    if (cost == 0) haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                    state.updateAbstinence(id, nameValue, startVal, targetHours[0], rewardMinutes[0],
+                            reasonVal, finalSaving, iconChoice[0], selectedLinks, System.currentTimeMillis(), true);
+                    onChanged.run();
+                    sheet.dismiss();
+                });
             }
-            onChanged.run();
-            sheet.dismiss();
+        });
+    }
+
+    private static void showAbstinenceAppLinker(MainActivity activity, FocusState state,
+                                                java.util.Set<String> selectedPkgs, Runnable onDone) {
+        List<AppCatalog.Entry> entries = AppCatalog.launchable(activity);
+        if (entries.isEmpty()) {
+            Toast.makeText(activity, "未找到可关联的应用", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        LinearLayout body = column(activity);
+        EditText search = styledInput(activity, "搜索应用名称", "", InputType.TYPE_CLASS_TEXT);
+        body.addView(search, -1, -2);
+        gap(body, 10);
+
+        List<AppCatalog.Entry> filtered = new ArrayList<>(entries);
+        ListView list = new ListView(activity);
+        list.setDivider(null);
+        list.setDividerHeight(dp(activity, 8));
+        list.setVerticalScrollBarEnabled(false);
+
+        BaseAdapter adapter = new BaseAdapter() {
+            @Override public int getCount() { return filtered.size(); }
+            @Override public AppCatalog.Entry getItem(int position) { return filtered.get(position); }
+            @Override public long getItemId(int position) { return position; }
+
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                AppCatalog.Entry entry = getItem(position);
+                boolean checked = selectedPkgs.contains(entry.pkg());
+                LinearLayout rowBox = row(activity);
+                rowBox.setBackground(touchCard(activity, checked ? BLUE_SOFT : SURFACE_SUBTLE,
+                        checked ? blueStroke() : BORDER, 14));
+                rowBox.setPadding(dp(activity, 12), dp(activity, 9), dp(activity, 12), dp(activity, 9));
+                rowBox.addView(appIcon(activity, entry.pkg(), 36, 10));
+                space(rowBox, 10);
+
+                LinearLayout info = column(activity);
+                info.addView(text(activity, entry.label(), 14, INK, true));
+                FocusState.Rule rule = state.rules.get(entry.pkg());
+                if (rule != null && rule.category() == FocusState.Category.LIMITED) {
+                    info.addView(text(activity, "受限管控应用", 11, BLUE, false));
+                }
+                weight(rowBox, info);
+                space(rowBox, 8);
+                if (checked) {
+                    rowBox.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 22, 12, 6));
+                } else {
+                    FrameLayout box = new FrameLayout(activity);
+                    box.setBackground(cardBg(activity, CARD, BORDER, 6));
+                    rowBox.addView(box, dp(activity, 22), dp(activity, 22));
+                }
+                return rowBox;
+            }
+        };
+        list.setAdapter(adapter);
+        body.addView(list, new LinearLayout.LayoutParams(-1, dp(activity, 320)));
+        gap(body, 12);
+
+        TextView doneBtn = primaryButton(activity, "完成（已选 " + selectedPkgs.size() + " 个）");
+        body.addView(doneBtn, -1, -2);
+
+        list.setOnItemClickListener((parent, view, pos, rowId) -> {
+            tapHaptic(view);
+            AppCatalog.Entry entry = filtered.get(pos);
+            if (!selectedPkgs.add(entry.pkg())) {
+                selectedPkgs.remove(entry.pkg());
+            }
+            doneBtn.setText("完成（已选 " + selectedPkgs.size() + " 个）");
+            adapter.notifyDataSetChanged();
+        });
+        search.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                String q = s.toString().trim().toLowerCase(Locale.ROOT);
+                filtered.clear();
+                for (AppCatalog.Entry e : entries) {
+                    if (q.isEmpty() || e.label().toLowerCase(Locale.ROOT).contains(q)) {
+                        filtered.add(e);
+                    }
+                }
+                adapter.notifyDataSetChanged();
+            }
+        });
+
+        Dialog dlg = bottomSheet(activity, "选择关联拦截应用", null, body);
+        doneBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            onDone.run();
+            dlg.dismiss();
         });
     }
 
@@ -2753,7 +2837,8 @@ final class FocusSheets {
         githubCard.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
         githubCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
         LinearLayout ghTop = row(activity);
-        ghTop.addView(iconBadge(activity, R.drawable.ic_info, BLUE_SOFT, BLUE, 38, 19, 11));
+        ghTop.addView(iconBadge(activity, R.drawable.ic_brand_github, SURFACE_SUBTLE,
+                isDark() ? 0xfff0f6fc : 0xff24292f, 38, 19, 11));
         space(ghTop, 12);
         LinearLayout ghCopy = column(activity);
         ghCopy.addView(text(activity, "GitHub 项目链接", 15, INK, true));
@@ -2786,7 +2871,8 @@ final class FocusSheets {
         gap(body, 10);
 
         String giteeUrl = GitHubUpdates.GITEE_RELEASES_URL;
-        body.addView(settingRow(activity, R.drawable.ic_info, BLUE_SOFT, BLUE,
+        body.addView(settingRow(activity, R.drawable.ic_brand_gitee, RED_SOFT,
+                isDark() ? 0xffff8589 : 0xffc71d23,
                 "Gitee 国内下载", "打开正式版 APK 下载页", null, () -> {
                     try {
                         activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(giteeUrl)));
@@ -2803,7 +2889,7 @@ final class FocusSheets {
         biliCard.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
         biliCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
         LinearLayout biliTop = row(activity);
-        biliTop.addView(iconBadge(activity, R.drawable.ic_play, biliSoft, biliColor, 38, 19, 11));
+        biliTop.addView(iconBadge(activity, R.drawable.ic_brand_bilibili, biliSoft, biliColor, 38, 19, 11));
         space(biliTop, 12);
         LinearLayout biliCopy = column(activity);
         biliCopy.addView(text(activity, "作者 B 站主页", 15, INK, true));
@@ -2845,7 +2931,7 @@ final class FocusSheets {
         mailCard.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
         mailCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
         LinearLayout mailTop = row(activity);
-        mailTop.addView(iconBadge(activity, R.drawable.ic_mail, GREEN_SOFT, GREEN, 38, 19, 11));
+        mailTop.addView(iconBadge(activity, R.drawable.ic_brand_qqmail, BLUE_SOFT, 0, 38, 24, 11));
         space(mailTop, 12);
         LinearLayout mailCopy = column(activity);
         mailCopy.addView(text(activity, "作者邮箱", 15, INK, true));
@@ -2947,7 +3033,7 @@ final class FocusSheets {
         gap(body, 8);
 
         body.addView(settingRow(activity, R.drawable.ic_feedback, GREEN_SOFT, GREEN,
-                "反馈与交流", "联系作者", null, () -> {
+                "反馈与交流", null, null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onFeedback.run();
                 }));
@@ -2960,7 +3046,7 @@ final class FocusSheets {
                     onUpdates.run();
                 }));
 
-        sheetRef[0] = bottomSheet(activity, "设置", null, body);
+        sheetRef[0] = rightSheet(activity, "设置", body);
         KeepAliveManager.refreshStatusAsync(activity, snap -> {
             if (sheetRef[0] == null || !sheetRef[0].isShowing()) return;
             int r = snap.readyCount();
@@ -3004,10 +3090,7 @@ final class FocusSheets {
                     + " · 储蓄罐 " + duration(state.vaultMs) + " / " + duration(state.vaultCapacityMs()));
             vaultHeaderTv.setText("储蓄罐时间（" + state.vaultCapacityMinutes()
                     + "/" + FocusState.MAX_VAULT_MINUTES + " 分）");
-            String dateStr = FocusState.today().toString();
-            quotaTv.setText("今日基础免费 " + duration(state.dailyBaseFreeRemainingMs(dateStr))
-                    + "/" + FocusState.MAX_DAILY_BASE_FREE_MINUTES + " 分 · "
-                    + state.rateMode.label);
+            quotaTv.setText(state.rateMode.label);
             StringBuilder locks = new StringBuilder();
             if (state.offlineActive()) locks.append("自律正计时 ");
             if (state.active()) locks.append("自律倒计时 ");
@@ -3193,18 +3276,6 @@ final class FocusSheets {
             Toast.makeText(activity, "已跳过所有待办与习惯冷静期", Toast.LENGTH_SHORT).show();
         });
         body.addView(clearCooldownBtn, -1, -2);
-        gap(body, 8);
-
-        TextView resetBaseFreeBtn = secondaryButton(activity, "清零今日 15m 基础已用");
-        resetBaseFreeBtn.setOnClickListener(v -> {
-            tapHaptic(v);
-            FocusState.Day day = state.days.get(FocusState.today().toString());
-            if (day != null) day.baseFreeUsedMs = 0L;
-            onChanged.run();
-            refreshStatus[0].run();
-            Toast.makeText(activity, "已清零今日基础免费已用额度", Toast.LENGTH_SHORT).show();
-        });
-        body.addView(resetBaseFreeBtn, -1, -2);
         gap(body, 8);
 
         TextView resetFirstFreeBtn = secondaryButton(activity, "重置首次免费修改机会");

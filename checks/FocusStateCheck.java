@@ -16,12 +16,10 @@ final class FocusStateCheck {
     public static void main(String[] args) {
         long noon = at("2026-11-22T12:00:00Z");
         var state = new FocusState();
-        // v1.5.1 defaults: MODERATE (3:1), 04:00 AM reset, 2h vault cap, 15m daily base free cap, 35m sleep config cost
+        // v1.5.1 defaults: MODERATE (3:1), 04:00 AM reset, 2h vault cap, 35m sleep config cost
         equal(FocusState.RateMode.MODERATE, state.rateMode);
         equal(FocusState.RESET_HOUR, 4);
         equal(120 * MINUTE, FocusState.MAX_VAULT_MS);
-        equal(15, FocusState.MAX_DAILY_BASE_FREE_MINUTES);
-        equal(15 * MINUTE, FocusState.MAX_DAILY_BASE_FREE_MS);
         equal(35, FocusState.SLEEP_CONFIG_COST_MINUTES);
         equal(30, FocusState.MODE_SWITCH_COST_MINUTES);
         equal(30, FocusState.DAILY_CAP_CHANGE_COST_MINUTES);
@@ -41,17 +39,17 @@ final class FocusStateCheck {
         equal(30, state.stepDailyCapMinutes);
         equal(2, state.rewards.size());
 
-        state.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING, 0));
-        state.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 1));
+        state.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING));
+        state.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
 
-        // MODERATE 3:1 -> Learning 9m earns 3m credit; Video uses 1m free + 90s credit -> 90s remaining
+        // MODERATE 3:1 -> Learning 9m earns 3m credit; Video spends 150s from the shared balance -> 30s remaining
         state.addUsage(STUDY, noon, noon + 9 * MINUTE, UTC);
         equal(3 * MINUTE, state.creditMs);
         state.addUsage(VIDEO, noon, noon + 150_000, UTC);
-        equal(90_000L, state.creditMs);
+        equal(30_000L, state.creditMs);
         state.addUsage(VIDEO, noon + 150_000, noon + 270_000, UTC);
         equal(0L, state.creditMs);
-        equal(240_000L, state.used(VIDEO, "2026-11-22"));
+        equal(180_000L, state.used(VIDEO, "2026-11-22"));
         equal(BUDGET, state.restriction(VIDEO, noon + 270_000, UTC));
 
         // 04:00 AM reset boundary: 03:59:59Z stays in 2026-11-22; 04:00:00Z starts 2026-11-23
@@ -59,20 +57,20 @@ final class FocusStateCheck {
         equal("2026-11-23", FocusState.date(at("2026-11-23T04:00:00Z"), UTC));
         long resetBoundary = at("2026-11-23T04:00:00Z");
         state.addUsage(VIDEO, resetBoundary - 500, resetBoundary + 500, UTC);
-        equal(500L, state.used(VIDEO, "2026-11-23"));
-        equal(NONE, state.restriction(VIDEO, resetBoundary + 500, UTC));
+        equal(0L, state.used(VIDEO, "2026-11-23"));
+        equal(BUDGET, state.restriction(VIDEO, resetBoundary + 500, UTC));
 
         state.bedtime = true;
         long midnight = at("2026-11-23T00:00:00Z");
         equal(BEDTIME, state.restriction(VIDEO, at("2026-11-22T23:00:00Z"), UTC));
         equal(BEDTIME, state.restriction(VIDEO, midnight + 1, UTC));
-        equal(NONE, state.restriction(VIDEO, at("2026-11-23T07:00:00Z"), UTC));
+        equal(BUDGET, state.restriction(VIDEO, at("2026-11-23T07:00:00Z"), UTC));
         equal(BEDTIME, state.restriction(STUDY, midnight + 1, UTC));
         equal(BEDTIME, state.restriction("test.unconfigured", midnight + 1, UTC));
 
         // Pomodoro 15m * 4 rounds under MODERATE 3:1 = 5m per round -> 20m total
         var pomo = new FocusState();
-        pomo.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 10));
+        pomo.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         pomo.start(15, 5, 4, noon);
         equal(FOCUS, pomo.restriction(VIDEO, noon + 1, UTC));
         equal(FocusState.Transition.BREAK, pomo.advance(noon + 15 * MINUTE, UTC));
@@ -109,7 +107,7 @@ final class FocusStateCheck {
 
         // Pause / resume focus under MODERATE 3:1 (24m focus -> 8m reward)
         var paused = new FocusState();
-        paused.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 30));
+        paused.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         paused.start(24, 5, 2, noon);
         paused.togglePause(noon + 2 * MINUTE);
         equal(true, paused.paused());
@@ -156,7 +154,7 @@ final class FocusStateCheck {
         equal(0L, capTest.depositToVault(10 * MINUTE, noon + 1_000, UTC));
 
         // Sober mode spends earned time (credit first, then vault) and refuses when insufficient
-        extra.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        extra.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         equal(false, extra.startSober(VIDEO, "Video", 30, noon, UTC));
         equal(false, extra.soberActive(noon));
         extra.creditMs = 0L;
@@ -224,7 +222,7 @@ final class FocusStateCheck {
 
         // Offline lock-phone timer under MODERATE 3:1: min 5m required to claim, 15m -> 5m reward, then +6m -> +2m
         var offline = new FocusState();
-        offline.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 10));
+        offline.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         offline.startOffline(noon);
         equal(true, offline.offlineRunning());
         equal(FOCUS, offline.restriction(VIDEO, noon + MINUTE, UTC));
@@ -234,7 +232,8 @@ final class FocusStateCheck {
         offline.pauseOffline(noon + 4 * MINUTE);
         equal(false, offline.offlineRunning());
         equal(true, offline.offlinePaused());
-        equal(NONE, offline.restriction(VIDEO, noon + 5 * MINUTE, UTC));
+        equal(BUDGET, offline.restriction(VIDEO, noon + 5 * MINUTE, UTC));
+        equal(NONE, offline.restriction("test.unconfigured", noon + 5 * MINUTE, UTC));
         offline.startOffline(noon + 5 * MINUTE);
         equal(15 * MINUTE, offline.offlineElapsed(noon + 16 * MINUTE));
         equal(true, offline.canClaimOffline(noon + 16 * MINUTE));
@@ -250,13 +249,13 @@ final class FocusStateCheck {
 
         // UsageStats sync reconciliation under MODERATE 3:1 (9m learning -> 3m)
         var sync = new FocusState();
-        sync.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING, 0));
-        sync.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 2));
+        sync.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING));
+        sync.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         equal(9 * MINUTE, sync.syncUsageTotal(STUDY, 9 * MINUTE, noon + 20 * MINUTE, UTC));
         equal(3 * MINUTE, sync.creditMs);
         equal(0L, sync.syncUsageTotal(STUDY, 9 * MINUTE, noon + 21 * MINUTE, UTC));
         equal(4 * MINUTE, sync.syncUsageTotal(VIDEO, 4 * MINUTE, noon + 22 * MINUTE, UTC));
-        equal(1 * MINUTE, sync.creditMs);
+        equal(0L, sync.creditMs);
 
         // System steps: 2000 per 5m with a 30m daily cap
         extra.creditMs = 0L;
@@ -282,7 +281,7 @@ final class FocusStateCheck {
 
         // 5 fixed RateModes exact rational math + remainder continuity
         var modes = new FocusState();
-        modes.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING, 0));
+        modes.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING));
         modes.rateMode = FocusState.RateMode.RELAXED;
         equal(12 * MINUTE, modes.convertByMode(12 * MINUTE));
         modes.rateMode = FocusState.RateMode.EASY;
@@ -413,52 +412,43 @@ final class FocusStateCheck {
         equal(20, eco.earlySleepConfigCostMinutes(false, 10, 20, false));
         equal(0, eco.earlySleepConfigCostMinutes(false, 10, 10, false));
 
-        var limitedRule = new FocusState.Rule("Games", LIMITED, 5);
-        equal(0, eco.ruleChangeCostMinutes(null, false, 0));
-        equal(0, eco.ruleChangeCostMinutes(null, true, 0));
-        eco.putRule("study1", new FocusState.Rule("Docs", LEARNING, 0));
-        equal(10, eco.ruleChangeCostMinutes(null, true, 0));
+        var limitedRule = new FocusState.Rule("Games", LIMITED);
+        equal(0, eco.ruleChangeCostMinutes(null, false));
+        equal(0, eco.ruleChangeCostMinutes(null, true));
+        eco.putRule("study1", new FocusState.Rule("Docs", LEARNING));
+        equal(10, eco.ruleChangeCostMinutes(null, true));
         eco.rules.remove("study1");
-        equal(10, eco.ruleChangeCostMinutes(null, true, 0));
-        equal(0, eco.ruleChangeCostMinutes(limitedRule, false, 3));
-        equal(15, eco.ruleChangeCostMinutes(limitedRule, false, 15));
+        equal(10, eco.ruleChangeCostMinutes(null, true));
+        equal(0, eco.ruleChangeCostMinutes(limitedRule, false));
+        equal(15, eco.ruleChangeCostMinutes(limitedRule, true));
         equal(15, eco.removeRuleCostMinutes(limitedRule));
 
-        // Batch rule changes & putRule clamping >15 down to 15
+        // Batch app classification costs
         var batch = new FocusState();
-        batch.putRule("test.clamp", new FocusState.Rule("ClampApp", LIMITED, 99));
-        equal(15, batch.rules.get("test.clamp").dailyMinutes());
         equal(10, batch.batchRuleChangeCostMinutes(java.util.Arrays.asList("learn.a", "learn.b"), true));
         equal(0, batch.batchRuleChangeCostMinutes(java.util.Arrays.asList("lim.a", "lim.b"), false));
 
-        // 15m shared daily base free quota & uncustomized 0m limited apps draw directly from creditMs
+        // A newly restricted app draws from the same remaining balance as existing apps.
         var quota = new FocusState();
         String qDate = "2026-11-22";
-        quota.putRule("lim.zero", new FocusState.Rule("ZeroFree", LIMITED, 0));
-        quota.putRule("lim.ten1", new FocusState.Rule("TenOne", LIMITED, 10));
-        quota.putRule("lim.ten2", new FocusState.Rule("TenTwo", LIMITED, 10));
+        quota.putRule("lim.first", new FocusState.Rule("First app", LIMITED));
         quota.creditMs = 20 * MINUTE;
-        equal(0L, quota.freeRemainingMs("lim.zero", qDate));
-        equal(10 * MINUTE, quota.freeRemainingMs("lim.ten1", qDate));
-        equal(15 * MINUTE, quota.dailyBaseFreeRemainingMs(qDate));
-        // Uncustomized dailyMinutes=0 app consumes creditMs directly without touching 15m base free cap
-        quota.addUsage("lim.zero", noon, noon + 5 * MINUTE, UTC);
-        equal(15 * MINUTE, quota.creditMs);
-        equal(15 * MINUTE, quota.dailyBaseFreeRemainingMs(qDate));
-        // Two LIMITED(10) apps share the 15m daily cap: first takes 10m free, second gets only 5m free + 3m credit
-        quota.addUsage("lim.ten1", noon + 5 * MINUTE, noon + 15 * MINUTE, UTC);
-        equal(15 * MINUTE, quota.creditMs);
-        equal(5 * MINUTE, quota.dailyBaseFreeRemainingMs(qDate));
-        equal(5 * MINUTE, quota.freeRemainingMs("lim.ten2", qDate));
-        quota.addUsage("lim.ten2", noon + 15 * MINUTE, noon + 23 * MINUTE, UTC);
-        equal(0L, quota.dailyBaseFreeRemainingMs(qDate));
-        equal(0L, quota.freeRemainingMs("lim.ten2", qDate));
-        equal(12 * MINUTE, quota.creditMs);
+        quota.addUsage("lim.first", noon, noon + 15 * MINUTE, UTC);
+        equal(5 * MINUTE, quota.creditMs);
+        quota.putRule("lim.second", new FocusState.Rule("Second app", LIMITED));
+        equal(NONE, quota.restriction("lim.second", noon + 15 * MINUTE, UTC));
+        quota.addUsage("lim.second", noon + 15 * MINUTE, noon + 23 * MINUTE, UTC);
+        equal(0L, quota.creditMs);
+        equal(15 * MINUTE, quota.used("lim.first", qDate));
+        equal(5 * MINUTE, quota.used("lim.second", qDate));
+        equal(20 * MINUTE, quota.day(qDate).limitedMs);
+        equal(BUDGET, quota.restriction("lim.first", noon + 23 * MINUTE, UTC));
+        equal(BUDGET, quota.restriction("lim.second", noon + 23 * MINUTE, UTC));
 
         // Strict lock semantics: discipline lock blocks unconfigured & limited (allows only LEARNING); bedtime ignores Sober
         var strict = new FocusState();
-        strict.putRule(STUDY, new FocusState.Rule("Study", LEARNING, 0));
-        strict.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 15));
+        strict.putRule(STUDY, new FocusState.Rule("Study", LEARNING));
+        strict.putRule(VIDEO, new FocusState.Rule("Video", LIMITED));
         strict.creditMs = 30 * MINUTE;
         strict.startOffline(noon);
         equal(true, strict.isDisciplineLocked(noon + MINUTE));
@@ -590,8 +580,8 @@ final class FocusStateCheck {
 
         // Multi-app Sober Mode: multiple purpose apps allowed (including restricted apps), all others & launcher blocked
         var multi = new FocusState();
-        multi.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
-        multi.putRule("test.docs", new FocusState.Rule("Docs", LIMITED, 0));
+        multi.putRule(VIDEO, new FocusState.Rule("Video", LIMITED));
+        multi.putRule("test.docs", new FocusState.Rule("Docs", LIMITED));
         multi.creditMs = 20 * MINUTE;
         var chosen2 = new java.util.LinkedHashMap<String, String>();
         chosen2.put(VIDEO, "Video");
@@ -626,10 +616,10 @@ final class FocusStateCheck {
         equal(true, multi.startSober(chosen3, 5, noon + 20 * MINUTE, UTC));
         equal("A、B 等 3 个应用", multi.soberSummaryLabel());
 
-        // Restricted app (BUDGET with 0 credit and 0 free quota) opened via Sober Mode paid from vaultMs
+        // Restricted app (BUDGET with zero shared credit) opened via Sober Mode paid from vaultMs
         var restrictedSober = new FocusState();
         restrictedSober.vaultExpansionCount = 1;
-        restrictedSober.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        restrictedSober.putRule(VIDEO, new FocusState.Rule("Video", LIMITED));
         restrictedSober.creditMs = 0L;
         restrictedSober.vaultMs = 20 * MINUTE;
         equal(BUDGET, restrictedSober.restriction(VIDEO, noon, UTC));
@@ -640,7 +630,7 @@ final class FocusStateCheck {
         equal(FocusState.Restriction.SOBER, restrictedSober.restriction("com.android.launcher3", noon + MINUTE, UTC));
         restrictedSober.addUsage(VIDEO, noon, noon + 3 * MINUTE, UTC);
         String todayStr = FocusState.date(noon, UTC);
-        equal(0L, restrictedSober.day(todayStr).baseFreeUsedMs);
+        equal(0L, restrictedSober.day(todayStr).limitedMs);
         equal(0L, restrictedSober.creditMs);
         equal(7 * MINUTE, restrictedSober.stopSober(noon + 3 * MINUTE, UTC));
         equal(17 * MINUTE, restrictedSober.vaultMs);
@@ -662,7 +652,7 @@ final class FocusStateCheck {
 
         // Activate INDULGENT then LAY_FLAT on same day; next 04:00 AM restores SCHOLAR (skipping INDULGENT)
         long nov20 = at("2026-11-20T13:00:00Z");
-        cards.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        cards.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         cards.creditMs = 0L;
         equal(true, cards.activateIndulgentMode(nov20, UTC));
         equal(FocusState.RateMode.INDULGENT, cards.rateMode);
@@ -785,8 +775,8 @@ final class FocusStateCheck {
 
         // 4. Lay-Flat Mode v1.6.2 freeze: zero time earning/claiming & vault untouched
         var lf = new FocusState();
-        lf.rules.put(STUDY, new FocusState.Rule("Study", LEARNING, 0));
-        lf.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        lf.rules.put(STUDY, new FocusState.Rule("Study", LEARNING));
+        lf.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         lf.creditMs = 15 * MINUTE;
         lf.vaultMs = 25 * MINUTE;
         lf.layFlatCards = 1;
@@ -1079,6 +1069,92 @@ final class FocusStateCheck {
         equal(true, lfShop.buyStreakProtectCard(nextDayAfterReset + 1_000, UTC));
         equal(40 * MINUTE, lfShop.creditMs);
         equal(1, lfShop.streakProtectCards);
+
+        // Abstinence anti-inflation rules: daily cap clamp, backdate 24h guard, config cost, stage progression, runs & undo
+        var ac = new FocusState();
+        long acNow = at("2026-11-24T12:00:00Z");
+        ac.creditMs = 0L;
+        ac.addAbstinenceTracked("ac1", "戒夜宵", acNow - 25L * 60 * MINUTE, 24, 20, "", 0.0, 0,
+                java.util.Collections.singletonList("com.example.food"), acNow - 26L * 60 * MINUTE);
+        ac.addAbstinenceTracked("ac2", "戒短视频", acNow - 25L * 60 * MINUTE, 24, 15, "保护视力", 0.0, 1,
+                java.util.Collections.singletonList("com.example.video"), acNow - 26L * 60 * MINUTE);
+        ac.addAbstinenceTracked("ac3", "戒游戏", acNow - 25L * 60 * MINUTE, 24, 10, "", 0.0, 3,
+                null, acNow - 26L * 60 * MINUTE);
+        // Un-backdated items created 26h ago have no guard and total pending is clamped to habitDailyCapMinutes (25m)
+        equal(25 * MINUTE, ac.pendingAbstinenceRewardMs(acNow, UTC));
+        equal(20 * MINUTE, ac.claimAbstinence("ac1", acNow, UTC));
+        equal(20, ac.abstinences.get("ac1").totalEarnedMinutes);
+        equal(5 * MINUTE, ac.claimAbstinence("ac2", acNow, UTC));
+        equal(5, ac.abstinences.get("ac2").totalEarnedMinutes);
+        equal(25 * MINUTE, ac.day("2026-11-24").habitEarnedMs);
+        // Third claim when cap is exhausted yields 0 and keeps rewardClaimed = false for next day
+        equal(0L, ac.claimAbstinence("ac3", acNow, UTC));
+        equal(false, ac.abstinences.get("ac3").rewardClaimed);
+        long acNextDay = at("2026-11-25T04:05:00Z");
+        equal(10 * MINUTE, ac.claimAbstinence("ac3", acNextDay, UTC));
+        equal(10, ac.abstinences.get("ac3").totalEarnedMinutes);
+
+        // Progressive stage advancement preserves startedMs streak
+        long beforeAdvStart = ac.abstinences.get("ac1").startedMs;
+        equal(72, ac.advanceAbstinenceStage("ac1", acNow, UTC));
+        equal(beforeAdvStart, ac.abstinences.get("ac1").startedMs);
+        equal(false, ac.abstinences.get("ac1").rewardClaimed);
+        equal(168, FocusState.nextAbstinenceStageHours(72));
+        equal(360, FocusState.nextAbstinenceStageHours(168));
+
+        // Backdate guard locks reward for min(targetMs, 24h)
+        long bdNow = at("2026-11-24T12:00:00Z");
+        ac.addAbstinenceTracked("bd24", "回溯测试24", bdNow - 30L * 60 * MINUTE, 24, 15, "", 0.0, 0, null, bdNow);
+        equal(true, ac.abstinenceReached(ac.abstinences.get("bd24"), bdNow));
+        equal(false, ac.canClaimAbstinence(ac.abstinences.get("bd24"), bdNow));
+        equal(FocusState.ABSTINENCE_BACKDATE_GUARD_MS, ac.abstinenceGuardRemainingMs(ac.abstinences.get("bd24"), bdNow));
+        equal(0L, ac.claimAbstinence("bd24", bdNow, UTC));
+        ac.addAbstinenceTracked("bd12", "回溯测试12", bdNow - 15L * 60 * MINUTE, 12, 10, "", 0.0, 0, null, bdNow);
+        equal(12L * 60 * MINUTE, ac.abstinenceGuardRemainingMs(ac.abstinences.get("bd12"), bdNow));
+        equal(true, ac.canClaimAbstinence(ac.abstinences.get("bd12"), bdNow + 12L * 60 * MINUTE));
+
+        // Config change cost & relapse run trigger / same-day calendar undo restoration
+        FocusState.Abstinence bdItem = ac.abstinences.get("bd24");
+        equal(15, ac.abstinenceConfigCostMinutes(bdItem, 12, 15));
+        equal(15, ac.abstinenceConfigCostMinutes(bdItem, 24, 25));
+        equal(0, ac.abstinenceConfigCostMinutes(bdItem, 72, 15));
+        equal("ac2", ac.linkedAbstinenceForPackage("com.example.video").id);
+
+        long originalStart = acNextDay - 50L * 60 * MINUTE;
+        ac.addAbstinenceTracked("rel", "戒喝奶茶", originalStart, 24, 10, "省钱", 15.0, 0, null, originalStart);
+        ac.resetAbstinence("rel", acNextDay, UTC, true, "夜宵摊前没忍住", "熬夜");
+        FocusState.Abstinence relItem = ac.abstinences.get("rel");
+        equal(1, relItem.relapseCount);
+        equal(1, relItem.runs.size());
+        equal("熬夜", relItem.runs.get(0).triggerTag());
+        equal(acNextDay, relItem.startedMs);
+        // Undo today's relapse from calendar restores originalStart & clears trigger
+        ac.setAbstinenceCalendarRecord("rel", LocalDate.of(2026, 11, 25), false, "", "", acNextDay + 60_000L, UTC);
+        equal(0, relItem.relapseCount);
+        equal(originalStart, relItem.startedMs);
+        equal(0, relItem.runs.size());
+        equal(true, ac.abstinenceCleanDaysLast30(relItem, acNextDay + 60_000L, UTC) >= 2);
+
+        // A backfilled relapse closes its run at the end of the selected day, including on undo.
+        long backfillStart = at("2026-11-20T12:00:00Z");
+        LocalDate backfillDate = LocalDate.of(2026, 11, 21);
+        ac.addAbstinence("backfill", "历史破戒补记", backfillStart, 24, 10);
+        var backfill = ac.abstinences.get("backfill");
+        ac.setAbstinenceCalendarRecord("backfill", backfillDate, true, "", "无聊", acNextDay, UTC);
+        equal(at("2026-11-22T00:00:00Z"), backfill.startedMs);
+        equal(36L * 60 * MINUTE, backfill.longestMs);
+        ac.setAbstinenceCalendarRecord("backfill", backfillDate, false, "", "", acNextDay, UTC);
+        equal(backfillStart, backfill.startedMs);
+        equal(0, backfill.runs.size());
+
+        // Undoing a mistaken reset preserves an already-claimed reward for that stage.
+        long rewardDay = at("2026-11-26T10:00:00Z");
+        equal(10L * MINUTE, ac.claimAbstinence("backfill", rewardDay, UTC));
+        ac.resetAbstinence("backfill", rewardDay + MINUTE, UTC, true);
+        ac.setAbstinenceCalendarRecord("backfill", LocalDate.of(2026, 11, 26), false, "", "",
+                rewardDay + 2 * MINUTE, UTC);
+        equal(true, backfill.rewardClaimed);
+        equal(0L, ac.claimAbstinence("backfill", at("2026-11-27T10:00:00Z"), UTC));
     }
 
     private static long at(String instant) {

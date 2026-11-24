@@ -236,10 +236,7 @@ final class FocusStore {
             JSONObject row = rules.getJSONObject(pkg);
             FocusState.Category category = "LEARNING".equals(row.optString("category"))
                     ? FocusState.Category.LEARNING : FocusState.Category.LIMITED;
-            int limit = category == FocusState.Category.LIMITED
-                    ? Math.max(0, Math.min(FocusState.MAX_DAILY_BASE_FREE_MINUTES, row.optInt("limit")))
-                    : 0;
-            state.rules.put(pkg, new FocusState.Rule(row.optString("label", pkg), category, limit));
+            state.rules.put(pkg, new FocusState.Rule(row.optString("label", pkg), category));
         }
 
         JSONObject habits = root.optJSONObject("habits");
@@ -278,6 +275,14 @@ final class FocusStore {
                     row.optDouble("dailySavingYuan", 0.0),
                     row.optInt("iconIndex", 0)
             );
+            abs.createdMs = row.optLong("createdMs", abs.startedMs);
+            abs.rewardGuardUntilMs = Math.max(0L, row.optLong("rewardGuardUntilMs", 0L));
+            if (row.has("totalEarnedMinutes")) {
+                abs.totalEarnedMinutes = Math.max(0, row.optInt("totalEarnedMinutes", 0));
+            }
+            abs.previousStartedMs = Math.max(0L, row.optLong("previousStartedMs", 0L));
+            abs.previousStartedForDate = row.optString("previousStartedForDate", "");
+            abs.previouslyClaimedTargetHours = row.optInt("previouslyClaimedTargetHours", 0);
             JSONArray relapseArr = row.optJSONArray("relapseDates");
             if (relapseArr != null) {
                 for (int idx = 0; idx < relapseArr.length(); idx++) {
@@ -290,6 +295,38 @@ final class FocusStore {
                 String ds = dk.next();
                 String note = diaryObj.optString(ds, "");
                 if (!ds.isEmpty() && !note.isEmpty()) abs.diaryNotes.put(ds, note);
+            }
+            JSONObject trigObj = row.optJSONObject("diaryTriggers");
+            for (Iterator<String> tk = keys(trigObj); tk.hasNext();) {
+                String ds = tk.next();
+                String trig = trigObj.optString(ds, "");
+                if (!ds.isEmpty() && !trig.isEmpty()) abs.diaryTriggers.put(ds, trig);
+            }
+            JSONArray linkArr = row.optJSONArray("linkedPackages");
+            if (linkArr != null) {
+                for (int idx = 0; idx < linkArr.length(); idx++) {
+                    String pkg = linkArr.optString(idx);
+                    if (!pkg.isEmpty()) abs.linkedPackages.add(pkg);
+                }
+            }
+            JSONArray runsArr = row.optJSONArray("runs");
+            if (runsArr != null) {
+                for (int idx = 0; idx < runsArr.length(); idx++) {
+                    JSONObject r = runsArr.optJSONObject(idx);
+                    if (r == null) continue;
+                    long rs = r.optLong("startedMs", 0L);
+                    long re = r.optLong("endedMs", 0L);
+                    if (re > rs) {
+                        abs.runs.add(new FocusState.AbstinenceRun(
+                                rs, re,
+                                r.optBoolean("relapsed", false),
+                                r.optString("triggerTag", ""),
+                                r.optString("note", "")));
+                    }
+                }
+                while (abs.runs.size() > FocusState.MAX_ABSTINENCE_RUNS) {
+                    abs.runs.remove(0);
+                }
             }
             state.abstinences.put(id, abs);
         }
@@ -380,7 +417,6 @@ final class FocusStore {
             day.stepsEarnedMs = row.optLong("stepsEarned");
             day.rewardSpentMs = row.optLong("rewardSpent");
             day.configSpentMs = row.optLong("configSpent");
-            day.baseFreeUsedMs = row.optLong("baseFreeUsed");
 
             JSONObject usage = row.optJSONObject("usage");
             for (Iterator<String> p = keys(usage); p.hasNext();) {
@@ -551,8 +587,7 @@ final class FocusStore {
                 FocusState.Rule rule = entry.getValue();
                 rules.put(entry.getKey(), new JSONObject()
                         .put("label", rule.label())
-                        .put("category", rule.category().name())
-                        .put("limit", rule.dailyMinutes()));
+                        .put("category", rule.category().name()));
             }
 
             JSONObject habits = new JSONObject();
@@ -568,6 +603,15 @@ final class FocusStore {
             JSONObject abstinences = new JSONObject();
             for (var entry : state.abstinences.entrySet()) {
                 FocusState.Abstinence a = entry.getValue();
+                JSONArray runsArr = new JSONArray();
+                for (FocusState.AbstinenceRun run : a.runs) {
+                    runsArr.put(new JSONObject()
+                            .put("startedMs", run.startedMs())
+                            .put("endedMs", run.endedMs())
+                            .put("relapsed", run.relapsed())
+                            .put("triggerTag", run.triggerTag())
+                            .put("note", run.note()));
+                }
                 abstinences.put(entry.getKey(), new JSONObject()
                         .put("name", a.name)
                         .put("startedMs", a.startedMs)
@@ -580,8 +624,17 @@ final class FocusStore {
                         .put("reason", a.reason)
                         .put("dailySavingYuan", a.dailySavingYuan)
                         .put("iconIndex", a.iconIndex)
+                        .put("createdMs", a.createdMs)
+                        .put("rewardGuardUntilMs", a.rewardGuardUntilMs)
+                        .put("totalEarnedMinutes", a.totalEarnedMinutes)
+                        .put("previousStartedMs", a.previousStartedMs)
+                        .put("previousStartedForDate", a.previousStartedForDate)
+                        .put("previouslyClaimedTargetHours", a.previouslyClaimedTargetHours)
                         .put("relapseDates", new JSONArray(a.relapseDates))
-                        .put("diaryNotes", new JSONObject(a.diaryNotes)));
+                        .put("diaryNotes", new JSONObject(a.diaryNotes))
+                        .put("diaryTriggers", new JSONObject(a.diaryTriggers))
+                        .put("linkedPackages", new JSONArray(a.linkedPackages))
+                        .put("runs", runsArr));
             }
 
             JSONObject todos = new JSONObject();
@@ -656,7 +709,6 @@ final class FocusStore {
                         .put("stepsEarned", day.stepsEarnedMs)
                         .put("rewardSpent", day.rewardSpentMs)
                         .put("configSpent", day.configSpentMs)
-                        .put("baseFreeUsed", day.baseFreeUsedMs)
                         .put("usage", new JSONObject(day.usage))
                         .put("events", events));
             }

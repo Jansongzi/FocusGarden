@@ -65,6 +65,32 @@ final class UpdateRulesCheck {
         if (!"https://gitee.com/jiansz/focusgarden/releases".equals(GitHubUpdates.GITEE_RELEASES_URL))
             throw new AssertionError("Gitee releases URL mismatch");
 
+        String giteePage = """
+                <div class='release-tag-item' data-tag='v1.6.8'>
+                  <div class='ui label latest-version'>最新版</div>
+                  <textarea class='content' style='display:none;'>戒断优化&#x000A;SHA-256: %s</textarea>
+                  <a href="/jiansz/focusgarden/releases/download/v1.6.8/FocusGarden-v1.6.8.apk">APK</a>
+                </div>
+                <div class='release-tag-item' data-tag='v1.6.7'>
+                  <textarea class='content'>旧版&#x000A;SHA-256: %s</textarea>
+                  <a href="/jiansz/focusgarden/releases/download/v1.6.7/FocusGarden-v1.6.7.apk">APK</a>
+                </div>
+                """.formatted(checksum, "b".repeat(64));
+        var domestic = GitHubUpdates.parseGiteeReleasesPage(giteePage, null);
+        if (!"v1.6.8".equals(domestic.version()) || !"戒断优化".equals(domestic.notes())
+                || !checksum.equals(domestic.assets().get(0).sha()))
+            throw new AssertionError("Gitee web release must keep the latest APK and matching digest");
+        var previous = GitHubUpdates.parseGiteeReleasesPage(giteePage, "v1.6.7");
+        if (!"b".repeat(64).equals(previous.assets().get(0).sha()))
+            throw new AssertionError("Gitee web release must resolve the requested tag");
+        try {
+            GitHubUpdates.parseGiteeReleasesPage(giteePage.replace(
+                    "/releases/download/v1.6.8/FocusGarden-v1.6.8.apk", "/archive/refs/tags/v1.6.8.zip"), null);
+            throw new AssertionError("A source archive must not be used as a Gitee update");
+        } catch (IOException expected) {
+            // Without an APK, the client will fall back to GitHub.
+        }
+
         System.out.println("PASS: repository, stable version comparison, digest validation, web release parsing and update source priority");
     }
 

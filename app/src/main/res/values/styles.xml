@@ -11,4 +11,8 @@
         <item name="android:windowEnterAnimation">@anim/sheet_enter</item>
         <item name="android:windowExitAnimation">@anim/sheet_exit</item>
     </style>
+    <style name="Animation.FocusGarden.RightSheet" parent="">
+        <item name="android:windowEnterAnimation">@anim/right_sheet_enter</item>
+        <item name="android:windowExitAnimation">@anim/right_sheet_exit</item>
+    </style>
 </resources>
