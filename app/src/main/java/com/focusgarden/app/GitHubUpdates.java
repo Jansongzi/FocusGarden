@@ -28,6 +28,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,9 +37,13 @@ import javax.net.ssl.HttpsURLConnection;
 final class GitHubUpdates {
     static final String MIME = "application/vnd.android.package-archive";
     static final String DEFAULT_REPOSITORY = "Jansongzi/FocusGarden";
+    private static final String GITEE_REPOSITORY = "jiansz/focusgarden";
+    static final String GITEE_RELEASES_URL = "https://gitee.com/" + GITEE_REPOSITORY + "/releases";
     private static final long MAX_APK = 150L * 1024 * 1024;
-    private static final Set<String> DOWNLOAD_HOSTS = new HashSet<>(Arrays.asList("github.com",
+    private static final Set<String> GITHUB_DOWNLOAD_HOSTS = new HashSet<>(Arrays.asList("github.com",
             "objects.githubusercontent.com", "release-assets.githubusercontent.com", "github-releases.githubusercontent.com"));
+    private static final Set<String> GITEE_DOWNLOAD_HOSTS = new HashSet<>(Arrays.asList("gitee.com", "foruda.gitee.com"));
+    private static final Pattern GITEE_CHECKSUM = Pattern.compile("(?m)^SHA-256: ([a-fA-F0-9]{64})[ \\t]*\\r?$");
     private static volatile PackageInfo cachedInstalled;
 
     record Asset(String name, URL url, long size, String sha) {}
@@ -70,6 +75,65 @@ final class GitHubUpdates {
     static boolean hasPending(Context context, PackageInfo current) {
         long downloaded = context.getSharedPreferences("github_updates", Context.MODE_PRIVATE).getLong("downloadedCode", 0);
         return downloaded > code(current) && pending(context).isFile();
+    }
+
+    static Release latestUpdate(String installedVersion) throws Exception {
+        return trySources(() -> {
+            Release release = giteeRelease("latest");
+            if (UpdateRules.compare(release.version, installedVersion) < 0) {
+                throw new IOException("国内更新源版本落后");
+            }
+            return release;
+        }, () -> latest(DEFAULT_REPOSITORY));
+    }
+
+    static <T> T trySources(Callable<T> domestic, Callable<T> github) throws Exception {
+        try {
+            return domestic.call();
+        } catch (Exception domesticError) {
+            try {
+                return github.call();
+            } catch (Exception githubError) {
+                githubError.addSuppressed(domesticError);
+                throw githubError;
+            }
+        }
+    }
+
+    private static Release giteeRelease(String releasePath) throws Exception {
+        String body = readText(new URL("https://gitee.com/api/v5/repos/" + GITEE_REPOSITORY
+                        + "/releases/" + releasePath), Collections.singleton("gitee.com"), false, 1_000_000);
+        return parseGiteeRelease(new JSONObject(body));
+    }
+
+    static Release parseGiteeRelease(JSONObject json) throws Exception {
+        if (json.optBoolean("draft") || json.optBoolean("prerelease")) throw new IOException("国内更新源暂无正式版本");
+        String version = json.getString("tag_name");
+        UpdateRules.compare(version, version);
+        String name = "FocusGarden-" + version + ".apk";
+        URL expected = giteeDownloadUrl(version, name);
+        String notes = json.isNull("body") ? "" : json.optString("body", "");
+        Matcher checksum = GITEE_CHECKSUM.matcher(notes);
+        if (!checksum.find()) throw new IOException("国内更新源缺少安装包校验信息");
+        String sha = UpdateRules.sha256("sha256:" + checksum.group(1));
+        notes = checksum.replaceAll("").trim();
+        if (notes.length() > 1400) notes = notes.substring(0, 1400) + "…";
+        JSONArray assets = json.optJSONArray("assets");
+        if (assets != null) for (int i = 0; i < assets.length(); i++) {
+            JSONObject value = assets.getJSONObject(i);
+            if (!name.equals(value.optString("name"))) continue;
+            if (!expected.toExternalForm().equals(value.optString("browser_download_url"))) {
+                throw new IOException("国内安装包下载地址校验不通过");
+            }
+            long size = value.optLong("size");
+            if (size < 0 || size > MAX_APK) throw new IOException("国内安装包大小无效");
+            return new Release(version, notes, Collections.singletonList(new Asset(name, expected, size, sha)));
+        }
+        throw new IOException("国内更新源暂无可用安装包");
+    }
+
+    private static URL giteeDownloadUrl(String version, String name) throws IOException {
+        return new URL(GITEE_RELEASES_URL + "/download/" + version + "/" + name);
     }
 
     static Release latest(String repository) throws Exception {
@@ -113,10 +177,7 @@ final class GitHubUpdates {
         String version = m.group(1);
         UpdateRules.compare(version, version);
 
-        String assetsHtml = readText(
-                new URL("https://github.com/" + repository + "/releases/expanded_assets/" + version),
-                Collections.singleton("github.com"), false, 1_000_000);
-        List<Asset> assets = parseExpandedAssets(assetsHtml, repository, version);
+        List<Asset> assets = githubAssetsFromWeb(repository, version);
 
         String notes = "";
         try {
@@ -128,10 +189,20 @@ final class GitHubUpdates {
     }
 
     static Release latestFromApi(String repository) throws Exception {
+        return githubReleaseFromApi(repository, "latest");
+    }
+
+    private static Release githubReleaseFromApi(String repository, String releasePath) throws Exception {
         String body = readText(
-                new URL("https://api.github.com/repos/" + repository + "/releases/latest"),
+                new URL("https://api.github.com/repos/" + repository + "/releases/" + releasePath),
                 Collections.singleton("api.github.com"), true, 2_000_000);
         return parseRelease(new JSONObject(body), repository);
+    }
+
+    private static List<Asset> githubAssetsFromWeb(String repository, String version) throws Exception {
+        String html = readText(new URL("https://github.com/" + repository + "/releases/expanded_assets/" + version),
+                Collections.singleton("github.com"), false, 1_000_000);
+        return parseExpandedAssets(html, repository, version);
     }
 
     static List<Asset> parseExpandedAssets(String html, String repository, String version) throws Exception {
@@ -215,7 +286,8 @@ final class GitHubUpdates {
             long size = value.optLong("size");
             if (!name.toLowerCase(Locale.ROOT).endsWith(".apk") || size <= 0 || size > MAX_APK) continue;
             URL url = new URL(value.getString("browser_download_url"));
-            String prefix = "/" + repository.toLowerCase(Locale.ROOT) + "/releases/download/";
+            String prefix = "/" + repository.toLowerCase(Locale.ROOT) + "/releases/download/"
+                    + version.toLowerCase(Locale.ROOT) + "/";
             if (!validHost(url, Collections.singleton("github.com")) || !url.getPath().toLowerCase(Locale.ROOT).startsWith(prefix)) {
                 throw new IOException("安装包下载地址校验不通过");
             }
@@ -225,10 +297,52 @@ final class GitHubUpdates {
         return new Release(version, notes, Collections.unmodifiableList(assets));
     }
 
-    static void download(Context context, Asset asset, String release) throws Exception {
+    static void downloadUpdate(Context context, Asset asset, String release) throws Exception {
+        boolean fromGitee = "gitee.com".equals(asset.url.getHost());
+        if (!asset.name.equals("FocusGarden-" + release + ".apk")) {
+            download(context, asset, release, GITHUB_DOWNLOAD_HOSTS);
+            return;
+        }
+        trySources(() -> {
+            Asset domestic = fromGitee ? asset : giteeAsset(release, asset);
+            download(context, domestic, release, GITEE_DOWNLOAD_HOSTS);
+            return null;
+        }, () -> {
+            download(context, fromGitee ? githubAsset(release, asset.name) : asset, release, GITHUB_DOWNLOAD_HOSTS);
+            return null;
+        });
+    }
+
+    private static Asset giteeAsset(String version, Asset github) throws Exception {
+        if (!github.sha.isEmpty()) {
+            return new Asset(github.name, giteeDownloadUrl(version, github.name), github.size, github.sha);
+        }
+        Release gitee = giteeRelease("tags/" + version);
+        if (!version.equals(gitee.version)) throw new IOException("国内更新源版本不匹配");
+        return gitee.assets.get(0);
+    }
+
+    private static Asset githubAsset(String release, String name) throws Exception {
+        try {
+            return findAsset(githubAssetsFromWeb(DEFAULT_REPOSITORY, release), name);
+        } catch (Exception webError) {
+            Release github = githubReleaseFromApi(DEFAULT_REPOSITORY, "tags/" + release);
+            if (!release.equals(github.version)) throw new IOException("GitHub 备用源版本不匹配");
+            return findAsset(github.assets, name);
+        }
+    }
+
+    private static Asset findAsset(List<Asset> assets, String name) throws IOException {
+        for (Asset asset : assets) {
+            if (name.equals(asset.name)) return asset;
+        }
+        throw new IOException("GitHub 备用源暂无同版本安装包");
+    }
+
+    private static void download(Context context, Asset asset, String release, Set<String> hosts) throws Exception {
         File temp = File.createTempFile("focus-update-", ".apk", context.getCacheDir());
         try {
-            HttpsURLConnection connection = connect(asset.url, false);
+            HttpsURLConnection connection = connect(asset.url, hosts, false);
             try {
                 checkHttp(connection);
                 long contentLen = connection.getContentLengthLong();
@@ -329,18 +443,14 @@ final class GitHubUpdates {
         if (!validHost(url, hosts)) throw new IOException("更新地址无效");
         HttpsURLConnection c = (HttpsURLConnection) url.openConnection();
         c.setInstanceFollowRedirects(false);
-        c.setConnectTimeout(12000);
-        c.setReadTimeout(16000);
+        c.setConnectTimeout(GITEE_DOWNLOAD_HOSTS.contains(url.getHost()) ? 5000 : 12000);
+        c.setReadTimeout(url.getPath().startsWith("/api/v5/") ? 6000 : 16000);
         c.setRequestProperty("User-Agent", "FocusGarden-Android");
         if (api) {
             c.setRequestProperty("Accept", "application/vnd.github+json");
             c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
         }
         return c;
-    }
-
-    private static HttpsURLConnection connect(URL target, boolean api) throws IOException {
-        return connect(target, api ? Collections.singleton("api.github.com") : DOWNLOAD_HOSTS, api);
     }
 
     private static HttpsURLConnection connect(URL target, Set<String> hosts, boolean api) throws IOException {

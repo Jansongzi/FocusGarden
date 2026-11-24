@@ -140,6 +140,7 @@ final class FocusStore {
         state.excludeFromRecents = root.optBoolean("excludeFromRecents");
         state.guardSettingsDuringFocus = root.optBoolean("guardSettingsDuringFocus");
         state.hapticFeedback = root.optBoolean("hapticFeedback", true);
+        state.vaultCardCollapsed = root.optBoolean("vaultCardCollapsed", false);
         if (root.has("rewardsSeeded")) {
             state.rewardsSeeded = root.optBoolean("rewardsSeeded", true);
         } else if (!root.has("credit")) {
@@ -457,6 +458,7 @@ final class FocusStore {
                     .put("excludeFromRecents", state.excludeFromRecents)
                     .put("guardSettingsDuringFocus", state.guardSettingsDuringFocus)
                     .put("hapticFeedback", state.hapticFeedback)
+                    .put("vaultCardCollapsed", state.vaultCardCollapsed)
                     .put("rewardsSeeded", state.rewardsSeeded)
                     .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
                     .put("freeHabitSlotUsed", state.freeHabitSlotUsed)

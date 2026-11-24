@@ -1,7 +1,9 @@
 package com.focusgarden.app;
 
 import android.accessibilityservice.AccessibilityService;
+import android.app.ActivityOptions;
 import android.app.KeyguardManager;
+import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -20,7 +22,9 @@ import android.telecom.TelecomManager;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
@@ -47,6 +51,7 @@ public final class FocusService extends AccessibilityService {
     private BlockScreen blockScreen;
     private GardenUi.CapsuleBar awarenessBar;
     private TextView soberPill;
+    private WindowManager.LayoutParams soberPillParams;
     private FocusState.Restriction showing = FocusState.Restriction.NONE;
     private boolean showingGuard;
     private String foreground;
@@ -624,6 +629,38 @@ public final class FocusService extends AccessibilityService {
         return false;
     }
 
+    private void openMainAppFromOverlay() {
+        Intent launch = new Intent(this, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                PendingIntent pi = PendingIntent.getActivity(this, 102, launch,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                pi.send(this, 0, null, null, null, null, ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                        .toBundle());
+                return;
+            } catch (Exception ignored) {}
+        }
+        try {
+            startActivity(launch);
+        } catch (Exception ignored) {}
+    }
+
+    private int serviceDisplayWidth() {
+        if (Build.VERSION.SDK_INT >= 30 && windows != null) {
+            return windows.getCurrentWindowMetrics().getBounds().width();
+        }
+        return getResources().getDisplayMetrics().widthPixels;
+    }
+
+    private int serviceDisplayHeight() {
+        if (Build.VERSION.SDK_INT >= 30 && windows != null) {
+            return windows.getCurrentWindowMetrics().getBounds().height();
+        }
+        return getResources().getDisplayMetrics().heightPixels;
+    }
+
     private void updateSoberPill(long now) {
         String remaining = SoberModeUi.clockText(store.state.soberRemaining(now));
         if (soberPill == null) {
@@ -633,30 +670,83 @@ public final class FocusService extends AccessibilityService {
             pill.setTextSize(13);
             pill.setMinWidth(GardenUi.dp(this, 88));
             pill.setPadding(GardenUi.dp(this, 14), 0, GardenUi.dp(this, 14), 0);
-            pill.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)
-                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP)));
+            int pillH = GardenUi.dp(this, 36);
             WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT, GardenUi.dp(this, 36),
+                    WindowManager.LayoutParams.WRAP_CONTENT, pillH,
                     WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
-            params.gravity = Gravity.TOP | Gravity.END;
-            params.x = GardenUi.dp(this, 14);
-            params.y = GardenUi.dp(this, 10);
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT);
+            params.gravity = Gravity.TOP | Gravity.START;
+            params.alpha = 1.0f;
+            int topPad = GardenUi.dp(this, 10);
+            int rightPad = GardenUi.dp(this, 14);
             if (Build.VERSION.SDK_INT >= 30) {
                 var insets = windows.getCurrentWindowMetrics().getWindowInsets().getInsetsIgnoringVisibility(
                         WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout());
                 params.setFitInsetsTypes(0);
-                params.x += getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
+                rightPad += getResources().getConfiguration().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
                         ? insets.left : insets.right;
-                params.y += insets.top;
+                topPad += insets.top;
             } else {
                 int status = getResources().getIdentifier("status_bar_height", "dimen", "android");
-                params.y += status == 0 ? GardenUi.dp(this, 24) : getResources().getDimensionPixelSize(status);
+                topPad += status == 0 ? GardenUi.dp(this, 24) : getResources().getDimensionPixelSize(status);
             }
+            int estWidth = GardenUi.dp(this, 92);
+            params.x = Math.max(0, serviceDisplayWidth() - estWidth - rightPad);
+            params.y = topPad;
             params.setTitle("目的模式悬浮计时");
+            final int dragSlop = Math.max(GardenUi.dp(this, 8), ViewConfiguration.get(this).getScaledTouchSlop());
+            pill.setOnTouchListener(new View.OnTouchListener() {
+                private int startX, startY;
+                private float downRawX, downRawY;
+                private boolean dragged;
+
+                @Override public boolean onTouch(View v, MotionEvent event) {
+                    if (soberPillParams == null) return false;
+                    switch (event.getActionMasked()) {
+                        case MotionEvent.ACTION_DOWN -> {
+                            startX = soberPillParams.x;
+                            startY = soberPillParams.y;
+                            downRawX = event.getRawX();
+                            downRawY = event.getRawY();
+                            dragged = false;
+                            return true;
+                        }
+                        case MotionEvent.ACTION_MOVE -> {
+                            float dx = event.getRawX() - downRawX;
+                            float dy = event.getRawY() - downRawY;
+                            if (!dragged && (dx * dx + dy * dy) > (float) dragSlop * dragSlop) dragged = true;
+                            if (dragged) {
+                                int w = serviceDisplayWidth();
+                                int h = serviceDisplayHeight();
+                                int pw = Math.max(GardenUi.dp(FocusService.this, 88), pill.getWidth());
+                                soberPillParams.x = Math.max(0, Math.min(w - pw, Math.round(startX + dx)));
+                                soberPillParams.y = Math.max(GardenUi.dp(FocusService.this, 24),
+                                        Math.min(Math.max(GardenUi.dp(FocusService.this, 24), h - pillH - GardenUi.dp(FocusService.this, 24)),
+                                                Math.round(startY + dy)));
+                                try {
+                                    windows.updateViewLayout(pill, soberPillParams);
+                                } catch (Exception ignored) {}
+                            }
+                            return true;
+                        }
+                        case MotionEvent.ACTION_UP -> {
+                            if (!dragged) openMainAppFromOverlay();
+                            return true;
+                        }
+                        case MotionEvent.ACTION_CANCEL -> {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            });
             try {
                 windows.addView(pill, params);
                 soberPill = pill;
+                soberPillParams = params;
             } catch (WindowManager.BadTokenException | IllegalStateException | SecurityException e) {
                 return;
             }
@@ -664,7 +754,7 @@ public final class FocusService extends AccessibilityService {
         if (!remaining.contentEquals(soberPill.getText())) {
             soberPill.setText(remaining);
         }
-        soberPill.setContentDescription("目的模式剩余 " + remaining + "，返回倒计时");
+        soberPill.setContentDescription("目的模式剩余 " + remaining + "，可拖动或轻触返回倒计时");
     }
 
     private void hideSoberPill() {
@@ -673,6 +763,7 @@ public final class FocusService extends AccessibilityService {
             windows.removeViewImmediate(soberPill);
         } catch (IllegalArgumentException ignored) {}
         soberPill = null;
+        soberPillParams = null;
     }
 
     private void updateAwarenessBar(long now) {

@@ -3,12 +3,17 @@ package com.focusgarden.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorManager;
+import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -51,7 +56,25 @@ final class FocusSheets {
         boolean isShowing();
     }
 
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static final String GITHUB_URL = "https://github.com/Jansongzi/FocusGarden";
+    private static final String AUTHOR_EMAIL = "2594428774@qq.com";
+
     private FocusSheets() {}
+
+    private static void postReturn(MainActivity activity, Runnable onDismissBack) {
+        if (onDismissBack == null) return;
+        MAIN.post(() -> {
+            if (!activity.isFinishing() && !activity.isDestroyed()) {
+                onDismissBack.run();
+            }
+        });
+    }
+
+    private static void attachReturn(Dialog dialog, MainActivity activity, Runnable onDismissBack) {
+        if (dialog == null || onDismissBack == null) return;
+        dialog.setOnDismissListener(d -> postReturn(activity, onDismissBack));
+    }
 
     static LiveRefresh showFocusTimer(MainActivity activity, FocusState state, Runnable onChanged) {
         Dialog dialog = new Dialog(activity, isDark()
@@ -502,6 +525,13 @@ final class FocusSheets {
     static LiveRefresh showKeepAliveSheet(MainActivity activity, FocusState state,
                                           Runnable onChanged, Runnable onPickWallpaper,
                                           Runnable onWidget, Runnable onTile) {
+        return showKeepAliveSheet(activity, state, onChanged, onPickWallpaper, onWidget, onTile, null);
+    }
+
+    static LiveRefresh showKeepAliveSheet(MainActivity activity, FocusState state,
+                                          Runnable onChanged, Runnable onPickWallpaper,
+                                          Runnable onWidget, Runnable onTile,
+                                          Runnable onDismissBack) {
         LinearLayout body = column(activity);
 
         // Card 1: Core permissions (UsageStats + Overlay)
@@ -685,6 +715,7 @@ final class FocusSheets {
         renderSnap.accept(KeepAliveManager.cachedStatus(activity));
         sheetRef[0] = bottomSheet(activity, "强力守护与系统", null, body, true,
                 "强力守护说明", "集中配置保活权限、防关闭守护与桌面快捷入口，请确保基础权限已授权。");
+        attachReturn(sheetRef[0], activity, onDismissBack);
         triggerRefresh.run();
 
         return new LiveRefresh() {
@@ -2119,6 +2150,10 @@ final class FocusSheets {
     }
 
     static void showRateSettings(MainActivity activity, FocusState state, Runnable onChanged) {
+        showRateSettings(activity, state, onChanged, null);
+    }
+
+    static void showRateSettings(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
         LinearLayout body = column(activity);
 
         body.addView(text(activity, "时间获取模式", 13, INK_SUB, true));
@@ -2484,9 +2519,10 @@ final class FocusSheets {
         };
         rebuild[0].run();
 
-        bottomSheet(activity, "时间获取模式与上限", null, body, true,
+        Dialog sheet = bottomSheet(activity, "时间获取模式与上限", null, body, true,
                 "模式切换与卡牌规则",
                 "每日 04:00 重置周期；首次修改各项设置均免费提醒，后续常规模式切换与上限修改每次消耗 30 分钟；3 天正常自律进度兑 1 张放纵卡（最多 5 张），2 张放纵卡兑 1 张躺平卡（最多 2 张）；放纵与躺平次日 04:00 自动恢复上一正常模式。");
+        attachReturn(sheet, activity, onDismissBack);
     }
 
     private static LinearLayout rateRow(Activity activity, String title, String sub, String val, Runnable onTap) {
@@ -2509,8 +2545,14 @@ final class FocusSheets {
     }
 
     static void showGeneralSettings(MainActivity activity, FocusState state, Runnable onCards, Runnable onChanged) {
+        showGeneralSettings(activity, state, onCards, onChanged, null);
+    }
+
+    static void showGeneralSettings(MainActivity activity, FocusState state, Runnable onCards, Runnable onChanged,
+                                    Runnable onDismissBack) {
         LinearLayout body = column(activity);
         Dialog[] sheetRef = new Dialog[1];
+        boolean[] suppressReturn = {false};
 
         body.addView(text(activity, "外观与夜间模式", 13, MUTED, true));
         gap(body, 8);
@@ -2519,8 +2561,9 @@ final class FocusSheets {
             state.themeMode = idx;
             FocusStore.get(activity).save();
             activity.applyThemeNow();
+            suppressReturn[0] = true;
             if (sheetRef[0] != null) sheetRef[0].dismiss();
-            showGeneralSettings(activity, state, onCards, onChanged);
+            showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
         }));
         gap(body, 16);
 
@@ -2629,24 +2672,38 @@ final class FocusSheets {
 
         body.addView(settingRow(activity, R.drawable.ic_edit, AMBER_SOFT, AMBER,
                 "管理兑换页卡片", null, null, () -> {
+                    suppressReturn[0] = true;
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
-                    onCards.run();
+                    if (onDismissBack != null) {
+                        showCardManager(activity, state, onChanged,
+                                () -> showGeneralSettings(activity, state, onCards, onChanged, onDismissBack));
+                    } else {
+                        onCards.run();
+                    }
                 }));
 
         sheetRef[0] = bottomSheet(activity, "通用设置", null, body);
+        if (onDismissBack != null) {
+            sheetRef[0].setOnDismissListener(d -> {
+                if (!suppressReturn[0]) postReturn(activity, onDismissBack);
+            });
+        }
     }
 
     static void showRewardsSheet(MainActivity activity, FocusState state, Runnable onChanged) {
+        showRewardsSheet(activity, state, onChanged, null);
+    }
+
+    static void showRewardsSheet(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
         LinearLayout body = column(activity);
         state.seedDefaultRewardsIfNeeded();
 
         LinearLayout summary = row(activity);
-        summary.setBackground(cardBg(activity, AMBER_SOFT, amberStroke(), 16));
-        summary.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
         LinearLayout sLeft = column(activity);
-        sLeft.addView(text(activity, "当前可支配时间", 12, AMBER, true));
+        TextView summaryTitle = text(activity, "", 12, AMBER, true);
         TextView bigSpendable = text(activity, "", 22, INK, true);
         TextView subBreakdown = text(activity, "", 11, INK_SUB, false);
+        sLeft.addView(summaryTitle);
         sLeft.addView(bigSpendable);
         sLeft.addView(subBreakdown);
         weight(summary, sLeft);
@@ -2668,9 +2725,23 @@ final class FocusSheets {
             rebuild[0].run();
         });
         rebuild[0] = () -> {
-            FocusState.Day day = state.days.getOrDefault(FocusState.today().toString(), new FocusState.Day());
-            bigSpendable.setText(duration(state.totalSpendableMs()));
-            subBreakdown.setText("今日可用 " + duration(state.creditMs) + " + 储蓄罐 " + duration(state.vaultMs));
+            long now = System.currentTimeMillis();
+            state.syncResetDay(now, ZoneId.systemDefault());
+            boolean layFlat = state.isLayFlat();
+            FocusState.Day day = state.days.getOrDefault(FocusState.date(now, ZoneId.systemDefault()), new FocusState.Day());
+
+            summary.setBackground(layFlat
+                    ? cardBg(activity, PURPLE_SOFT, purpleStroke(), 16)
+                    : cardBg(activity, AMBER_SOFT, amberStroke(), 16));
+            summary.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
+            summaryTitle.setText(layFlat ? "躺平状态 · 仅限储蓄时间" : "当前可支配时间");
+            summaryTitle.setTextColor(layFlat ? PURPLE : AMBER);
+            spentTodayPill.setTextColor(layFlat ? PURPLE : AMBER);
+
+            bigSpendable.setText(duration(state.rewardSpendableMs()));
+            subBreakdown.setText(layFlat
+                    ? "当前储蓄罐 " + duration(state.vaultMs) + "（躺平状态下兑换奖励仅消耗储蓄时间）"
+                    : "今日可用 " + duration(state.creditMs) + " + 储蓄罐 " + duration(state.vaultMs));
             spentTodayPill.setText("今日已兑 " + duration(day.rewardSpentMs));
 
             listWrap.removeAllViews();
@@ -2692,7 +2763,7 @@ final class FocusSheets {
             for (var entry : new ArrayList<>(state.rewards.entrySet())) {
                 String id = entry.getKey();
                 FocusState.Reward reward = entry.getValue();
-                boolean affordable = state.canAfford(reward.costMinutes * FocusState.MINUTE);
+                boolean affordable = state.canAffordReward(reward.costMinutes * FocusState.MINUTE);
 
                 LinearLayout row = row(activity);
                 row.setBackground(touchCard(activity, CARD, BORDER, 15));
@@ -2710,17 +2781,25 @@ final class FocusSheets {
                 TextView redeemBtn = pillButton(activity, "兑换", affordable ? BLUE : BLUE_DISABLED_BG,
                         affordable ? ON_ACCENT : BLUE_DISABLED_TEXT, 10, 34);
                 redeemBtn.setOnClickListener(v -> {
+                    long clickNow = System.currentTimeMillis();
+                    state.syncResetDay(clickNow, ZoneId.systemDefault());
+                    boolean curLayFlat = state.isLayFlat();
                     long need = reward.costMinutes * FocusState.MINUTE;
-                    if (!state.canAfford(need)) {
+                    if (!state.canAffordReward(need)) {
                         haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                        Toast.makeText(activity, "还差 " + duration(need - state.totalSpendableMs())
-                                + " 才可兑换「" + reward.title + "」", Toast.LENGTH_SHORT).show();
+                        long lack = Math.max(0L, need - state.rewardSpendableMs());
+                        Toast.makeText(activity, curLayFlat
+                                ? "躺平状态下仅可消耗储蓄时间，还差 " + duration(lack) + " 才可兑换「" + reward.title + "」"
+                                : "还差 " + duration(lack) + " 才可兑换「" + reward.title + "」",
+                                Toast.LENGTH_SHORT).show();
                         return;
                     }
                     tapHaptic(v);
+                    String confirmMsg = curLayFlat
+                            ? "躺平状态下将仅从时间储蓄罐扣除 " + reward.costMinutes + " 分钟（不消耗今日可用时间）。"
+                            : "将消耗 " + reward.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）。";
                     confirmDialog(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
-                            "兑换「" + reward.title + "」？",
-                            "将消耗 " + reward.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）。",
+                            "兑换「" + reward.title + "」？", confirmMsg,
                             "取消", "确认兑换", false, () -> {
                                 if (state.redeemReward(id, System.currentTimeMillis(), ZoneId.systemDefault())) {
                                     haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
@@ -2730,7 +2809,8 @@ final class FocusSheets {
                                             + reward.costMinutes + " 分钟", Toast.LENGTH_SHORT).show();
                                 } else {
                                     haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                                    Toast.makeText(activity, "可支配时间不足", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(activity, curLayFlat ? "储蓄时间不足" : "可支配时间不足",
+                                            Toast.LENGTH_SHORT).show();
                                 }
                             });
                 });
@@ -2767,9 +2847,10 @@ final class FocusSheets {
         });
 
         rebuild[0].run();
-        bottomSheet(activity, "奖励兑换", null, body, true,
-                "奖励兑换说明", "消耗可用自由时间兑换现实奖励（优先扣除今日可用，不足部分自动从储蓄罐扣除）；点按左上角 + 可添加自定义奖励，点按列表项可编辑。",
+        Dialog sheet = bottomSheet(activity, "奖励兑换", null, body, true,
+                "奖励兑换说明", "消耗可用自由时间兑换现实奖励（常规模式优先扣除今日可用，不足部分自动从储蓄罐扣除；躺平状态下仅消耗储蓄罐时间）；点按左上角 + 可添加自定义奖励，点按列表项可编辑。",
                 addHeaderBtn);
+        attachReturn(sheet, activity, onDismissBack);
     }
 
     private static void showAddRewardSheet(MainActivity activity, FocusState state, Runnable onAdded) {
@@ -2892,6 +2973,10 @@ final class FocusSheets {
     }
 
     static void showCardManager(MainActivity activity, FocusState state, Runnable onChanged) {
+        showCardManager(activity, state, onChanged, null);
+    }
+
+    static void showCardManager(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
         LinearLayout body = column(activity);
         String[][] defs = {
                 {"apps", "应用", "统计正向学习应用时长并自动兑换"},
@@ -2923,12 +3008,122 @@ final class FocusSheets {
             body.addView(row);
             if (i + 1 < defs.length) gap(body, 8);
         }
-        bottomSheet(activity, "添加和编辑卡片", null, body);
+        Dialog sheet = bottomSheet(activity, "添加和编辑卡片", null, body);
+        attachReturn(sheet, activity, onDismissBack);
+    }
+
+    private static void copyToClipboard(Context context, String label, String value, String toastMsg) {
+        ClipboardManager cm = context.getSystemService(ClipboardManager.class);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText(label, value));
+        }
+        Toast.makeText(context, toastMsg, Toast.LENGTH_SHORT).show();
+    }
+
+    static void showFeedbackSheet(MainActivity activity, Runnable onDismissBack) {
+        LinearLayout body = column(activity);
+
+        LinearLayout hero = column(activity);
+        hero.setBackground(cardBg(activity, BLUE_SOFT, blueStroke(), 16));
+        hero.setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 16), dp(activity, 14));
+        hero.addView(text(activity, "本项目完全开源且免费，欢迎反馈交流！", 15, INK, true));
+        gap(hero, 5);
+        hero.addView(text(activity, "欢迎前往 GitHub 查看源码、提交建议或问题，也可以通过作者邮箱直接联系交流。", 12, INK_SUB, false));
+        body.addView(hero);
+        gap(body, 14);
+
+        LinearLayout githubCard = column(activity);
+        githubCard.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        githubCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
+        LinearLayout ghTop = row(activity);
+        ghTop.addView(iconBadge(activity, R.drawable.ic_info, BLUE_SOFT, BLUE, 38, 19, 11));
+        space(ghTop, 12);
+        LinearLayout ghCopy = column(activity);
+        ghCopy.addView(text(activity, "GitHub 项目链接", 15, INK, true));
+        gap(ghCopy, 2);
+        ghCopy.addView(text(activity, GITHUB_URL, 12, BLUE, false));
+        weight(ghTop, ghCopy);
+        githubCard.addView(ghTop);
+        gap(githubCard, 10);
+        LinearLayout ghBtns = row(activity);
+        TextView ghOpen = pillButton(activity, "打开项目主页", BLUE, ON_ACCENT, 10, 36);
+        ghOpen.setOnClickListener(v -> {
+            tapHaptic(v);
+            try {
+                activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL)));
+            } catch (Exception e) {
+                copyToClipboard(activity, "GitHub 项目链接", GITHUB_URL, "无法打开浏览器，已复制 GitHub 链接");
+            }
+        });
+        TextView ghCopyBtn = pillButton(activity, "复制链接", CARD, INK, 10, 36);
+        ghCopyBtn.setBackground(touchCard(activity, CARD, BORDER, 10));
+        ghCopyBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            copyToClipboard(activity, "GitHub 项目链接", GITHUB_URL, "已复制 GitHub 项目链接");
+        });
+        weight(ghBtns, ghOpen);
+        space(ghBtns, 8);
+        weight(ghBtns, ghCopyBtn);
+        githubCard.addView(ghBtns);
+        body.addView(githubCard);
+        gap(body, 10);
+
+        String giteeUrl = GitHubUpdates.GITEE_RELEASES_URL + "/latest";
+        body.addView(settingRow(activity, R.drawable.ic_info, BLUE_SOFT, BLUE,
+                "Gitee 国内下载", "打开正式版 APK 下载页", null, () -> {
+                    try {
+                        activity.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(giteeUrl)));
+                    } catch (android.content.ActivityNotFoundException e) {
+                        copyToClipboard(activity, "Gitee 下载链接", giteeUrl, "已复制 Gitee 下载链接");
+                    }
+                }));
+        gap(body, 10);
+
+        LinearLayout mailCard = column(activity);
+        mailCard.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        mailCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
+        LinearLayout mailTop = row(activity);
+        mailTop.addView(iconBadge(activity, R.drawable.ic_mail, GREEN_SOFT, GREEN, 38, 19, 11));
+        space(mailTop, 12);
+        LinearLayout mailCopy = column(activity);
+        mailCopy.addView(text(activity, "作者邮箱", 15, INK, true));
+        gap(mailCopy, 2);
+        TextView emailTv = text(activity, AUTHOR_EMAIL, 13, GREEN, true);
+        emailTv.setFontFeatureSettings("tnum");
+        mailCopy.addView(emailTv);
+        weight(mailTop, mailCopy);
+        mailCard.addView(mailTop);
+        gap(mailCard, 10);
+        LinearLayout mailBtns = row(activity);
+        TextView mailCopyBtn = pillButton(activity, "复制邮箱", GREEN_SOFT, GREEN, 10, 36);
+        mailCopyBtn.setBackground(touchCard(activity, GREEN_SOFT, greenStroke(), 10));
+        mailCopyBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            copyToClipboard(activity, "作者邮箱", AUTHOR_EMAIL, "已复制作者邮箱：" + AUTHOR_EMAIL);
+        });
+        TextView mailSendBtn = pillButton(activity, "发送邮件", CARD, INK, 10, 36);
+        mailSendBtn.setBackground(touchCard(activity, CARD, BORDER, 10));
+        mailSendBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            try {
+                activity.startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + AUTHOR_EMAIL)));
+            } catch (Exception e) {
+                copyToClipboard(activity, "作者邮箱", AUTHOR_EMAIL, "未检测到邮件应用，已复制邮箱：" + AUTHOR_EMAIL);
+            }
+        });
+        weight(mailBtns, mailCopyBtn);
+        space(mailBtns, 8);
+        weight(mailBtns, mailSendBtn);
+        mailCard.addView(mailBtns);
+        body.addView(mailCard);
+
+        Dialog sheet = bottomSheet(activity, "反馈与开源交流", null, body);
+        attachReturn(sheet, activity, onDismissBack);
     }
 
     static void showSettings(MainActivity activity, FocusState state, KeepAliveManager.StatusSnapshot initialSnap,
                              Runnable onRules, Runnable onKeepAlive, Runnable onGeneral, Runnable onRates,
-                             Runnable onRewards, Runnable onDebug, Runnable onUpdates) {
+                             Runnable onRewards, Runnable onDebug, Runnable onFeedback, Runnable onUpdates) {
         LinearLayout body = column(activity);
         Dialog[] sheetRef = new Dialog[1];
 
@@ -2984,6 +3179,13 @@ final class FocusSheets {
                 }));
         gap(body, 8);
 
+        body.addView(settingRow(activity, R.drawable.ic_feedback, GREEN_SOFT, GREEN,
+                "反馈与开源交流", "开源免费 · GitHub 与作者邮箱", "开源", () -> {
+                    if (sheetRef[0] != null) sheetRef[0].dismiss();
+                    onFeedback.run();
+                }));
+        gap(body, 8);
+
         String ver = GitHubUpdates.installed(activity).versionName;
         body.addView(settingRow(activity, R.drawable.ic_info, SURFACE_SUBTLE, INK_SUB,
                 "检查更新", "当前版本 v" + ver, null, () -> {
@@ -3004,6 +3206,10 @@ final class FocusSheets {
     }
 
     static void showDebugSheet(MainActivity activity, FocusState state, Runnable onChanged) {
+        showDebugSheet(activity, state, onChanged, null);
+    }
+
+    static void showDebugSheet(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
         LinearLayout body = column(activity);
 
         LinearLayout warn = row(activity);
@@ -3252,7 +3458,8 @@ final class FocusSheets {
         body.addView(seedRedeemBtn, -1, -2);
 
         refreshStatus[0].run();
-        bottomSheet(activity, "调试模式", "开发测试工具 · 请勿用于正式自律", body);
+        Dialog sheet = bottomSheet(activity, "调试模式", "开发测试工具 · 请勿用于正式自律", body);
+        attachReturn(sheet, activity, onDismissBack);
     }
 
     private static LinearLayout settingRow(Activity activity, int iconRes, int badgeBg, int badgeTint,

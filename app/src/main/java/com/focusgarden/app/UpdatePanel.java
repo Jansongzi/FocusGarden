@@ -4,6 +4,8 @@ import android.app.Dialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -15,12 +17,15 @@ import java.util.function.Consumer;
 final class UpdatePanel {
     private static final AtomicBoolean BUSY = new AtomicBoolean();
     private final MainActivity activity;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean checking;
     private boolean manualCheck;
     private boolean ignoreAutomaticResult;
     private Dialog progress;
     private Dialog panel;
     private GitHubUpdates.Release deferredRelease;
+    private Runnable returnAfterClose;
+    private boolean transitioning;
 
     UpdatePanel(MainActivity activity) {
         this.activity = activity;
@@ -39,15 +44,32 @@ final class UpdatePanel {
     }
 
     void dismiss() {
+        returnAfterClose = null;
         if (progress != null) progress.dismiss();
         if (panel != null) panel.dismiss();
     }
 
     private boolean hasPanel() {
-        return panel != null && panel.isShowing();
+        return (panel != null && panel.isShowing()) || (progress != null && progress.isShowing());
+    }
+
+    private void bindReturn(Dialog dialog) {
+        if (dialog == null) return;
+        dialog.setOnDismissListener(d -> mainHandler.post(() -> {
+            if (returnAfterClose == null || activity.isFinishing() || activity.isDestroyed()) return;
+            if (transitioning || hasPanel()) return;
+            Runnable r = returnAfterClose;
+            returnAfterClose = null;
+            r.run();
+        }));
     }
 
     void open() {
+        open(null);
+    }
+
+    void open(Runnable onClosed) {
+        returnAfterClose = onClosed;
         deferredRelease = null;
         var current = GitHubUpdates.installed(activity);
         String version = current.versionName;
@@ -57,14 +79,21 @@ final class UpdatePanel {
             TextView recheck = GardenUi.secondaryButton(activity, "重新检查最新版本");
             recheck.setOnClickListener(v -> {
                 GardenUi.tapHaptic(v);
+                transitioning = true;
                 if (dialogRef[0] != null) dialogRef[0].dismiss();
+                transitioning = false;
                 check(true);
             });
             dialogRef[0] = GardenUi.cardDialog(activity, R.drawable.ic_info, GardenUi.BLUE_SOFT, GardenUi.BLUE,
                     "发现待安装更新",
                     "当前版本 v" + version + "\n已下载新版安装包，可以直接覆盖安装，或重新检查更新。",
-                    recheck, "稍后", "立即安装", false, true, this::install);
+                    recheck, "稍后", "立即安装", false, true, () -> {
+                        transitioning = true;
+                        install();
+                        transitioning = false;
+                    });
             panel = dialogRef[0];
+            bindReturn(panel);
             return;
         }
         check(true);
@@ -74,12 +103,13 @@ final class UpdatePanel {
         if (manual && !manualCheck) {
             manualCheck = true;
             progress = GardenUi.loadingDialog(activity, "检查更新", "正在检查最新版本…");
+            bindReturn(progress);
         }
         if (checking) return;
         checking = true;
         new Thread(() -> {
             try {
-                GitHubUpdates.Release release = GitHubUpdates.latest(GitHubUpdates.DEFAULT_REPOSITORY);
+                GitHubUpdates.Release release = GitHubUpdates.latestUpdate(GitHubUpdates.installed(activity).versionName);
                 activity.runOnUiThread(() -> finishCheck(release, null));
             } catch (Exception e) {
                 activity.runOnUiThread(() -> finishCheck(null, errorMessage(e)));
@@ -93,13 +123,20 @@ final class UpdatePanel {
         boolean suppressed = ignoreAutomaticResult;
         manualCheck = false;
         ignoreAutomaticResult = false;
+        transitioning = true;
         if (progress != null) {
             progress.dismiss();
             progress = null;
         }
-        if (activity.isFinishing() || activity.isDestroyed()) return;
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            transitioning = false;
+            returnAfterClose = null;
+            return;
+        }
         if (error != null) {
             if (manual && activity.isResumedForUpdate()) message("暂时无法完成", error);
+            else if (manual) returnAfterClose = null;
+            transitioning = false;
             return;
         }
         String installed = GitHubUpdates.installed(activity).versionName;
@@ -107,21 +144,30 @@ final class UpdatePanel {
             if (manual && activity.isResumedForUpdate()) {
                 panel = GardenUi.infoDialog(activity, R.drawable.ic_check, GardenUi.GREEN_SOFT, GardenUi.GREEN,
                         "已是最新版本", "当前版本 v" + installed + " 已是最新正式版本。", "知道了");
+                bindReturn(panel);
+            } else if (manual) {
+                returnAfterClose = null;
             }
+            transitioning = false;
             return;
         }
         if (manual && activity.isResumedForUpdate()) {
             showRelease(release);
-        } else if (!suppressed) {
-            deferredRelease = release;
-            presentWhenReady();
+        } else {
+            if (manual) returnAfterClose = null;
+            if (!suppressed) {
+                deferredRelease = release;
+                presentWhenReady();
+            }
         }
+        transitioning = false;
     }
 
     private void showRelease(GitHubUpdates.Release release) {
         if (release.assets().isEmpty()) {
             panel = GardenUi.infoDialog(activity, R.drawable.ic_info, GardenUi.AMBER_SOFT, GardenUi.AMBER,
                     "发现新版本 " + release.version(), "新版本暂无可用的安装包附件，请稍后再试。", "知道了");
+            bindReturn(panel);
             return;
         }
         String notes = release.notes().trim().isEmpty()
@@ -129,12 +175,20 @@ final class UpdatePanel {
         if (release.assets().size() == 1) {
             GitHubUpdates.Asset asset = release.assets().get(0);
             panel = GardenUi.confirmDialog(activity, R.drawable.ic_info, GardenUi.BLUE_SOFT, GardenUi.BLUE,
-                    "发现新版本 " + release.version(), notes, "暂不更新", "立即下载", false,
-                    () -> downloadAsset(asset, release.version()));
+                    "发现新版本 " + release.version(), notes, "暂不更新", "立即下载", false, () -> {
+                        transitioning = true;
+                        downloadAsset(asset, release.version());
+                        transitioning = false;
+                    });
+            bindReturn(panel);
         } else {
             panel = GardenUi.confirmDialog(activity, R.drawable.ic_info, GardenUi.BLUE_SOFT, GardenUi.BLUE,
-                    "发现新版本 " + release.version(), notes, "暂不更新", "选择安装包", false,
-                    () -> choose(release));
+                    "发现新版本 " + release.version(), notes, "暂不更新", "选择安装包", false, () -> {
+                        transitioning = true;
+                        choose(release);
+                        transitioning = false;
+                    });
+            bindReturn(panel);
         }
     }
 
@@ -152,22 +206,32 @@ final class UpdatePanel {
             row.addView(GardenUi.iconView(activity, R.drawable.ic_chevron_right, 16, GardenUi.MUTED));
             row.setOnClickListener(v -> {
                 GardenUi.tapHaptic(v);
+                transitioning = true;
                 if (sheetRef[0] != null) sheetRef[0].dismiss();
                 downloadAsset(asset, release.version());
+                transitioning = false;
             });
             body.addView(row);
             if (i + 1 < assets.size()) GardenUi.gap(body, 8);
         }
         sheetRef[0] = panel = GardenUi.bottomSheet(activity, "选择安装包", "新版本 " + release.version(), body);
+        bindReturn(panel);
     }
 
     private void downloadAsset(GitHubUpdates.Asset asset, String releaseVersion) {
         run("正在下载更新", "正在下载并校验安装包…", () -> {
-            GitHubUpdates.download(activity.getApplicationContext(), asset, releaseVersion);
+            GitHubUpdates.downloadUpdate(activity.getApplicationContext(), asset, releaseVersion);
             return releaseVersion;
-        }, version -> panel = GardenUi.confirmDialog(activity, R.drawable.ic_check, GardenUi.GREEN_SOFT, GardenUi.GREEN,
-                "已下载 " + version, "版本和签名校验已通过，是否立即覆盖安装？",
-                "稍后安装", "立即安装", false, this::install));
+        }, version -> {
+            panel = GardenUi.confirmDialog(activity, R.drawable.ic_check, GardenUi.GREEN_SOFT, GardenUi.GREEN,
+                    "已下载 " + version, "版本和签名校验已通过，是否立即覆盖安装？",
+                    "稍后安装", "立即安装", false, () -> {
+                        transitioning = true;
+                        install();
+                        transitioning = false;
+                    });
+            bindReturn(panel);
+        });
     }
 
     private void install() {
@@ -179,6 +243,7 @@ final class UpdatePanel {
                         "稍后", "前往设置", false, () -> activity.startActivity(
                                 new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                         Uri.parse("package:" + activity.getPackageName()))));
+                bindReturn(panel);
                 return;
             }
             Uri uri = GitHubUpdates.installUri(activity);
@@ -198,26 +263,33 @@ final class UpdatePanel {
             message("正在处理", "更新任务正在进行中，请稍候。");
             return;
         }
-        Dialog progress = panel = GardenUi.loadingDialog(activity, title, subtitle);
+        Dialog progressDlg = panel = GardenUi.loadingDialog(activity, title, subtitle);
+        bindReturn(progressDlg);
         new Thread(() -> {
             try {
                 T value = work.call();
-                activity.runOnUiThread(() -> finish(progress, () -> complete.accept(value)));
+                activity.runOnUiThread(() -> finish(progressDlg, () -> complete.accept(value)));
             } catch (Exception e) {
-                activity.runOnUiThread(() -> finish(progress, () -> message("暂时无法完成", errorMessage(e))));
+                activity.runOnUiThread(() -> finish(progressDlg, () -> message("暂时无法完成", errorMessage(e))));
             }
         }, "focus-garden-update").start();
     }
 
-    private void finish(Dialog progress, Runnable done) {
+    private void finish(Dialog progressDlg, Runnable done) {
         BUSY.set(false);
-        if (activity.isFinishing() || activity.isDestroyed()) return;
-        progress.dismiss();
+        if (activity.isFinishing() || activity.isDestroyed()) {
+            returnAfterClose = null;
+            return;
+        }
+        transitioning = true;
+        progressDlg.dismiss();
         done.run();
+        transitioning = false;
     }
 
     private void message(String title, String detail) {
         panel = GardenUi.infoDialog(activity, R.drawable.ic_info, GardenUi.BLUE_SOFT, GardenUi.BLUE, title, detail, "知道了");
+        bindReturn(panel);
     }
 
     private static String errorMessage(Exception e) {

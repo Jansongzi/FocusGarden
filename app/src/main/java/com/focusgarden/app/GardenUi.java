@@ -182,6 +182,10 @@ final class GardenUi {
         return darkTheme ? 0xff1c4d6b : 0xffccebfb;
     }
 
+    static int purpleStroke() {
+        return darkTheme ? 0xff453478 : 0xffd7cfff;
+    }
+
     static int mutedCircleBorder() {
         return darkTheme ? 0xff3b4961 : 0xffc6d2e2;
     }

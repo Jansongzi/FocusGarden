@@ -2,9 +2,11 @@ package com.focusgarden.app;
 
 import android.Manifest;
 import android.animation.ValueAnimator;
+import android.app.ActivityOptions;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -24,9 +26,11 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
@@ -141,24 +145,61 @@ public final class KeepAliveService extends Service implements SensorEventListen
         return getResources().getDisplayMetrics().heightPixels;
     }
 
+    private int statusBarTopInset() {
+        if (Build.VERSION.SDK_INT >= 30 && windows != null) {
+            try {
+                return windows.getCurrentWindowMetrics().getWindowInsets()
+                        .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout()).top;
+            } catch (Exception ignored) {}
+        }
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        return id > 0 ? getResources().getDimensionPixelSize(id) : GardenUi.dp(this, 24);
+    }
+
+    private void applyGestureExclusion(View v, int hitSize) {
+        if (Build.VERSION.SDK_INT < 29 || v == null) return;
+        int w = v.getWidth() > 0 ? v.getWidth() : hitSize;
+        int h = v.getHeight() > 0 ? v.getHeight() : hitSize;
+        v.setSystemGestureExclusionRects(Collections.singletonList(new Rect(0, 0, w, h)));
+    }
+
+    private void openMainApp() {
+        Intent launch = new Intent(this, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                PendingIntent pi = PendingIntent.getActivity(this, 101, launch,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                pi.send(this, 0, null, null, null, null, ActivityOptions.makeBasic()
+                        .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                        .toBundle());
+                return;
+            } catch (Exception ignored) {}
+        }
+        try {
+            startActivity(launch);
+        } catch (Exception ignored) {}
+    }
+
     @Override public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         if (floatingBall == null || ballParams == null || windows == null) return;
-        int hit = floatingBall.getWidth() > 0 ? floatingBall.getWidth() : GardenUi.dp(this, 40);
+        int hit = floatingBall.getWidth() > 0 ? floatingBall.getWidth() : GardenUi.dp(this, 48);
         int visual = GardenUi.dp(this, 24);
-        int edgeOffset = Math.max(0, GardenUi.dp(this, 10) - (hit - visual) / 2);
+        int edgeOffset = Math.max(0, GardenUi.dp(this, 12) - (hit - visual) / 2);
         int w = displayWidth();
         int h = displayHeight();
         ballParams.x = (ballParams.x + hit / 2 < w / 2) ? edgeOffset : Math.max(edgeOffset, w - hit - edgeOffset);
         ballParams.y = clampBallY(ballParams.y, hit, h);
         try {
             windows.updateViewLayout(floatingBall, ballParams);
+            floatingBall.post(() -> applyGestureExclusion(floatingBall, hit));
         } catch (Exception ignored) {}
     }
 
     private int clampBallY(int y, int hitSize, int screenH) {
-        int minY = GardenUi.dp(this, 40);
-        int maxY = Math.max(minY, screenH - hitSize - GardenUi.dp(this, 64));
+        int minY = Math.max(GardenUi.dp(this, 60), statusBarTopInset() + GardenUi.dp(this, 16));
+        int maxY = Math.max(minY, screenH - hitSize - GardenUi.dp(this, 72));
         return Math.max(minY, Math.min(maxY, y));
     }
 
@@ -171,14 +212,19 @@ public final class KeepAliveService extends Service implements SensorEventListen
         }
         if (floatingBall != null) return;
 
-        int hitSize = GardenUi.dp(this, 40);
+        int hitSize = GardenUi.dp(this, 48);
         int visualSize = GardenUi.dp(this, 24);
-        int edgeOffset = Math.max(0, GardenUi.dp(this, 10) - (hitSize - visualSize) / 2);
+        int edgeOffset = Math.max(0, GardenUi.dp(this, 12) - (hitSize - visualSize) / 2);
 
         FrameLayout container = new FrameLayout(this);
+        container.setBackgroundColor(0x01000000);
+        container.setClickable(true);
+        container.setFocusable(false);
         container.setContentDescription("留白专注悬浮球，可拖动或轻触返回应用");
 
         FrameLayout orb = new FrameLayout(this);
+        orb.setClickable(false);
+        orb.setAlpha(0.16f);
         GradientDrawable bg = new GradientDrawable();
         bg.setShape(GradientDrawable.OVAL);
         bg.setColor(GardenUi.BLUE);
@@ -186,6 +232,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
         orb.setBackground(bg);
 
         ImageView icon = new ImageView(this);
+        icon.setClickable(false);
         icon.setImageResource(R.drawable.ic_bubble);
         icon.setColorFilter(GardenUi.ON_ACCENT);
         int iconPx = GardenUi.dp(this, 12);
@@ -194,9 +241,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
 
         if (Build.VERSION.SDK_INT >= 29) {
             container.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-                if (r > l && b > t) {
-                    v.setSystemGestureExclusionRects(Collections.singletonList(new Rect(0, 0, r - l, b - t)));
-                }
+                if (r > l && b > t) applyGestureExclusion(v, hitSize);
             });
         }
 
@@ -211,15 +256,20 @@ public final class KeepAliveService extends Service implements SensorEventListen
                 hitSize,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         ballParams.gravity = Gravity.TOP | Gravity.START;
-        ballParams.alpha = 0.16f;
+        // Keep window alpha 1.0 so Android 12+ does not drop touches as untrusted obscured overlay; apply 0.16f to orb.
+        ballParams.alpha = 1.0f;
+        if (Build.VERSION.SDK_INT >= 30) {
+            ballParams.setFitInsetsTypes(0);
+        }
         ballParams.x = Math.max(0, Math.min(screenW - hitSize, savedX));
         ballParams.y = clampBallY(savedY, hitSize, screenH);
         ballParams.setTitle("留白悬浮保活球");
 
-        final int dragSlop = Math.min(ViewConfiguration.get(this).getScaledTouchSlop(), GardenUi.dp(this, 6));
+        final int dragSlop = Math.max(GardenUi.dp(this, 8), ViewConfiguration.get(this).getScaledTouchSlop());
         container.setOnTouchListener(new View.OnTouchListener() {
             private int startX, startY;
             private float downRawX, downRawY;
@@ -234,12 +284,16 @@ public final class KeepAliveService extends Service implements SensorEventListen
                         downRawX = event.getRawX();
                         downRawY = event.getRawY();
                         dragged = false;
+                        orb.animate().alpha(0.72f).scaleX(1.12f).scaleY(1.12f).setDuration(80L).start();
                         return true;
                     }
                     case MotionEvent.ACTION_MOVE -> {
                         float dx = event.getRawX() - downRawX;
                         float dy = event.getRawY() - downRawY;
-                        if (!dragged && (dx * dx + dy * dy) > (float) dragSlop * dragSlop) dragged = true;
+                        if (!dragged && (dx * dx + dy * dy) > (float) dragSlop * dragSlop) {
+                            dragged = true;
+                            container.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                        }
                         if (dragged) {
                             int w = displayWidth();
                             int h = displayHeight();
@@ -252,13 +306,14 @@ public final class KeepAliveService extends Service implements SensorEventListen
                         return true;
                     }
                     case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        orb.animate().alpha(0.16f).scaleX(1f).scaleY(1f).setDuration(140L).start();
                         if (!dragged && event.getActionMasked() == MotionEvent.ACTION_UP) {
-                            Intent launch = new Intent(KeepAliveService.this, MainActivity.class)
-                                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                            startActivity(launch);
+                            container.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                            openMainApp();
                         } else {
                             int w = displayWidth();
-                            int targetX = (ballParams.x + hitSize / 2 < w / 2) ? edgeOffset : w - hitSize - edgeOffset;
+                            int targetX = (ballParams.x + hitSize / 2 < w / 2)
+                                    ? edgeOffset : Math.max(edgeOffset, w - hitSize - edgeOffset);
                             int fromX = ballParams.x;
                             snapAnimator = ValueAnimator.ofInt(fromX, targetX);
                             snapAnimator.setDuration(180L);
@@ -272,6 +327,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
                             });
                             snapAnimator.start();
                             ballPrefs.edit().putInt("x", targetX).putInt("y", ballParams.y).apply();
+                            container.postDelayed(() -> applyGestureExclusion(container, hitSize), 200L);
                         }
                         return true;
                     }
@@ -283,6 +339,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
         try {
             windows.addView(container, ballParams);
             floatingBall = container;
+            container.post(() -> applyGestureExclusion(container, hitSize));
         } catch (Exception e) {
             floatingBall = null;
         }

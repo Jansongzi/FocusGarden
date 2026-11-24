@@ -1,6 +1,8 @@
 package com.focusgarden.app;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 final class UpdateRulesCheck {
     public static void main(String[] args) throws Exception {
@@ -46,7 +48,21 @@ final class UpdateRulesCheck {
         if (!notes.contains("优化设置面板") || !notes.contains("修复更新检查"))
             throw new AssertionError("Unexpected Atom notes: " + notes);
 
-        System.out.println("PASS: repository, stable version comparison, digest validation and web release parsing");
+        AtomicInteger githubCalls = new AtomicInteger();
+        String preferred = GitHubUpdates.trySources(() -> "Gitee", () -> {
+            githubCalls.incrementAndGet();
+            return "GitHub";
+        });
+        if (!"Gitee".equals(preferred) || githubCalls.get() != 0)
+            throw new AssertionError("GitHub must be skipped when Gitee succeeds");
+        String fallback = GitHubUpdates.trySources(() -> { throw new IOException("Gitee offline"); }, () -> {
+            githubCalls.incrementAndGet();
+            return "GitHub";
+        });
+        if (!"GitHub".equals(fallback) || githubCalls.get() != 1)
+            throw new AssertionError("GitHub must be tried once when Gitee fails");
+
+        System.out.println("PASS: repository, stable version comparison, digest validation, web release parsing and update source priority");
     }
 
     private static void reject(Runnable operation) {

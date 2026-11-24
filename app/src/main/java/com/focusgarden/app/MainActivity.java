@@ -1,6 +1,8 @@
 package com.focusgarden.app;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.Dialog;
@@ -24,6 +26,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
@@ -94,6 +97,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
     // Live Home references updated every 500ms without tearing down scroll
     private PiggyBankView homePiggyBank;
     private float lastPiggyRatio = -1f;
+    private FrameLayout homeVaultWrap;
+    private LinearLayout homeVaultCard;
+    private LinearLayout homeContentRoot;
+    private ValueAnimator vaultToggleAnimator;
     private View homeScrim;
     private FrameLayout homeFloatingSettings;
     private TextView homeVaultBig;
@@ -105,6 +112,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private TextView homeSoberSub;
     private SwitchView homeSoberSwitch;
     private ImageView homeTimerHeadIcon;
+    private TextView homeTimerHomeStatus;
     private TextView homeTimerSub;
     private TextView homeTimerReward;
     private TextView homeTimerEarnedLabel;
@@ -155,6 +163,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Boolean lastSoberBadgeActive;
     private Boolean lastOfflineCanClaim;
     private Boolean lastStopwatchRunning;
+    private Boolean lastHomeTimerActive;
     private FocusSheets.LiveRefresh liveTimerSheet;
     private FocusSheets.LiveRefresh liveStepsSheet;
     private SoberModeUi.Timer soberTimer;
@@ -368,6 +377,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     @Override protected void onDestroy() {
+        cancelVaultToggleAnimator();
         updatePanel.dismiss();
         if (sleepLockUi != null) sleepLockUi.dismiss();
         if (soberTimer != null) soberTimer.dismiss();
@@ -548,8 +558,19 @@ public final class MainActivity extends Activity implements SensorEventListener 
         return id > 0 ? getResources().getDimensionPixelSize(id) : dp(this, 24);
     }
 
+    private void cancelVaultToggleAnimator() {
+        if (vaultToggleAnimator != null) {
+            vaultToggleAnimator.cancel();
+            vaultToggleAnimator = null;
+        }
+    }
+
     private void clearHomeRefs() {
+        cancelVaultToggleAnimator();
         homePiggyBank = null;
+        homeVaultWrap = null;
+        homeVaultCard = null;
+        homeContentRoot = null;
         homeVaultBig = null;
         homeCreditBig = null;
         homeCreditUnit = null;
@@ -561,7 +582,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
         lastSoberBadgeActive = null;
         lastOfflineCanClaim = null;
         lastStopwatchRunning = null;
+        lastHomeTimerActive = null;
         homeTimerHeadIcon = null;
+        homeTimerHomeStatus = null;
         homeTimerSub = null;
         homeTimerReward = null;
         homeTimerEarnedLabel = null;
@@ -647,9 +670,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         });
 
         scroll = new ScrollView(this);
+        scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
         pages = column(this);
+        pages.setClipChildren(false);
+        pages.setClipToPadding(false);
         scroll.addView(pages, -1, -2);
 
         FrameLayout contentStage = new FrameLayout(this);
@@ -833,6 +859,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         // 1. Pastel Peach Piggy Bank Hero Stage
         FrameLayout piggyStage = new FrameLayout(this);
+        piggyStage.setClipChildren(false);
+        piggyStage.setClipToPadding(false);
         piggyStage.setPadding(dp(this, 16), topInset + dp(this, 14), dp(this, 16), dp(this, 6));
         homePiggyBank = new PiggyBankView(this);
         float vaultRatio = Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS);
@@ -846,29 +874,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
         lastPiggyRatio = vaultRatio;
         homePiggyBank.setVaultMinutes(state.vaultMs);
-        homePiggyBank.setOnClickListener(v -> {
-            tapHaptic(v);
-            LocalDate d = FocusState.today();
-            int curScore = state.disciplineScore(d);
-            String cardSummary = "放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
-                    + " 张 · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张";
-            String progressInfo = "正常模式自律进度 " + state.disciplinedProgress + " / "
-                    + FocusState.INDULGENT_UNLOCK_DAYS + " 天（每满 3 天兑换 1 张放纵卡）";
-            infoDialog(this, R.drawable.ic_info, BLUE_SOFT, BLUE,
-                    "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / 120 分钟",
-                    "储蓄罐内时长每日凌晨 04:00 不清零，上限 2 小时。\n\n今日自律指数：" + curScore + "%\n"
-                            + cardSummary + "\n" + progressInfo,
-                    "知道了");
-        });
+        homePiggyBank.setVaultCollapsed(state.vaultCardCollapsed);
+        homePiggyBank.setOnClickListener(v -> toggleVaultCardIntoPiggy());
         piggyStage.addView(homePiggyBank,
                 new FrameLayout.LayoutParams(dp(this, 228), dp(this, 152), Gravity.CENTER));
         pages.addView(piggyStage, -1, -2);
 
         LinearLayout content = column(this);
+        content.setClipChildren(false);
+        content.setClipToPadding(false);
         content.setPadding(dp(this, 16), dp(this, 4), dp(this, 16), 0);
+        homeContentRoot = content;
         pages.addView(content, -1, -2);
 
-        // 2. Hero Card: 时间储蓄罐 (Blue normally, Purple when 躺平模式 is active)
+        // 2. Hero Card: 时间储蓄罐 (Blue normally, Purple when 躺平模式 is active; sucks into piggy when collapsed)
         LinearLayout vaultCard = column(this);
         vaultCard.setBackground(layFlat
                 ? gradientBg(this, 0xff8b6eff, 0xff5b3fd6, 22)
@@ -883,13 +902,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
         TextView vaultUnit = text(this, "分钟已存", 13, PALE, false);
         weight(vaultTop, vaultUnit);
 
-        TextView vaultTag = text(this, layFlat ? "躺平生效 · 储蓄不变" : "不清零 · 上限 2 小时", 11, ON_ACCENT, false);
-        vaultTag.setBackground(shape(this, 0x26ffffff, 10));
+        LinearLayout vaultTag = row(this);
+        vaultTag.setBackground(touch(this, 0x26ffffff, 10));
         vaultTag.setPadding(dp(this, 10), dp(this, 5), dp(this, 10), dp(this, 5));
+        vaultTag.setContentDescription("查看储蓄罐规则、自律指数与卡牌详情");
+        vaultTag.addView(text(this, layFlat ? "躺平生效 · 储蓄不变" : "不清零 · 上限 2 小时", 11, ON_ACCENT, false));
+        space(vaultTag, 4);
+        vaultTag.addView(iconView(this, R.drawable.ic_info, 12, ON_ACCENT));
         vaultTag.setOnClickListener(v -> {
             tapHaptic(v);
-            FocusSheets.showGeneralSettings(this, state,
-                    () -> FocusSheets.showCardManager(this, state, this::changed), this::changed);
+            showVaultInfoDialog();
         });
         vaultTop.addView(vaultTag);
         vaultCard.addView(vaultTop);
@@ -963,8 +985,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         space(vaultBtns, 10);
         weight(vaultBtns, withdrawBtn);
         vaultCard.addView(vaultBtns);
-        content.addView(vaultCard);
-        gap(content, 12);
+        homeVaultCard = vaultCard;
+        homeVaultWrap = new FrameLayout(this);
+        homeVaultWrap.setClipChildren(false);
+        homeVaultWrap.setClipToPadding(false);
+        homeVaultWrap.setPadding(0, 0, 0, dp(this, 12));
+        homeVaultWrap.addView(vaultCard, new FrameLayout.LayoutParams(-1, -2));
+        homeVaultWrap.setVisibility(state.vaultCardCollapsed ? View.GONE : View.VISIBLE);
+        content.addView(homeVaultWrap, new LinearLayout.LayoutParams(-1, -2));
 
         // 3. 可用时长 & 限制应用卡 (Becomes countdown to 04:00 reset during 躺平模式)
         LinearLayout budgetCard = surfaceCard();
@@ -1078,6 +1106,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         soberCard.addView(soberRow);
         soberCard.setOnClickListener(v -> homeSoberSwitch.performClick());
         content.addView(soberCard);
+        gap(content, 10);
+
+        // 5. 自律模式卡 (Home permanent entry without redeem button or accordion collapse)
+        content.addView(homeDisciplineCard());
         gap(content, 12);
 
         if (!lastAccessibilityEnabled) {
@@ -1108,6 +1140,135 @@ public final class MainActivity extends Activity implements SensorEventListener 
         content.addView(homeRewardCard(day));
 
         updateHomeLive();
+    }
+
+    private void showVaultInfoDialog() {
+        LocalDate d = FocusState.today();
+        int curScore = state.disciplineScore(d);
+        String cardSummary = "放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
+                + " 张 · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张";
+        String progressInfo = "正常模式自律进度 " + state.disciplinedProgress + " / "
+                + FocusState.INDULGENT_UNLOCK_DAYS + " 天（每满 3 天兑换 1 张放纵卡）";
+        infoDialog(this, R.drawable.ic_info, BLUE_SOFT, BLUE,
+                "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / 120 分钟",
+                "储蓄罐内时长每日凌晨 04:00 不清零，上限 2 小时。\n\n今日自律指数：" + curScore + "%\n"
+                        + cardSummary + "\n" + progressInfo,
+                "知道了");
+    }
+
+    private void toggleVaultCardIntoPiggy() {
+        if (homeVaultWrap == null || homeVaultCard == null || homePiggyBank == null) return;
+        boolean collapse = !state.vaultCardCollapsed;
+        state.vaultCardCollapsed = collapse;
+        FocusStore.get(this).save();
+        homePiggyBank.setVaultCollapsed(collapse);
+        cancelVaultToggleAnimator();
+
+        if (collapse) {
+            tapHaptic(homePiggyBank);
+            homePiggyBank.playDepositBurst();
+        } else {
+            tapHaptic(homePiggyBank);
+            homePiggyBank.playWithdrawRipple();
+        }
+
+        if (RedeemUi.reducedMotion(this)) {
+            homeVaultCard.setScaleX(1f);
+            homeVaultCard.setScaleY(1f);
+            homeVaultCard.setTranslationY(0f);
+            homeVaultCard.setAlpha(1f);
+            homeVaultWrap.getLayoutParams().height = LinearLayout.LayoutParams.WRAP_CONTENT;
+            homeVaultWrap.setVisibility(collapse ? View.GONE : View.VISIBLE);
+            homeVaultWrap.requestLayout();
+            return;
+        }
+
+        int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                homeContentRoot != null && homeContentRoot.getWidth() > 0
+                        ? Math.max(1, homeContentRoot.getWidth()
+                                - homeContentRoot.getPaddingLeft() - homeContentRoot.getPaddingRight())
+                        : Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(this, 32)),
+                View.MeasureSpec.EXACTLY);
+        int hSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED);
+        homeVaultCard.measure(widthSpec, hSpec);
+        int fullH = Math.max(dp(this, 80), homeVaultCard.getMeasuredHeight() + homeVaultWrap.getPaddingBottom());
+
+        int[] piggyLoc = new int[2];
+        int[] wrapLoc = new int[2];
+        homePiggyBank.getLocationInWindow(piggyLoc);
+        homeVaultWrap.getLocationInWindow(wrapLoc);
+        float dy = piggyLoc[0] != 0 || piggyLoc[1] != 0 || wrapLoc[0] != 0 || wrapLoc[1] != 0
+                ? (piggyLoc[1] + homePiggyBank.getHeight() * 0.56f) - wrapLoc[1]
+                : -dp(this, 96);
+        if (dy > -dp(this, 40)) dy = -dp(this, 96);
+        final float suckDy = dy;
+
+        homeVaultWrap.setVisibility(View.VISIBLE);
+        int curH = homeVaultWrap.getHeight() > 0 ? Math.min(fullH, homeVaultWrap.getHeight())
+                : (collapse ? fullH : 0);
+        final int fromH = collapse ? curH : 0;
+        final int toH = collapse ? 0 : fullH;
+        final float fromScale = collapse ? Math.max(0.14f, homeVaultCard.getScaleX()) : 0.14f;
+        final float toScale = collapse ? 0.10f : 1f;
+        final float fromTy = collapse ? homeVaultCard.getTranslationY() : suckDy;
+        final float toTy = collapse ? suckDy : 0f;
+        final float fromAlpha = collapse ? homeVaultCard.getAlpha() : 0f;
+        final float toAlpha = collapse ? 0f : 1f;
+
+        if (!collapse) {
+            homeVaultWrap.getLayoutParams().height = fromH;
+            homeVaultCard.setScaleX(fromScale);
+            homeVaultCard.setScaleY(fromScale);
+            homeVaultCard.setTranslationY(fromTy);
+            homeVaultCard.setAlpha(fromAlpha);
+            homeVaultWrap.requestLayout();
+        }
+
+        homeVaultCard.setPivotX(Math.max(1f, (homeVaultCard.getWidth() > 0
+                ? homeVaultCard.getWidth() : homeVaultCard.getMeasuredWidth()) * 0.5f));
+        homeVaultCard.setPivotY(0f);
+
+        AccelerateInterpolator accel = new AccelerateInterpolator(1.4f);
+        DecelerateInterpolator decel = new DecelerateInterpolator(1.6f);
+        OvershootInterpolator pop = new OvershootInterpolator(1.1f);
+        final boolean[] cancelled = {false};
+
+        vaultToggleAnimator = ValueAnimator.ofFloat(0f, 1f);
+        vaultToggleAnimator.setDuration(collapse ? 340L : 360L);
+        vaultToggleAnimator.addUpdateListener(anim -> {
+            if (homeVaultWrap == null || homeVaultCard == null) return;
+            float f = (float) anim.getAnimatedValue();
+            float k = collapse ? accel.getInterpolation(f) : decel.getInterpolation(f);
+            float scK = collapse ? k : pop.getInterpolation(f);
+
+            int nextH = Math.max(0, Math.min(fullH, Math.round(fromH + (toH - fromH) * k)));
+            homeVaultWrap.getLayoutParams().height = nextH;
+            homeVaultWrap.requestLayout();
+
+            float sc = fromScale + (toScale - fromScale) * scK;
+            homeVaultCard.setScaleX(sc);
+            homeVaultCard.setScaleY(sc);
+            homeVaultCard.setTranslationY(fromTy + (toTy - fromTy) * k);
+            homeVaultCard.setAlpha(Math.max(0f, Math.min(1f, fromAlpha + (toAlpha - fromAlpha) * k)));
+        });
+        vaultToggleAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationCancel(Animator animation) {
+                cancelled[0] = true;
+            }
+
+            @Override public void onAnimationEnd(Animator animation) {
+                if (vaultToggleAnimator == animation) vaultToggleAnimator = null;
+                if (cancelled[0] || homeVaultWrap == null || homeVaultCard == null) return;
+                homeVaultCard.setScaleX(1f);
+                homeVaultCard.setScaleY(1f);
+                homeVaultCard.setTranslationY(0f);
+                homeVaultCard.setAlpha(1f);
+                homeVaultWrap.getLayoutParams().height = LinearLayout.LayoutParams.WRAP_CONTENT;
+                homeVaultWrap.setVisibility(collapse ? View.GONE : View.VISIBLE);
+                homeVaultWrap.requestLayout();
+            }
+        });
+        vaultToggleAnimator.start();
     }
 
     // =========================================================================
@@ -1570,6 +1731,29 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 "应用", sub, btn, body, null);
     }
 
+    private LinearLayout homeDisciplineCard() {
+        LinearLayout card = surfaceCard();
+
+        LinearLayout head = row(this);
+        FrameLayout iconBox = iconBadge(this, R.drawable.ic_phone_lock, BLUE_SOFT, BLUE, 40, 20, 12);
+        homeTimerHeadIcon = (ImageView) iconBox.getChildAt(0);
+        head.addView(iconBox);
+        space(head, 12);
+
+        weight(head, titleWithInfo(this, "自律模式", 15, INK,
+                "自律模式", "期间除正向学习应用外全部锁定。正计时支持随时暂停或停止（满 5 分钟可前往「兑换」页领取时间）；倒计时结束后自动结算，期间不可提前停止。"));
+
+        homeTimerHomeStatus = text(this, "未开启", 11, MUTED, true);
+        homeTimerHomeStatus.setBackground(shape(this, SURFACE_SUBTLE, 8));
+        homeTimerHomeStatus.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
+        head.addView(homeTimerHomeStatus);
+        card.addView(head);
+
+        buildDisciplineControls(card, false);
+        syncHomeTimerMode();
+        return card;
+    }
+
     private LinearLayout homeTimerCard(long now, FocusState.Day day) {
         homeTimerCollapsedSub = text(this, "", 12, MUTED, false);
         final RedeemUi.Pressable3DButton[] timerBtnRef = new RedeemUi.Pressable3DButton[1];
@@ -1593,6 +1777,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
         top.addView(right);
         body.addView(top);
 
+        buildDisciplineControls(body, true);
+
+        ImageView[] iconRef = new ImageView[1];
+        LinearLayout card = wrapRedeemAccordionCard("timer", R.drawable.ic_timer, BLUE_SOFT, BLUE,
+                "自律模式", homeTimerCollapsedSub, redeemCardBtns.get("timer"), body, iconRef);
+        homeTimerHeadIcon = iconRef[0];
+        syncHomeTimerMode();
+        return card;
+    }
+
+    private void buildDisciplineControls(LinearLayout body, boolean includeRedeemRow) {
         homeTimerSub = text(this, "", 12, MUTED, false);
         LinearLayout.LayoutParams timerSubLp = new LinearLayout.LayoutParams(-2, -2);
         timerSubLp.topMargin = dp(this, 3);
@@ -1745,30 +1940,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         space(homeTimerStopWatchRunRow, 8);
         homeTimerStopWatchRunRow.addView(homeTimerStopBtn, new LinearLayout.LayoutParams(0, -2, 0.90f));
 
-        homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
-        homeOfflineRedeemBtn.setOnClickListener(v -> {
-            if (state.active() || (!state.offlineActive() && timerTabMode == 1)) return;
-            if (state.isLayFlat()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
-                return;
-            }
-            long curNow = System.currentTimeMillis();
-            if (!state.canClaimOffline(curNow)) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("累计自律需满 5 分钟且可兑换满 1 分钟才可领取");
-                return;
-            }
-            long gained = state.claimOffline(curNow, ZoneId.systemDefault());
-            if (gained > 0L) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
-                toast("已兑换 +" + duration(gained));
-            } else {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-            }
-        });
-
         // Running controls for 倒计时 (locked: cannot stop early)
         homeTimerCountdownRunRow = row(this);
         homeTimerCountdownBtn = pillButton(this, "", BLUE_SOFT, BLUE, 12, 44);
@@ -1783,22 +1954,41 @@ public final class MainActivity extends Activity implements SensorEventListener 
         controls.addView(homeTimerCountdownRunRow);
         body.addView(controls);
 
-        homeTimerRedeemRow = row(this);
-        homeTimerRedeemRow.setGravity(Gravity.CENTER_VERTICAL);
-        homeTimerRedeemHint = text(this, "", 12, MUTED, false);
-        weight(homeTimerRedeemRow, homeTimerRedeemHint);
-        space(homeTimerRedeemRow, 8);
-        homeTimerRedeemRow.addView(homeOfflineRedeemBtn);
-        LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, -2);
-        redeemLp.topMargin = dp(this, 10);
-        body.addView(homeTimerRedeemRow, redeemLp);
+        if (includeRedeemRow) {
+            homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
+            homeOfflineRedeemBtn.setOnClickListener(v -> {
+                if (state.active() || (!state.offlineActive() && timerTabMode == 1)) return;
+                if (state.isLayFlat()) {
+                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                    toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+                    return;
+                }
+                long curNow = System.currentTimeMillis();
+                if (!state.canClaimOffline(curNow)) {
+                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                    toast("累计自律需满 5 分钟且可兑换满 1 分钟才可领取");
+                    return;
+                }
+                long gained = state.claimOffline(curNow, ZoneId.systemDefault());
+                if (gained > 0L) {
+                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                    changed();
+                    toast("已兑换 +" + duration(gained));
+                } else {
+                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                }
+            });
 
-        ImageView[] iconRef = new ImageView[1];
-        LinearLayout card = wrapRedeemAccordionCard("timer", R.drawable.ic_timer, BLUE_SOFT, BLUE,
-                "自律模式", homeTimerCollapsedSub, redeemCardBtns.get("timer"), body, iconRef);
-        homeTimerHeadIcon = iconRef[0];
-        syncHomeTimerMode();
-        return card;
+            homeTimerRedeemRow = row(this);
+            homeTimerRedeemRow.setGravity(Gravity.CENTER_VERTICAL);
+            homeTimerRedeemHint = text(this, "", 12, MUTED, false);
+            weight(homeTimerRedeemRow, homeTimerRedeemHint);
+            space(homeTimerRedeemRow, 8);
+            homeTimerRedeemRow.addView(homeOfflineRedeemBtn);
+            LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, -2);
+            redeemLp.topMargin = dp(this, 10);
+            body.addView(homeTimerRedeemRow, redeemLp);
+        }
     }
 
     private void openStartedTimer() {
@@ -1872,6 +2062,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private LinearLayout homeRewardCard(FocusState.Day day) {
         state.seedDefaultRewardsIfNeeded();
+        boolean layFlat = state.isLayFlat();
         LinearLayout card = surfaceCard();
 
         LinearLayout top = row(this);
@@ -1879,12 +2070,15 @@ public final class MainActivity extends Activity implements SensorEventListener 
         space(top, 10);
         LinearLayout titles = column(this);
         titles.addView(text(this, "奖励兑换", 16, INK, true));
-        titles.addView(text(this, "今日主动消耗 " + duration(day.rewardSpentMs), 12, MUTED, false));
+        titles.addView(text(this, layFlat
+                ? "躺平中仅扣储蓄罐 · 今日已兑 " + duration(day.rewardSpentMs)
+                : "今日主动消耗 " + duration(day.rewardSpentMs), 12, layFlat ? PURPLE : MUTED, false));
         weight(top, titles);
 
         LinearLayout right = column(this);
         right.setGravity(Gravity.END);
-        right.addView(text(this, duration(state.totalSpendableMs()) + " 可支配", 12, INK, true));
+        right.addView(text(this, duration(state.rewardSpendableMs()) + (layFlat ? " 储蓄可用" : " 可支配"),
+                12, layFlat ? PURPLE : INK, true));
         right.addView(text(this, state.rewards.size() + " 项现实奖励", 11, MUTED, false));
         top.addView(right);
         card.addView(top);
@@ -1895,7 +2089,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (shown >= 2) break;
             String id = entry.getKey();
             FocusState.Reward r = entry.getValue();
-            boolean affordable = state.canAfford(r.costMinutes * FocusState.MINUTE);
+            boolean affordable = state.canAffordReward(r.costMinutes * FocusState.MINUTE);
             LinearLayout itemRow = row(this);
             itemRow.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
             itemRow.setPadding(dp(this, 12), dp(this, 9), dp(this, 12), dp(this, 9));
@@ -1908,16 +2102,24 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     affordable ? AMBER_SOFT : BLUE_DISABLED_BG, affordable ? AMBER : BLUE_DISABLED_TEXT, 9, 32);
             itemRow.addView(pill);
             itemRow.setOnClickListener(v -> {
+                long clickNow = System.currentTimeMillis();
+                state.syncResetDay(clickNow, ZoneId.systemDefault());
+                boolean curLayFlat = state.isLayFlat();
                 long need = r.costMinutes * FocusState.MINUTE;
-                if (!state.canAfford(need)) {
+                if (!state.canAffordReward(need)) {
                     haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    toast("还差 " + duration(need - state.totalSpendableMs()) + " 才可兑换「" + r.title + "」");
+                    long lack = Math.max(0L, need - state.rewardSpendableMs());
+                    toast(curLayFlat
+                            ? "躺平状态下仅可消耗储蓄时间，还差 " + duration(lack) + " 才可兑换「" + r.title + "」"
+                            : "还差 " + duration(lack) + " 才可兑换「" + r.title + "」");
                     return;
                 }
                 tapHaptic(v);
+                String confirmMsg = curLayFlat
+                        ? "躺平状态下将仅从时间储蓄罐消耗 " + r.costMinutes + " 分钟（不扣除今日可用时间）。"
+                        : "将主动消耗 " + r.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）。";
                 confirmDialog(this, R.drawable.ic_gift, AMBER_SOFT, AMBER,
-                        "兑换「" + r.title + "」？",
-                        "将主动消耗 " + r.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）。",
+                        "兑换「" + r.title + "」？", confirmMsg,
                         "取消", "确认兑换", false, () -> {
                             if (state.redeemReward(id, System.currentTimeMillis(), ZoneId.systemDefault())) {
                                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
@@ -1925,7 +2127,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                                 toast("已兑换「" + r.title + "」，消耗 " + r.costMinutes + " 分钟");
                             } else {
                                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                                toast("可支配时间不足");
+                                toast(curLayFlat ? "储蓄时间不足" : "可支配时间不足");
                             }
                         });
             });
@@ -2405,8 +2607,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (activeStopwatch) {
                 long elapsed = state.offlineElapsed(now);
                 long claimable = state.claimableOfflineMs(now);
-                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : shortMinutes(claimable) + " 分钟 可兑换");
-                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
+                if (homeTimerReward != null) {
+                    setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : shortMinutes(claimable) + " 分钟 可兑换");
+                }
+                if (homeTimerEarnedLabel != null) {
+                    setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
+                }
                 boolean running = state.offlineRunning();
                 if (!Boolean.valueOf(running).equals(lastStopwatchRunning)) {
                     if (homeTimerPrimaryIcon != null) {
@@ -2418,31 +2624,84 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         ? countdown(elapsed) + " 自律中"
                         : countdown(elapsed) + " 继续自律");
                 setTextIfChanged(homeTimerSub, "今日共自律 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
-                homeTimerSub.setVisibility(View.VISIBLE);
-                setTextIfChanged(homeTimerCollapsedSub, (running ? "正计时进行中 · " : "正计时已暂停 · ") + countdown(elapsed));
+                if (homeTimerSub.getVisibility() != View.VISIBLE) homeTimerSub.setVisibility(View.VISIBLE);
+                if (homeTimerCollapsedSub != null) {
+                    setTextIfChanged(homeTimerCollapsedSub, (running ? "正计时进行中 · " : "正计时已暂停 · ") + countdown(elapsed));
+                }
+                if (homeTimerHomeStatus != null) {
+                    setTextIfChanged(homeTimerHomeStatus, (running ? "正计时 " : "已暂停 ") + countdown(elapsed));
+                    if (!Boolean.TRUE.equals(lastHomeTimerActive)) {
+                        homeTimerHomeStatus.setTextColor(BLUE);
+                        homeTimerHomeStatus.setBackground(shape(this, BLUE_SOFT, 8));
+                        lastHomeTimerActive = Boolean.TRUE;
+                    }
+                }
             } else if (activeCountdown) {
                 long rem = state.remaining(now);
-                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
-                        : shortMinutes(state.convertByMode(state.phaseDuration)) + " 分钟 预计奖励");
-                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
+                if (homeTimerReward != null) {
+                    setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
+                            : shortMinutes(state.convertByMode(state.phaseDuration)) + " 分钟 预计奖励");
+                }
+                if (homeTimerEarnedLabel != null) {
+                    setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
+                }
                 setTextIfChanged(homeTimerCountdownBtn, "自律倒计时还剩 " + countdown(rem) + " · 进入全屏");
                 setTextIfChanged(homeTimerSub, "倒计时进行中 · 结束后自动结算");
-                homeTimerSub.setVisibility(View.VISIBLE);
-                setTextIfChanged(homeTimerCollapsedSub, "倒计时进行中 · 剩 " + countdown(rem));
+                if (homeTimerSub.getVisibility() != View.VISIBLE) homeTimerSub.setVisibility(View.VISIBLE);
+                if (homeTimerCollapsedSub != null) {
+                    setTextIfChanged(homeTimerCollapsedSub, "倒计时进行中 · 剩 " + countdown(rem));
+                }
+                if (homeTimerHomeStatus != null) {
+                    setTextIfChanged(homeTimerHomeStatus, "倒计时 " + countdown(rem));
+                    if (!Boolean.TRUE.equals(lastHomeTimerActive)) {
+                        homeTimerHomeStatus.setTextColor(BLUE);
+                        homeTimerHomeStatus.setBackground(shape(this, BLUE_SOFT, 8));
+                        lastHomeTimerActive = Boolean.TRUE;
+                    }
+                }
             } else if (timerTabMode == 0) {
                 long claimable = state.claimableOfflineMs(now);
-                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
-                        : state.canClaimOffline(now) ? shortMinutes(claimable) + " 分钟 可兑换" : "满 5 分钟可兑");
-                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
-                homeTimerSub.setVisibility(View.GONE);
+                if (homeTimerReward != null) {
+                    setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
+                            : state.canClaimOffline(now) ? shortMinutes(claimable) + " 分钟 可兑换" : "满 5 分钟可兑");
+                }
+                if (homeTimerEarnedLabel != null) {
+                    setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
+                }
+                if (homeTimerSub.getVisibility() != View.GONE) homeTimerSub.setVisibility(View.GONE);
                 long totalDiscMs = (day == null ? 0L : (day.offlineMs + day.focusMs)) + state.offlineUnredeemedMs;
-                setTextIfChanged(homeTimerCollapsedSub, "累计自律 " + duration(totalDiscMs));
+                if (homeTimerCollapsedSub != null) {
+                    setTextIfChanged(homeTimerCollapsedSub, "累计自律 " + duration(totalDiscMs));
+                }
+                if (homeTimerHomeStatus != null) {
+                    setTextIfChanged(homeTimerHomeStatus, totalDiscMs > 0L ? "今日 " + duration(totalDiscMs) : "未开启");
+                    if (!Boolean.FALSE.equals(lastHomeTimerActive)) {
+                        homeTimerHomeStatus.setTextColor(MUTED);
+                        homeTimerHomeStatus.setBackground(shape(this, SURFACE_SUBTLE, 8));
+                        lastHomeTimerActive = Boolean.FALSE;
+                    }
+                }
             } else {
                 long expectedMs = state.convertByMode(state.presetWork * FocusState.MINUTE);
-                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : "+" + shortMinutes(expectedMs) + " 分钟 预计奖励");
-                setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
-                homeTimerSub.setVisibility(View.GONE);
-                setTextIfChanged(homeTimerCollapsedSub, "倒计时 " + state.presetWork + " 分钟 · 不可提前停止");
+                if (homeTimerReward != null) {
+                    setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : "+" + shortMinutes(expectedMs) + " 分钟 预计奖励");
+                }
+                if (homeTimerEarnedLabel != null) {
+                    setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
+                }
+                if (homeTimerSub.getVisibility() != View.GONE) homeTimerSub.setVisibility(View.GONE);
+                if (homeTimerCollapsedSub != null) {
+                    setTextIfChanged(homeTimerCollapsedSub, "倒计时 " + state.presetWork + " 分钟 · 不可提前停止");
+                }
+                if (homeTimerHomeStatus != null) {
+                    long totalDiscMs = (day == null ? 0L : (day.offlineMs + day.focusMs)) + state.offlineUnredeemedMs;
+                    setTextIfChanged(homeTimerHomeStatus, totalDiscMs > 0L ? "今日 " + duration(totalDiscMs) : "未开启");
+                    if (!Boolean.FALSE.equals(lastHomeTimerActive)) {
+                        homeTimerHomeStatus.setTextColor(MUTED);
+                        homeTimerHomeStatus.setBackground(shape(this, SURFACE_SUBTLE, 8));
+                        lastHomeTimerActive = Boolean.FALSE;
+                    }
+                }
             }
             boolean countdownMode = !activeStopwatch && (activeCountdown || timerTabMode == 1);
             boolean canClaim = !countdownMode && !layFlat && state.canClaimOffline(now);
@@ -2454,14 +2713,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 setTextIfChanged(homeTimerRedeemHint, layFlat ? "躺平模式今日暂停兑换时间"
                         : canClaim ? "已满 5 分钟，点击立即领取" : "累计满 5 分钟可随时兑换");
             }
-            setTextIfChanged(homeOfflineRedeemBtn, layFlat ? "今日暂停" : "+" + shortMinutes(claimable) + " 分钟");
-            if (!Boolean.valueOf(canClaim).equals(lastOfflineCanClaim)) {
-                homeOfflineRedeemBtn.setBackground(canClaim
-                        ? touch(this, BLUE, 12) : shape(this, BLUE_DISABLED_BG, 12));
-                homeOfflineRedeemBtn.setTextColor(canClaim ? ON_ACCENT : BLUE_DISABLED_TEXT);
-                lastOfflineCanClaim = canClaim;
+            if (homeOfflineRedeemBtn != null) {
+                setTextIfChanged(homeOfflineRedeemBtn, layFlat ? "今日暂停" : "+" + shortMinutes(claimable) + " 分钟");
+                if (!Boolean.valueOf(canClaim).equals(lastOfflineCanClaim)) {
+                    homeOfflineRedeemBtn.setBackground(canClaim
+                            ? touch(this, BLUE, 12) : shape(this, BLUE_DISABLED_BG, 12));
+                    homeOfflineRedeemBtn.setTextColor(canClaim ? ON_ACCENT : BLUE_DISABLED_TEXT);
+                    lastOfflineCanClaim = canClaim;
+                }
+                homeOfflineRedeemBtn.setEnabled(!countdownMode);
             }
-            homeOfflineRedeemBtn.setEnabled(!countdownMode);
         }
 
         if (redeemHeaderTimerPill != null) {
@@ -3535,17 +3796,25 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void openSettings() {
+        Runnable reopenSettings = () -> main.post(() -> {
+            if (!isFinishing() && !isDestroyed()) openSettings();
+        });
         FocusSheets.showSettings(this, state, KeepAliveManager.cachedStatus(this),
                 () -> openRules(true),
                 () -> liveKeepAliveSheet = FocusSheets.showKeepAliveSheet(
                         this, state, this::changed, this::launchWallpaperPicker,
-                        this::pinWidget, this::addQuickTile),
+                        this::pinWidget, this::addQuickTile, () -> {
+                            liveKeepAliveSheet = null;
+                            reopenSettings.run();
+                        }),
                 () -> FocusSheets.showGeneralSettings(this, state,
-                        () -> FocusSheets.showCardManager(this, state, this::changed), this::changed),
-                () -> FocusSheets.showRateSettings(this, state, this::changed),
-                () -> FocusSheets.showRewardsSheet(this, state, this::changed),
-                () -> FocusSheets.showDebugSheet(this, state, this::changed),
-                updatePanel::open);
+                        () -> FocusSheets.showCardManager(this, state, this::changed),
+                        this::changed, reopenSettings),
+                () -> FocusSheets.showRateSettings(this, state, this::changed, reopenSettings),
+                () -> FocusSheets.showRewardsSheet(this, state, this::changed, reopenSettings),
+                () -> FocusSheets.showDebugSheet(this, state, this::changed, reopenSettings),
+                () -> FocusSheets.showFeedbackSheet(this, reopenSettings),
+                () -> updatePanel.open(reopenSettings));
     }
 
     private void pinWidget() {

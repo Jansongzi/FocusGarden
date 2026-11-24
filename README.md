@@ -34,10 +34,10 @@ Android 本地专注工具，支持 Android 8.1（API 27）及更高版本。产
 
 ## 软件更新
 
-1. 打开应用时会在后台检查 GitHub 正式版本，发现更新后弹出安装包窗口。「设置 → 检查更新」可手动检查。
-2. 确认发现新版本后，应用会校验字节数、SHA-256 摘要、应用包名、签名证书与版本号；首次安装需在系统设置允许留白专注请求安装后即可覆盖升级并保留数据。
+1. 打开应用时会在后台优先检查 [Gitee 正式版本](https://gitee.com/jiansz/focusgarden/releases/latest)，检查失败时改查 [GitHub](https://github.com/Jansongzi/FocusGarden/releases/latest)。「设置 → 检查更新」可手动检查。「设置 → 反馈与开源交流 → Gitee 国内下载」可打开 Gitee 发布页。
+2. 应用优先从 Gitee 下载。下载或校验失败时，使用 GitHub 同一版本的安装包。应用校验安装包大小、可用的 SHA-256 摘要、包名、签名证书与版本号。首次安装需在系统设置允许留白专注请求安装后即可覆盖升级并保留数据。
 
-发布新版时，在 `version.properties` 同时提升 `versionName` 和 `versionCode`，上传 APK 到正式 Release（如 `v1.5.6`），并使用同一签名密钥签名。
+发布新版时，在 `version.properties` 同时提升 `versionName` 和 `versionCode`，使用同一签名密钥构建一次，将同一份 `FocusGarden-vX.Y.Z.apk` 先上传到 Gitee，再上传到 GitHub 的同名正式 Release。在 Gitee 发布说明末尾另起一行写入 `SHA-256: <64 位十六进制摘要>`，应用用它验证 APK。发布后检查两个源的版本和 APK 摘要一致。
 
 ## 构建
 

@@ -60,6 +60,8 @@ final class PiggyBankView extends View {
     private long depositStartAt;
     private long withdrawStartAt;
     private long phaseEpochAt = SystemClock.uptimeMillis();
+    private long lastVaultMs;
+    private boolean vaultCollapsed;
 
     private int cachedW;
     private int cachedH;
@@ -143,8 +145,19 @@ final class PiggyBankView extends View {
     }
 
     void setVaultMinutes(long vaultMs) {
-        long mins = Math.max(0L, vaultMs / FocusState.MINUTE);
-        setContentDescription("时间储蓄罐，已存 " + mins + " 分钟，上限 120 分钟，点击查看状态与自律指数");
+        lastVaultMs = Math.max(0L, vaultMs);
+        updateVaultContentDescription();
+    }
+
+    void setVaultCollapsed(boolean collapsed) {
+        vaultCollapsed = collapsed;
+        updateVaultContentDescription();
+    }
+
+    private void updateVaultContentDescription() {
+        long mins = Math.max(0L, lastVaultMs / FocusState.MINUTE);
+        setContentDescription("时间储蓄罐，已存 " + mins + " 分钟，上限 120 分钟，"
+                + (vaultCollapsed ? "点击展开时间储蓄卡片" : "点击将时间储蓄卡片收入小猪"));
     }
 
     @Override protected void onAttachedToWindow() {

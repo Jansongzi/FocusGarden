@@ -304,6 +304,7 @@ final class FocusState {
     boolean excludeFromRecents;
     boolean guardSettingsDuringFocus;
     boolean hapticFeedback = true;
+    boolean vaultCardCollapsed;
     boolean rewardsSeeded;
     boolean freeLearningSlotUsed;
     boolean freeHabitSlotUsed;
@@ -619,8 +620,16 @@ final class FocusState {
         return creditMs + vaultMs;
     }
 
+    long rewardSpendableMs() {
+        return isLayFlat() ? vaultMs : totalSpendableMs();
+    }
+
     boolean canAfford(long costMs) {
         return costMs <= 0L || totalSpendableMs() >= costMs;
+    }
+
+    boolean canAffordReward(long costMs) {
+        return costMs <= 0L || rewardSpendableMs() >= costMs;
     }
 
     boolean spendTime(long costMs, String eventType, String title, String detail, long now, ZoneId zone) {
@@ -631,6 +640,20 @@ final class FocusState {
         creditMs -= fromCredit;
         long rem = costMs - fromCredit;
         vaultMs = Math.max(0L, vaultMs - rem);
+        String d = date(now, zone);
+        Day stats = day(d);
+        stats.spentMs += costMs;
+        if ("REWARD".equals(eventType)) stats.rewardSpentMs += costMs;
+        else if ("CONFIG".equals(eventType)) stats.configSpentMs += costMs;
+        logEvent(d, now, eventType, title, detail, -costMs);
+        return true;
+    }
+
+    private boolean spendVaultOnly(long costMs, String eventType, String title, String detail, long now, ZoneId zone) {
+        if (costMs <= 0L) return true;
+        syncResetDay(now, zone);
+        if (vaultMs < costMs) return false;
+        vaultMs = Math.max(0L, vaultMs - costMs);
         String d = date(now, zone);
         Day stats = day(d);
         stats.spentMs += costMs;
@@ -821,9 +844,14 @@ final class FocusState {
     boolean redeemReward(String id, long now, ZoneId zone) {
         Reward r = rewards.get(id);
         if (r == null) return false;
+        syncResetDay(now, zone);
         long costMs = r.costMinutes * MINUTE;
-        if (!spendTime(costMs, "REWARD", "兑换奖励 · " + r.title,
-                "累计第 " + (r.redeemedCount + 1) + " 次", now, zone)) {
+        boolean ok = isLayFlat()
+                ? spendVaultOnly(costMs, "REWARD", "兑换奖励 · " + r.title,
+                        "躺平模式 · 仅消耗储蓄时间 · 累计第 " + (r.redeemedCount + 1) + " 次", now, zone)
+                : spendTime(costMs, "REWARD", "兑换奖励 · " + r.title,
+                        "累计第 " + (r.redeemedCount + 1) + " 次", now, zone);
+        if (!ok) {
             return false;
         }
         r.redeemedCount++;

@@ -866,6 +866,39 @@ final class FocusStateCheck {
         equal(0L, rv.redeemSummary(rvNow, UTC).totalMs());
         equal(0L, rv.claimAllRedeemable(rvNow, UTC).totalMs());
         equal(false, rv.todos.get("t_rv").claimed);
+
+        // 6. v1.6.3+ Lay-Flat active reward redemption consumes vault time only + vaultCardCollapsed default
+        var lr = new FocusState();
+        equal(false, lr.vaultCardCollapsed);
+        lr.vaultCardCollapsed = true;
+        equal(true, lr.vaultCardCollapsed);
+        long lrNow = at("2026-11-24T12:00:00Z");
+        lr.creditMs = 60 * MINUTE;
+        lr.vaultMs = 20 * MINUTE;
+        lr.layFlatCards = 1;
+        lr.addReward("rw_big", "看电影", 30);
+        lr.addReward("rw_small", "喝饮品", 15);
+        equal(true, lr.activateLayFlatMode(lrNow, UTC));
+        equal(20 * MINUTE, lr.rewardSpendableMs());
+        equal(false, lr.canAffordReward(30 * MINUTE));
+        equal(false, lr.redeemReward("rw_big", lrNow, UTC));
+        equal(60 * MINUTE, lr.creditMs);
+        equal(20 * MINUTE, lr.vaultMs);
+        equal(true, lr.canAffordReward(15 * MINUTE));
+        equal(true, lr.redeemReward("rw_small", lrNow, UTC));
+        equal(60 * MINUTE, lr.creditMs);
+        equal(5 * MINUTE, lr.vaultMs);
+        equal(1, lr.rewards.get("rw_small").redeemedCount);
+        equal(15 * MINUTE, lr.day("2026-11-24").rewardSpentMs);
+        // After next day 04:00 reset, normal mode restores and rewards can use newly earned credit + vault
+        lr.syncResetDay(at("2026-11-25T04:00:00Z"), UTC);
+        equal(FocusState.RateMode.MODERATE, lr.rateMode);
+        equal(5 * MINUTE, lr.vaultMs);
+        lr.creditMs = 30 * MINUTE;
+        equal(35 * MINUTE, lr.rewardSpendableMs());
+        equal(true, lr.redeemReward("rw_big", at("2026-11-25T04:05:00Z"), UTC));
+        equal(0L, lr.creditMs);
+        equal(5 * MINUTE, lr.vaultMs);
     }
 
     private static long at(String instant) {
