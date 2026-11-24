@@ -480,12 +480,14 @@ final class RedeemUi {
         }
 
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path shapePath = new Path();
         private final List<Particle> particles = new ArrayList<>();
         private final int[] tmpLoc = new int[2];
         private ValueAnimator animator;
         private float floatStartX, floatStartY;
         private String floatingText = "";
         private int floatingColor;
+        private String particleShape = "circle";
 
         RedeemAnimOverlay(Context context) {
             super(context);
@@ -506,6 +508,10 @@ final class RedeemUi {
         }
 
         void playBurst(View source, View target, String label, int textColor) {
+            playBurst(source, target, label, textColor, "default");
+        }
+
+        void playBurst(View source, View target, String label, int textColor, String effectId) {
             if (reducedMotion(getContext()) || source == null || target == null) return;
             if (!isAttachedToWindow() || !source.isAttachedToWindow() || !target.isAttachedToWindow()) return;
 
@@ -529,7 +535,9 @@ final class RedeemUi {
             floatingText = label == null ? "" : label;
             floatingColor = textColor;
 
-            int[] colors = {0xfff3d184, 0xffffe599, 0xffe2b14c, 0xff6299ff};
+            ShopCatalog.RedeemEffectPalette fx = ShopCatalog.redeemEffect(effectId);
+            int[] colors = fx.colors();
+            particleShape = fx.shapeKind();
             for (int i = 0; i < 10; i++) {
                 Particle p = new Particle();
                 float jitterX = (i - 4.5f) * dp(getContext(), 6);
@@ -597,7 +605,25 @@ final class RedeemUi {
                 float scale = local < 0.75f ? 1f : Math.max(0.2f, 1f - (local - 0.75f) / 0.25f * 0.7f);
                 int alpha = local < 0.8f ? 255 : Math.round(255f * (1f - (local - 0.8f) / 0.2f));
                 paint.setColor((Math.max(0, Math.min(255, alpha)) << 24) | (p.color & 0x00ffffff));
-                canvas.drawCircle(x, y, p.radius * scale, paint);
+                float r = p.radius * scale;
+                if ("star".equals(particleShape)) {
+                    float sr = r * 1.35f;
+                    shapePath.reset();
+                    shapePath.moveTo(x, y - sr);
+                    shapePath.quadTo(x, y, x + sr, y);
+                    shapePath.quadTo(x, y, x, y + sr);
+                    shapePath.quadTo(x, y, x - sr, y);
+                    shapePath.quadTo(x, y, x, y - sr);
+                    shapePath.close();
+                    canvas.drawPath(shapePath, paint);
+                } else if ("petal".equals(particleShape)) {
+                    canvas.save();
+                    canvas.rotate(local * 140f, x, y);
+                    canvas.drawOval(x - r * 1.15f, y - r * 0.65f, x + r * 1.15f, y + r * 0.65f, paint);
+                    canvas.restore();
+                } else {
+                    canvas.drawCircle(x, y, r, paint);
+                }
             }
         }
     }

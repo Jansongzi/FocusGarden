@@ -35,6 +35,40 @@ final class FocusStore {
         state.creditRemainder = root.optInt("creditRemainder");
         state.vaultMs = root.optLong("vaultMs");
         state.vaultStepMinutes = root.optInt("vaultStepMinutes", 10);
+        if (root.has("vaultExpansionCount")) {
+            state.vaultExpansionCount = Math.max(0, Math.min(FocusState.MAX_VAULT_EXPANSION_COUNT,
+                    root.optInt("vaultExpansionCount", 0)));
+        } else if (state.vaultMs > FocusState.INITIAL_VAULT_MINUTES * FocusState.MINUTE) {
+            long extraMs = state.vaultMs - FocusState.INITIAL_VAULT_MINUTES * FocusState.MINUTE;
+            long stepMs = FocusState.VAULT_EXPANSION_STEP_MINUTES * FocusState.MINUTE;
+            int needed = (int) ((extraMs + stepMs - 1L) / stepMs);
+            state.vaultExpansionCount = Math.max(0, Math.min(FocusState.MAX_VAULT_EXPANSION_COUNT, needed));
+        } else {
+            state.vaultExpansionCount = 0;
+        }
+        state.streakProtectCards = Math.max(0, Math.min(FocusState.MAX_STREAK_PROTECT_CARDS,
+                root.optInt("streakProtectCards", 0)));
+        state.vaultExpandCards = Math.max(0, Math.min(
+                FocusState.MAX_VAULT_EXPANSION_COUNT - state.vaultExpansionCount,
+                root.optInt("vaultExpandCards", 0)));
+        state.indulgentPaidMinutes = Math.max(0, Math.min(
+                FocusState.INDULGENT_INSTALLMENT_TOTAL_MINUTES - 1,
+                root.optInt("indulgentPaidMinutes", 0)));
+
+        state.ownedShopItems.clear();
+        JSONArray ownedArr = root.optJSONArray("ownedShopItems");
+        if (ownedArr != null) {
+            for (int i = 0; i < ownedArr.length(); i++) {
+                String oid = ownedArr.optString(i);
+                if (!oid.isEmpty()) state.ownedShopItems.add(oid);
+            }
+        }
+        String skin = root.optString("equippedPiggySkin", "default");
+        state.equippedPiggySkin = state.isShopItemOwned(skin) ? ShopCatalog.piggySkin(skin).id() : "default";
+        String liquid = root.optString("equippedLiquidTheme", "default");
+        state.equippedLiquidTheme = state.isShopItemOwned(liquid) ? ShopCatalog.liquidTheme(liquid).id() : "default";
+        String effect = root.optString("equippedRedeemEffect", "default");
+        state.equippedRedeemEffect = state.isShopItemOwned(effect) ? ShopCatalog.redeemEffect(effect).id() : "default";
 
         state.rateMode = FocusState.RateMode.fromName(
                 root.optString("rateMode", FocusState.RateMode.MODERATE.name()));
@@ -287,13 +321,40 @@ final class FocusStore {
                 state.rewards.put(id, new FocusState.Reward(
                         id,
                         row.optString("title", ""),
+                        row.optString("subtitle", ""),
                         row.optInt("costMinutes", 30),
+                        row.optInt("iconIndex", 0),
+                        row.optInt("colorIndex", 0),
+                        row.optBoolean("repeatable", true),
                         row.optInt("redeemedCount", 0),
                         row.optLong("lastRedeemedMs", 0L)
                 ));
             }
         }
         state.seedDefaultRewardsIfNeeded();
+
+        state.wishVouchers.clear();
+        JSONArray vouchersArr = root.optJSONArray("wishVouchers");
+        if (vouchersArr != null) {
+            for (int i = 0; i < vouchersArr.length(); i++) {
+                JSONObject row = vouchersArr.optJSONObject(i);
+                if (row == null) continue;
+                String vid = row.optString("id", "");
+                if (vid.isEmpty()) continue;
+                state.wishVouchers.add(new FocusState.WishVoucher(
+                        vid,
+                        row.optString("rewardId", ""),
+                        row.optString("title", ""),
+                        row.optString("subtitle", ""),
+                        row.optInt("costMinutes", 30),
+                        row.optInt("iconIndex", 0),
+                        row.optInt("colorIndex", 0),
+                        row.optLong("issuedMs", 0L),
+                        row.optBoolean("used", false),
+                        row.optLong("usedMs", 0L)
+                ));
+            }
+        }
 
         JSONObject days = root.optJSONObject("days");
         for (Iterator<String> i = keys(days); i.hasNext();) {
@@ -403,6 +464,14 @@ final class FocusStore {
                     .put("creditRemainder", state.creditRemainder)
                     .put("vaultMs", state.vaultMs)
                     .put("vaultStepMinutes", state.vaultStepMinutes)
+                    .put("vaultExpansionCount", state.vaultExpansionCount)
+                    .put("streakProtectCards", state.streakProtectCards)
+                    .put("vaultExpandCards", state.vaultExpandCards)
+                    .put("indulgentPaidMinutes", state.indulgentPaidMinutes)
+                    .put("ownedShopItems", new JSONArray(state.ownedShopItems))
+                    .put("equippedPiggySkin", state.equippedPiggySkin)
+                    .put("equippedLiquidTheme", state.equippedLiquidTheme)
+                    .put("equippedRedeemEffect", state.equippedRedeemEffect)
                     .put("rateMode", state.rateMode.name())
                     .put("previousMode", state.previousMode.name())
                     .put("modeSwitchDate", state.modeSwitchDate)
@@ -533,9 +602,28 @@ final class FocusStore {
                 FocusState.Reward r = entry.getValue();
                 rewards.put(entry.getKey(), new JSONObject()
                         .put("title", r.title)
+                        .put("subtitle", r.subtitle)
                         .put("costMinutes", r.costMinutes)
+                        .put("iconIndex", r.iconIndex)
+                        .put("colorIndex", r.colorIndex)
+                        .put("repeatable", r.repeatable)
                         .put("redeemedCount", r.redeemedCount)
                         .put("lastRedeemedMs", r.lastRedeemedMs));
+            }
+
+            JSONArray wishVouchers = new JSONArray();
+            for (FocusState.WishVoucher v : state.wishVouchers) {
+                wishVouchers.put(new JSONObject()
+                        .put("id", v.id)
+                        .put("rewardId", v.rewardId)
+                        .put("title", v.title)
+                        .put("subtitle", v.subtitle)
+                        .put("costMinutes", v.costMinutes)
+                        .put("iconIndex", v.iconIndex)
+                        .put("colorIndex", v.colorIndex)
+                        .put("issuedMs", v.issuedMs)
+                        .put("used", v.used)
+                        .put("usedMs", v.usedMs));
             }
 
             JSONObject days = new JSONObject();
@@ -574,7 +662,7 @@ final class FocusStore {
             }
 
             root.put("rules", rules).put("habits", habits).put("abstinences", abstinences)
-                    .put("todos", todos).put("rewards", rewards).put("days", days);
+                    .put("todos", todos).put("rewards", rewards).put("wishVouchers", wishVouchers).put("days", days);
             preferences.edit().putString("state", root.toString()).apply();
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not save state", e);

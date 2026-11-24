@@ -863,7 +863,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         piggyStage.setClipToPadding(false);
         piggyStage.setPadding(dp(this, 16), topInset + dp(this, 14), dp(this, 16), dp(this, 6));
         homePiggyBank = new PiggyBankView(this);
-        float vaultRatio = Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS);
+        homePiggyBank.setAppearance(state.equippedPiggySkin, state.equippedLiquidTheme);
+        homePiggyBank.setVaultCapacityMinutes(state.vaultCapacityMinutes());
+        long capMs = Math.max(1L, state.vaultCapacityMs());
+        float vaultRatio = Math.min(1f, (float) state.vaultMs / capMs);
         if (lastPiggyRatio < 0f) {
             homePiggyBank.setProgress(vaultRatio, false);
         } else {
@@ -906,7 +909,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         vaultTag.setBackground(touch(this, 0x26ffffff, 10));
         vaultTag.setPadding(dp(this, 10), dp(this, 5), dp(this, 10), dp(this, 5));
         vaultTag.setContentDescription("查看储蓄罐规则、自律指数与卡牌详情");
-        vaultTag.addView(text(this, layFlat ? "躺平生效 · 储蓄不变" : "不清零 · 上限 2 小时", 11, ON_ACCENT, false));
+        vaultTag.addView(text(this, layFlat ? "躺平生效 · 储蓄不变" : "不清零 · 上限 " + state.vaultCapacityMinutes() + " 分",
+                11, ON_ACCENT, false));
         space(vaultTag, 4);
         vaultTag.addView(iconView(this, R.drawable.ic_info, 12, ON_ACCENT));
         vaultTag.setOnClickListener(v -> {
@@ -935,7 +939,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             long nowClick = System.currentTimeMillis();
             if (state.isVaultFull()) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("时间储蓄罐已达 2 小时上限，请先提取或兑换奖励");
+                toast("时间储蓄罐已达 " + state.vaultCapacityMinutes() + " 分钟上限，可在时间商店扩容");
                 return;
             }
             long moved = state.depositToVault(state.vaultStepMinutes * FocusState.MINUTE,
@@ -946,7 +950,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 updateHomeLive();
                 if (homePiggyBank != null) homePiggyBank.playDepositBurst();
                 toast(state.isVaultFull()
-                        ? "已存入 " + duration(moved) + "，储蓄罐已满 2 小时"
+                        ? "已存入 " + duration(moved) + "，储蓄罐已满 " + state.vaultCapacityMinutes() + " 分钟"
                         : "已存入 " + duration(moved) + " 到时间储蓄罐");
             } else {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
@@ -1152,9 +1156,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         String progressInfo = "正常模式自律进度 " + state.indulgentTrackProgressDays() + " / "
                 + FocusState.INDULGENT_UNLOCK_DAYS + " 天（满 3 天解锁宝箱）";
         infoDialog(this, R.drawable.ic_info, BLUE_SOFT, BLUE,
-                "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / 120 分钟",
-                "储蓄罐内时长每日凌晨 04:00 不清零，上限 2 小时。\n\n今日自律指数：" + curScore + "%\n"
-                        + cardSummary + "\n" + progressInfo,
+                "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / " + state.vaultCapacityMinutes() + " 分钟",
+                "储蓄罐内时长每日凌晨 04:00 不清零，当前上限 " + state.vaultCapacityMinutes()
+                        + " 分钟（可在时间商店使用储蓄扩容卡提升至 " + FocusState.MAX_VAULT_MINUTES + " 分钟）。\n\n"
+                        + "今日自律指数：" + curScore + "%\n" + cardSummary + "\n" + progressInfo,
                 "知道了");
     }
 
@@ -1570,7 +1575,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             setTextIfChanged(redeemVoucherEarnedTv, "今日已兑换 " + afterEarnedMin + " 分钟");
         } else {
             if (redeemAnimOverlay != null && sourceView != null && redeemVoucherCoin != null) {
-                redeemAnimOverlay.playBurst(sourceView, redeemVoucherCoin, "+" + gainedMin + " 分钟", burstColor);
+                redeemAnimOverlay.playBurst(sourceView, redeemVoucherCoin, "+" + gainedMin + " 分钟",
+                        burstColor, state.equippedRedeemEffect);
             }
             if (redeemNumberAnim != null) redeemNumberAnim.cancel();
             redeemNumberAnim = ValueAnimator.ofFloat(0f, 1f);
@@ -2067,23 +2073,32 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private LinearLayout homeRewardCard(FocusState.Day day) {
         state.seedDefaultRewardsIfNeeded();
         boolean layFlat = state.isLayFlat();
+        long spendableMs = state.rewardSpendableMs();
+        int bagCount = state.warehouseBadgeCount();
+        boolean hasChest = state.canClaimIndulgentReward();
         LinearLayout card = surfaceCard();
 
         LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_gift, AMBER_SOFT, AMBER, 34, 18, 10));
+        top.addView(iconBadge(this, R.drawable.ic_gift, BLUE_SOFT, BLUE, 34, 18, 10));
         space(top, 10);
         LinearLayout titles = column(this);
-        titles.addView(text(this, "奖励兑换", 16, INK, true));
+        titles.addView(text(this, "时间商店", 16, INK, true));
         titles.addView(text(this, layFlat
-                ? "躺平中仅扣储蓄罐 · 今日已兑 " + duration(day.rewardSpentMs)
-                : "今日主动消耗 " + duration(day.rewardSpentMs), 12, layFlat ? PURPLE : MUTED, false));
+                ? "时光杂货铺 · 躺平仅扣储蓄时间"
+                : "时光杂货铺 · 道具 / 外观 / 心愿",
+                12, layFlat ? PURPLE : MUTED, false));
         weight(top, titles);
 
         LinearLayout right = column(this);
         right.setGravity(Gravity.END);
-        right.addView(text(this, duration(state.rewardSpendableMs()) + (layFlat ? " 储蓄可用" : " 可支配"),
-                12, layFlat ? PURPLE : INK, true));
-        right.addView(text(this, state.rewards.size() + " 项现实奖励", 11, MUTED, false));
+        right.addView(text(this, duration(spendableMs) + (layFlat ? " 储蓄可用" : " 可支配"),
+                12, layFlat ? PURPLE : (spendableMs > 0 ? BLUE : MUTED), true));
+        String rightSub = hasChest
+                ? "宝箱待领 · 背包 " + bagCount
+                : bagCount > 0
+                ? "背包 " + bagCount + " 件 · 心愿 " + state.rewards.size()
+                : state.rewards.size() + " 项壁挂心愿";
+        right.addView(text(this, rightSub, 11, hasChest ? AMBER : MUTED, hasChest));
         top.addView(right);
         card.addView(top);
         gap(card, 10);
@@ -2093,19 +2108,31 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (shown >= 2) break;
             String id = entry.getKey();
             FocusState.Reward r = entry.getValue();
-            boolean affordable = state.canAffordReward(r.costMinutes * FocusState.MINUTE);
+            boolean onceRedeemed = !r.repeatable && r.redeemedCount > 0;
+            boolean affordable = !onceRedeemed && state.canAffordReward(r.costMinutes * FocusState.MINUTE);
             LinearLayout itemRow = row(this);
             itemRow.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
             itemRow.setPadding(dp(this, 12), dp(this, 9), dp(this, 12), dp(this, 9));
             LinearLayout copy = column(this);
             copy.addView(text(this, r.title, 14, INK, true));
-            copy.addView(text(this, "消耗 " + r.costMinutes + " 分钟 · 已兑 " + r.redeemedCount + " 次", 11, MUTED, false));
+            String meta = (r.subtitle != null && !r.subtitle.isEmpty() ? r.subtitle + " · " : "")
+                    + "消耗 " + r.costMinutes + " 分钟";
+            if (r.redeemedCount > 0) meta += " · 已兑 " + r.redeemedCount + " 次";
+            copy.addView(text(this, meta, 11, MUTED, false));
             weight(itemRow, copy);
             space(itemRow, 8);
-            TextView pill = pillButton(this, "-" + r.costMinutes + "分",
-                    affordable ? AMBER_SOFT : BLUE_DISABLED_BG, affordable ? AMBER : BLUE_DISABLED_TEXT, 9, 32);
+            TextView pill = pillButton(this,
+                    onceRedeemed ? "已领" : ("-" + r.costMinutes + "分"),
+                    onceRedeemed ? GREEN_SOFT : (affordable ? BLUE_SOFT : BLUE_DISABLED_BG),
+                    onceRedeemed ? GREEN : (affordable ? BLUE : BLUE_DISABLED_TEXT),
+                    9, 32);
             itemRow.addView(pill);
             itemRow.setOnClickListener(v -> {
+                if (onceRedeemed) {
+                    tapHaptic(v);
+                    TimeShopUi.showTimeShopSheet(this, state, this::changed);
+                    return;
+                }
                 long clickNow = System.currentTimeMillis();
                 state.syncResetDay(clickNow, ZoneId.systemDefault());
                 boolean curLayFlat = state.isLayFlat();
@@ -2119,16 +2146,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     return;
                 }
                 tapHaptic(v);
-                String confirmMsg = curLayFlat
-                        ? "躺平状态下将仅从时间储蓄罐消耗 " + r.costMinutes + " 分钟（不扣除今日可用时间）。"
-                        : "将主动消耗 " + r.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）。";
-                confirmDialog(this, R.drawable.ic_gift, AMBER_SOFT, AMBER,
+                String confirmMsg = (curLayFlat
+                        ? "躺平状态下将仅从时间储蓄罐消耗 " + r.costMinutes + " 分钟"
+                        : "将主动消耗 " + r.costMinutes + " 分钟自由时间（优先扣除今日可用，不足从储蓄罐扣除）")
+                        + "，并生成 1 张心愿兑换券存入商店背包。";
+                confirmDialog(this, R.drawable.ic_gift, BLUE_SOFT, BLUE,
                         "兑换「" + r.title + "」？", confirmMsg,
                         "取消", "确认兑换", false, () -> {
                             if (state.redeemReward(id, System.currentTimeMillis(), ZoneId.systemDefault())) {
                                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                                 changed();
-                                toast("已兑换「" + r.title + "」，消耗 " + r.costMinutes + " 分钟");
+                                toast("已兑换「" + r.title + "」，心愿券已存入背包");
                             } else {
                                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
                                 toast(curLayFlat ? "储蓄时间不足" : "可支配时间不足");
@@ -2140,11 +2168,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
             shown++;
         }
 
-        TextView manageBtn = pillButton(this, "查看全部 / 自定义奖励", SURFACE_SUBTLE, INK, 12, 38);
-        manageBtn.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
+        TextView manageBtn = pillButton(this, "逛一逛时间商店", BLUE_SOFT, BLUE, 12, 40);
+        manageBtn.setBackground(touchCard(this, BLUE_SOFT, blueStroke(), 12));
         manageBtn.setOnClickListener(v -> {
             tapHaptic(v);
-            FocusSheets.showRewardsSheet(this, state, this::changed);
+            TimeShopUi.showTimeShopSheet(this, state, this::changed);
         });
         card.addView(manageBtn, -1, -2);
         return card;
@@ -2488,8 +2516,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         FocusState.Day day = state.days.get(today.toString());
 
         if (homeVaultBig != null) {
-            float vaultRatio = Math.min(1f, (float) state.vaultMs / FocusState.MAX_VAULT_MS);
+            long capMs = Math.max(1L, state.vaultCapacityMs());
+            float vaultRatio = Math.min(1f, (float) state.vaultMs / capMs);
             if (homePiggyBank != null) {
+                homePiggyBank.setAppearance(state.equippedPiggySkin, state.equippedLiquidTheme);
+                homePiggyBank.setVaultCapacityMinutes(state.vaultCapacityMinutes());
                 homePiggyBank.setProgress(vaultRatio, true);
                 homePiggyBank.setVaultMinutes(state.vaultMs);
             }
@@ -3816,7 +3847,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         () -> FocusSheets.showCardManager(this, state, this::changed),
                         this::changed, reopenSettings),
                 () -> FocusSheets.showRateSettings(this, state, this::changed, reopenSettings),
-                () -> FocusSheets.showRewardsSheet(this, state, this::changed, reopenSettings),
+                () -> TimeShopUi.showTimeShopSheet(this, state, this::changed, reopenSettings),
                 () -> FocusSheets.showDebugSheet(this, state, this::changed, reopenSettings),
                 () -> FocusSheets.showFeedbackSheet(this, reopenSettings),
                 () -> updatePanel.open(reopenSettings));

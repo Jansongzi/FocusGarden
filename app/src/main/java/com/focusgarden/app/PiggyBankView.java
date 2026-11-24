@@ -35,6 +35,7 @@ final class PiggyBankView extends View {
     private final Paint specularPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint coinPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint accentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final Path bodyPath = new Path();
     private final Path innerPath = new Path();
@@ -47,9 +48,14 @@ final class PiggyBankView extends View {
     private final Path smilePath = new Path();
     private final Path highlightPath = new Path();
     private final Path coinClipPath = new Path();
+    private final Path accentPath = new Path();
 
     private final RectF oval = new RectF();
     private final float dpPx;
+
+    private ShopCatalog.PiggySkinPalette skin = ShopCatalog.piggySkin("default");
+    private ShopCatalog.LiquidPalette liquid = ShopCatalog.liquidTheme("default");
+    private int vaultCapacityMinutes = FocusState.INITIAL_VAULT_MINUTES;
 
     private float targetRatio;
     private float startRatio;
@@ -110,10 +116,59 @@ final class PiggyBankView extends View {
 
         glowPaint.setStyle(Paint.Style.FILL);
         coinPaint.setStyle(Paint.Style.FILL);
+        accentPaint.setStyle(Paint.Style.FILL);
+
+        applyThemePaints();
 
         setFocusable(true);
         setClickable(true);
         setVaultMinutes(0L);
+    }
+
+    private void applyThemePaints() {
+        outlinePaint.setColor(skin.outline());
+        earInnerPaint.setColor(skin.earInner());
+        eyePaint.setColor(skin.eye());
+        eyeSmilePaint.setColor(skin.eye());
+        waveBackPaint.setColor(liquid.backWave());
+        meniscusPaint.setColor(liquid.meniscus());
+        rebuildShaders();
+    }
+
+    private void rebuildShaders() {
+        if (cachedW <= 0 || cachedH <= 0) return;
+        shellPaint.setShader(new LinearGradient(
+                0f, cachedCy - cachedRy, 0f, cachedCy + cachedRy,
+                skin.shellTop(), skin.shellBottom(), Shader.TileMode.CLAMP));
+
+        waveFrontPaint.setShader(new LinearGradient(
+                0f, cachedCy - cachedRy, 0f, cachedCy + cachedRy,
+                liquid.frontTop(), liquid.frontBottom(), Shader.TileMode.CLAMP));
+
+        int glowRgb = skin.glow() & 0x00FFFFFF;
+        glowPaint.setShader(new RadialGradient(
+                cachedCx, cachedCy, Math.max(cachedRx, cachedRy) * 1.38f,
+                new int[]{0x38000000 | glowRgb, 0x16000000 | glowRgb, glowRgb},
+                new float[]{0.35f, 0.72f, 1f},
+                Shader.TileMode.CLAMP));
+    }
+
+    void setAppearance(String skinId, String liquidId) {
+        ShopCatalog.PiggySkinPalette nextSkin = ShopCatalog.piggySkin(skinId);
+        ShopCatalog.LiquidPalette nextLiquid = ShopCatalog.liquidTheme(liquidId);
+        if (nextSkin == skin && nextLiquid == liquid) return;
+        skin = nextSkin;
+        liquid = nextLiquid;
+        applyThemePaints();
+        invalidate();
+    }
+
+    void setVaultCapacityMinutes(int capacityMinutes) {
+        int clamped = Math.max(FocusState.INITIAL_VAULT_MINUTES, Math.min(FocusState.MAX_VAULT_MINUTES, capacityMinutes));
+        if (vaultCapacityMinutes != clamped) {
+            vaultCapacityMinutes = clamped;
+            updateVaultContentDescription();
+        }
     }
 
     void setProgress(float ratio, boolean animate) {
@@ -156,7 +211,7 @@ final class PiggyBankView extends View {
 
     private void updateVaultContentDescription() {
         long mins = Math.max(0L, lastVaultMs / FocusState.MINUTE);
-        setContentDescription("时间储蓄罐，已存 " + mins + " 分钟，上限 120 分钟，"
+        setContentDescription("时间储蓄罐，已存 " + mins + " 分钟，上限 " + vaultCapacityMinutes + " 分钟，"
                 + (vaultCollapsed ? "点击展开时间储蓄卡片" : "点击将时间储蓄卡片收入小猪"));
     }
 
@@ -205,19 +260,7 @@ final class PiggyBankView extends View {
         buildBodyContour(innerPath, cachedCx, cachedCy,
                 Math.max(4f, cachedRx - wall), Math.max(4f, cachedRy - wall));
 
-        shellPaint.setShader(new LinearGradient(
-                0f, cachedCy - cachedRy, 0f, cachedCy + cachedRy,
-                0xFFFFF0EB, 0xFFFFD9CE, Shader.TileMode.CLAMP));
-
-        waveFrontPaint.setShader(new LinearGradient(
-                0f, cachedCy - cachedRy, 0f, cachedCy + cachedRy,
-                0xFFFFA580, 0xFFFF7A5B, Shader.TileMode.CLAMP));
-
-        glowPaint.setShader(new RadialGradient(
-                cachedCx, cachedCy, Math.max(cachedRx, cachedRy) * 1.38f,
-                new int[]{0x38FFB88C, 0x16FFB88C, 0x00FFB88C},
-                new float[]{0.35f, 0.72f, 1f},
-                Shader.TileMode.CLAMP));
+        rebuildShaders();
     }
 
     private static void buildBodyContour(Path path, float cx, float cy, float rx, float ry) {
@@ -386,6 +429,9 @@ final class PiggyBankView extends View {
         highlightPath.addArc(oval, 198f, 64f);
         canvas.drawPath(highlightPath, specularPaint);
 
+        // 6b. Skin theme accents clipped inside shell
+        drawSkinAccents(canvas, cx, cy, rx, ry);
+
         // 7. Crisp piggy shell outline
         canvas.drawPath(bodyPath, outlinePaint);
 
@@ -394,7 +440,7 @@ final class PiggyBankView extends View {
 
         // 9. Top coin slot + dropping golden coin sliding into the slot mouth
         oval.set(slotX - slotW * 0.5f, slotY, slotX + slotW * 0.5f, slotY + slotH);
-        fillPaint.setColor(0xFFBD6F60);
+        fillPaint.setColor(skin.slot());
         canvas.drawRoundRect(oval, slotH * 0.5f, slotH * 0.5f, fillPaint);
         fillPaint.setColor(0x66FFFFFF);
         canvas.drawRoundRect(
@@ -431,11 +477,11 @@ final class PiggyBankView extends View {
         float snoutRx = rx * 0.17f;
         float snoutRy = ry * 0.28f;
         oval.set(snoutCx - snoutRx, snoutCy - snoutRy, snoutCx + snoutRx, snoutCy + snoutRy);
-        fillPaint.setColor(0xFFFFC4B5);
+        fillPaint.setColor(skin.snout());
         canvas.drawOval(oval, fillPaint);
         canvas.drawOval(oval, outlinePaint);
 
-        fillPaint.setColor(0xFFC97A6B);
+        fillPaint.setColor(skin.slot());
         float nosRx = 1.6f * dpPx;
         float nosRy = 2.8f * dpPx;
         canvas.drawOval(snoutCx - snoutRx * 0.36f - nosRx, snoutCy - nosRy,
@@ -443,10 +489,10 @@ final class PiggyBankView extends View {
         canvas.drawOval(snoutCx + snoutRx * 0.30f - nosRx, snoutCy - nosRy,
                 snoutCx + snoutRx * 0.30f + nosRx, snoutCy + nosRy, fillPaint);
 
-        // 11. Rosy cheek blush & eye (dot when filling, happy ^ arc when full 2h)
+        // 11. Rosy cheek blush & eye (dot when filling, happy ^ arc when full capacity)
         float eyeX = cx + rx * 0.54f;
         float eyeY = cy - ry * 0.16f;
-        fillPaint.setColor(0x40FF8674);
+        fillPaint.setColor(skin.cheek());
         canvas.drawCircle(eyeX - rx * 0.10f, eyeY + ry * 0.22f, 6.2f * dpPx, fillPaint);
 
         if (displayedRatio >= 0.995f) {
@@ -470,10 +516,96 @@ final class PiggyBankView extends View {
         }
     }
 
+    private void drawSkinAccents(Canvas canvas, float cx, float cy, float rx, float ry) {
+        String kind = skin.accentKind();
+        if ("none".equals(kind)) return;
+        canvas.save();
+        canvas.clipPath(innerPath);
+        switch (kind) {
+            case "stars" -> {
+                accentPaint.setColor(0xE8FFFFFF);
+                drawFourStar(canvas, cx - rx * 0.36f, cy - ry * 0.28f, 6.2f * dpPx);
+                accentPaint.setColor(0xCCEDE9FE);
+                drawFourStar(canvas, cx + rx * 0.10f, cy - ry * 0.42f, 4.4f * dpPx);
+                drawFourStar(canvas, cx + rx * 0.28f, cy + ry * 0.28f, 5.4f * dpPx);
+                accentPaint.setColor(0x99FFF8DC);
+                canvas.drawCircle(cx - rx * 0.58f, cy + ry * 0.16f, 2.1f * dpPx, accentPaint);
+                canvas.drawCircle(cx - rx * 0.12f, cy + ry * 0.44f, 1.8f * dpPx, accentPaint);
+            }
+            case "glint" -> {
+                accentPaint.setColor(0xEEFFFBEB);
+                drawFourStar(canvas, cx - rx * 0.32f, cy - ry * 0.35f, 6.4f * dpPx);
+                accentPaint.setColor(0xBBFEF3C7);
+                drawFourStar(canvas, cx + rx * 0.22f, cy + ry * 0.22f, 4.2f * dpPx);
+            }
+            case "crystal" -> {
+                accentPaint.setColor(0x3DFFFFFF);
+                accentPath.reset();
+                accentPath.moveTo(cx - rx * 0.45f, cy - ry * 0.9f);
+                accentPath.lineTo(cx - rx * 0.15f, cy - ry * 0.9f);
+                accentPath.lineTo(cx - rx * 0.70f, cy + ry * 0.85f);
+                accentPath.lineTo(cx - rx * 0.95f, cy + ry * 0.85f);
+                accentPath.close();
+                canvas.drawPath(accentPath, accentPaint);
+                accentPaint.setColor(0xD8FFFFFF);
+                drawFourStar(canvas, cx - rx * 0.25f, cy - ry * 0.32f, 5.2f * dpPx);
+                drawFourStar(canvas, cx + rx * 0.25f, cy + ry * 0.18f, 4.0f * dpPx);
+            }
+            case "sakura" -> {
+                drawMiniBlossom(canvas, cx - rx * 0.36f, cy - ry * 0.24f, 5.8f * dpPx, 0xCCFFF1F6);
+                drawMiniBlossom(canvas, cx + rx * 0.14f, cy - ry * 0.38f, 4.4f * dpPx, 0xB8FFE4EF);
+            }
+            case "jade" -> {
+                accentPaint.setColor(0x45FFFFFF);
+                oval.set(cx - rx * 0.56f, cy - ry * 0.46f, cx - rx * 0.18f, cy - ry * 0.08f);
+                canvas.drawOval(oval, accentPaint);
+                accentPaint.setColor(0xCCF0FDF4);
+                drawFourStar(canvas, cx - rx * 0.26f, cy - ry * 0.34f, 4.6f * dpPx);
+            }
+            case "moon" -> {
+                accentPaint.setColor(0xE6FEF3C7);
+                float mx = cx - rx * 0.32f;
+                float my = cy - ry * 0.26f;
+                float mr = 7.4f * dpPx;
+                canvas.drawCircle(mx, my, mr, accentPaint);
+                accentPaint.setColor(skin.shellTop());
+                canvas.drawCircle(mx + mr * 0.42f, my - mr * 0.22f, mr * 0.84f, accentPaint);
+                accentPaint.setColor(0xCCDBEAFE);
+                drawFourStar(canvas, cx + rx * 0.16f, cy - ry * 0.36f, 4.4f * dpPx);
+                canvas.drawCircle(cx - rx * 0.58f, cy + ry * 0.12f, 1.9f * dpPx, accentPaint);
+            }
+        }
+        canvas.restore();
+    }
+
+    private void drawFourStar(Canvas canvas, float sx, float sy, float r) {
+        accentPath.reset();
+        accentPath.moveTo(sx, sy - r);
+        accentPath.quadTo(sx, sy, sx + r, sy);
+        accentPath.quadTo(sx, sy, sx, sy + r);
+        accentPath.quadTo(sx, sy, sx - r, sy);
+        accentPath.quadTo(sx, sy, sx, sy - r);
+        accentPath.close();
+        canvas.drawPath(accentPath, accentPaint);
+    }
+
+    private void drawMiniBlossom(Canvas canvas, float bx, float by, float r, int color) {
+        accentPaint.setColor(color);
+        float pr = r * 0.48f;
+        for (int i = 0; i < 5; i++) {
+            double a = i * Math.PI * 2.0 / 5.0 - Math.PI * 0.5;
+            float px = bx + (float) (Math.cos(a) * r * 0.55f);
+            float py = by + (float) (Math.sin(a) * r * 0.55f);
+            canvas.drawCircle(px, py, pr, accentPaint);
+        }
+        accentPaint.setColor(0xCCFDE68A);
+        canvas.drawCircle(bx, by, r * 0.26f, accentPaint);
+    }
+
     private void drawLeg(Canvas canvas, float cx, float topY, float w, float h) {
         oval.set(cx - w * 0.5f, topY, cx + w * 0.5f, topY + h);
         float rad = w * 0.45f;
-        fillPaint.setColor(0xFFFFC8B9);
+        fillPaint.setColor(skin.leg());
         canvas.drawRoundRect(oval, rad, rad, fillPaint);
         canvas.drawRoundRect(oval, rad, rad, outlinePaint);
     }
@@ -486,7 +618,7 @@ final class PiggyBankView extends View {
         earPath.quadTo(baseX - w * 0.35f, baseY - h, baseX + w * 0.05f, baseY - h * 0.95f);
         earPath.quadTo(baseX + w * 0.45f, baseY - h * 0.72f, baseX + w * 0.55f, baseY + h * 0.18f);
         earPath.close();
-        fillPaint.setColor(0xFFFFD2C5);
+        fillPaint.setColor(skin.shellTop());
         canvas.drawPath(earPath, fillPaint);
 
         earInnerPath.reset();

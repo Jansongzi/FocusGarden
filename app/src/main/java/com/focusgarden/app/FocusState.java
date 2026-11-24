@@ -24,7 +24,15 @@ final class FocusState {
     static final int EARLY_SLEEP_PRE_WINDOW_MIN = 60;
     static final int EARLY_SLEEP_POST_WINDOW_MIN = 240;
     static final int RESET_HOUR = 4;
-    static final long MAX_VAULT_MS = 120 * MINUTE;
+    static final int INITIAL_VAULT_MINUTES = 15;
+    static final int VAULT_EXPANSION_STEP_MINUTES = 15;
+    static final int MAX_VAULT_MINUTES = 120;
+    static final long MAX_VAULT_MS = MAX_VAULT_MINUTES * MINUTE;
+    static final int MAX_VAULT_EXPANSION_COUNT = (MAX_VAULT_MINUTES - INITIAL_VAULT_MINUTES) / VAULT_EXPANSION_STEP_MINUTES;
+    static final int STREAK_PROTECT_CARD_COST_MINUTES = 10;
+    static final int MAX_STREAK_PROTECT_CARDS = 10;
+    static final int VAULT_EXPAND_CARD_COST_MINUTES = 60;
+    static final int INDULGENT_INSTALLMENT_TOTAL_MINUTES = 20 * 60;
     static final int MAX_DAILY_BASE_FREE_MINUTES = 15;
     static final long MAX_DAILY_BASE_FREE_MS = MAX_DAILY_BASE_FREE_MINUTES * MINUTE;
     static final int SLEEP_CONFIG_COST_MINUTES = 35;
@@ -43,6 +51,7 @@ final class FocusState {
     enum Transition { NONE, BREAK, WORK, FINISHED }
     enum CheckInResult { OK, OK_CAPPED, ALREADY_DONE, COOLING_DOWN, NOT_FOUND }
     enum ModeSwitchCheck { OK, SAME_MODE, INDULGENT_LOCKED, DAILY_LIMIT_REACHED, INSUFFICIENT_TIME }
+    enum InstallmentResult { PAID, COMPLETED, FULL_INVENTORY, INSUFFICIENT_TIME, INVALID }
 
     enum RateMode {
         RELAXED("松弛模式", "1:1", "每自律 / 学习 1 分钟兑换 1 分钟", 1, 1, 100),
@@ -147,16 +156,56 @@ final class FocusState {
     static final class Reward {
         String id;
         String title;
+        String subtitle;
         int costMinutes;
+        int iconIndex;
+        int colorIndex;
+        boolean repeatable;
         int redeemedCount;
         long lastRedeemedMs;
 
         Reward(String id, String title, int costMinutes, int redeemedCount, long lastRedeemedMs) {
+            this(id, title, "", costMinutes, 0, 0, true, redeemedCount, lastRedeemedMs);
+        }
+
+        Reward(String id, String title, String subtitle, int costMinutes, int iconIndex,
+               int colorIndex, boolean repeatable, int redeemedCount, long lastRedeemedMs) {
             this.id = id;
             this.title = title;
+            this.subtitle = subtitle == null ? "" : subtitle.trim();
             this.costMinutes = Math.max(5, Math.min(480, costMinutes));
+            this.iconIndex = Math.max(0, Math.min(ShopCatalog.WISH_ICON_LABELS.length - 1, iconIndex));
+            this.colorIndex = Math.max(0, Math.min(ShopCatalog.wishStyles().size() - 1, colorIndex));
+            this.repeatable = repeatable;
             this.redeemedCount = Math.max(0, redeemedCount);
             this.lastRedeemedMs = lastRedeemedMs;
+        }
+    }
+
+    static final class WishVoucher {
+        String id;
+        String rewardId;
+        String title;
+        String subtitle;
+        int costMinutes;
+        int iconIndex;
+        int colorIndex;
+        long issuedMs;
+        boolean used;
+        long usedMs;
+
+        WishVoucher(String id, String rewardId, String title, String subtitle, int costMinutes,
+                    int iconIndex, int colorIndex, long issuedMs, boolean used, long usedMs) {
+            this.id = id;
+            this.rewardId = rewardId == null ? "" : rewardId;
+            this.title = title == null ? "" : title;
+            this.subtitle = subtitle == null ? "" : subtitle;
+            this.costMinutes = Math.max(0, costMinutes);
+            this.iconIndex = Math.max(0, Math.min(ShopCatalog.WISH_ICON_LABELS.length - 1, iconIndex));
+            this.colorIndex = Math.max(0, Math.min(ShopCatalog.wishStyles().size() - 1, colorIndex));
+            this.issuedMs = issuedMs;
+            this.used = used;
+            this.usedMs = usedMs;
         }
     }
 
@@ -253,6 +302,16 @@ final class FocusState {
     int totalDisciplineSessions;
     final TreeSet<String> disciplinedDays = new TreeSet<>();
     String lastResetDate = "";
+
+    int vaultExpansionCount;
+    int streakProtectCards;
+    int vaultExpandCards;
+    int indulgentPaidMinutes;
+    final Set<String> ownedShopItems = new LinkedHashSet<>();
+    String equippedPiggySkin = "default";
+    String equippedLiquidTheme = "default";
+    String equippedRedeemEffect = "default";
+    final List<WishVoucher> wishVouchers = new ArrayList<>();
 
     int learningPercent = 33;
     int focusPercent = 33;
@@ -438,9 +497,10 @@ final class FocusState {
             rewardsSeeded = true;
             return;
         }
-        rewards.put("default_drink", new Reward("default_drink", "奖励自己一杯饮品", 30, 0, 0L));
-        rewards.put("default_show", new Reward("default_show", "安心看一集剧 / 打一局游戏", 45, 0, 0L));
-        rewards.put("default_treat", new Reward("default_treat", "买一件心愿小物 / 加餐", 90, 0, 0L));
+        rewards.put("rw_milktea", new Reward("rw_milktea", "喝一杯奶茶", "忙碌生活中的一点甜",
+                30, 0, 0, true, 0, 0L));
+        rewards.put("rw_movie", new Reward("rw_movie", "看一场电影", "留一段时间给自己",
+                90, 1, 1, true, 0, 0L));
         rewardsSeeded = true;
     }
 
@@ -869,21 +929,61 @@ final class FocusState {
         return (rewardMs * rateMode.rewardDen + rateMode.rewardNum - 1L) / rateMode.rewardNum;
     }
 
+    private boolean spendForShop(long costMs, String title, String detail, long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        return isLayFlat()
+                ? spendVaultOnly(costMs, "REWARD", title, "躺平模式 · 仅消耗储蓄时间 · " + detail, now, zone)
+                : spendTime(costMs, "REWARD", title, detail, now, zone);
+    }
+
+    int vaultCapacityMinutes() {
+        int steps = Math.max(0, Math.min(MAX_VAULT_EXPANSION_COUNT, vaultExpansionCount));
+        return Math.min(MAX_VAULT_MINUTES, INITIAL_VAULT_MINUTES + steps * VAULT_EXPANSION_STEP_MINUTES);
+    }
+
+    long vaultCapacityMs() {
+        return vaultCapacityMinutes() * MINUTE;
+    }
+
+    boolean canExpandVault() {
+        return vaultExpansionCount < MAX_VAULT_EXPANSION_COUNT;
+    }
+
+    boolean canBuyVaultExpandCard() {
+        return vaultExpansionCount + vaultExpandCards < MAX_VAULT_EXPANSION_COUNT;
+    }
+
     void addReward(String id, String title, int costMinutes) {
+        addReward(id, title, "", costMinutes, 0, 0, true);
+    }
+
+    void addReward(String id, String title, String subtitle, int costMinutes,
+                   int iconIndex, int colorIndex, boolean repeatable) {
         if (id == null || title == null) return;
         String trimmed = title.trim();
         if (trimmed.isEmpty()) return;
-        rewards.put(id, new Reward(id, trimmed, costMinutes, 0, 0L));
+        rewards.put(id, new Reward(id, trimmed, subtitle, costMinutes, iconIndex, colorIndex, repeatable, 0, 0L));
         rewardsSeeded = true;
     }
 
     void updateReward(String id, String title, int costMinutes) {
+        Reward existing = rewards.get(id);
+        if (existing == null) return;
+        updateReward(id, title, existing.subtitle, costMinutes, existing.iconIndex, existing.colorIndex, existing.repeatable);
+    }
+
+    void updateReward(String id, String title, String subtitle, int costMinutes,
+                      int iconIndex, int colorIndex, boolean repeatable) {
         Reward r = rewards.get(id);
         if (r == null || title == null) return;
         String trimmed = title.trim();
         if (trimmed.isEmpty()) return;
         r.title = trimmed;
+        r.subtitle = subtitle == null ? "" : subtitle.trim();
         r.costMinutes = Math.max(5, Math.min(480, costMinutes));
+        r.iconIndex = Math.max(0, Math.min(ShopCatalog.WISH_ICON_LABELS.length - 1, iconIndex));
+        r.colorIndex = Math.max(0, Math.min(ShopCatalog.wishStyles().size() - 1, colorIndex));
+        r.repeatable = repeatable;
     }
 
     void removeReward(String id) {
@@ -893,19 +993,225 @@ final class FocusState {
     boolean redeemReward(String id, long now, ZoneId zone) {
         Reward r = rewards.get(id);
         if (r == null) return false;
+        if (!r.repeatable && r.redeemedCount > 0) return false;
         syncResetDay(now, zone);
         long costMs = r.costMinutes * MINUTE;
-        boolean ok = isLayFlat()
-                ? spendVaultOnly(costMs, "REWARD", "兑换奖励 · " + r.title,
-                        "躺平模式 · 仅消耗储蓄时间 · 累计第 " + (r.redeemedCount + 1) + " 次", now, zone)
-                : spendTime(costMs, "REWARD", "兑换奖励 · " + r.title,
-                        "累计第 " + (r.redeemedCount + 1) + " 次", now, zone);
+        boolean ok = spendForShop(costMs, "兑换心愿 · " + r.title,
+                "第 " + (r.redeemedCount + 1) + " 次兑换", now, zone);
         if (!ok) {
             return false;
         }
         r.redeemedCount++;
         r.lastRedeemedMs = now;
+        wishVouchers.add(0, new WishVoucher(
+                java.util.UUID.randomUUID().toString(),
+                r.id, r.title, r.subtitle, r.costMinutes,
+                r.iconIndex, r.colorIndex, now, false, 0L));
+        trimUsedWishVouchers();
         return true;
+    }
+
+    private void trimUsedWishVouchers() {
+        int usedCount = 0;
+        for (int i = 0; i < wishVouchers.size(); i++) {
+            if (wishVouchers.get(i).used) {
+                usedCount++;
+                if (usedCount > 200) {
+                    wishVouchers.remove(i);
+                    i--;
+                }
+            }
+        }
+    }
+
+    boolean useWishVoucher(String voucherId, long now, ZoneId zone) {
+        if (voucherId == null || voucherId.isEmpty()) return false;
+        for (WishVoucher v : wishVouchers) {
+            if (voucherId.equals(v.id)) {
+                if (v.used) return false;
+                v.used = true;
+                v.usedMs = now;
+                syncResetDay(now, zone);
+                logEvent(date(now, zone), now, "REWARD", "核销心愿兑换券 · " + v.title,
+                        "心愿已兑现（" + v.costMinutes + " 分钟）", 0L);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    int unusedWishVoucherCount() {
+        int count = 0;
+        for (WishVoucher v : wishVouchers) {
+            if (!v.used) count++;
+        }
+        return count;
+    }
+
+    boolean buyStreakProtectCard(long now, ZoneId zone) {
+        if (streakProtectCards >= MAX_STREAK_PROTECT_CARDS) return false;
+        long costMs = STREAK_PROTECT_CARD_COST_MINUTES * MINUTE;
+        if (!spendForShop(costMs, "购买打卡保护卡",
+                "保护一次连续早睡或自律记录（库存 " + (streakProtectCards + 1) + "/" + MAX_STREAK_PROTECT_CARDS + "）",
+                now, zone)) {
+            return false;
+        }
+        streakProtectCards++;
+        return true;
+    }
+
+    boolean canUseStreakProtectForEarlySleep(long now, ZoneId zone) {
+        if (streakProtectCards <= 0) return false;
+        LocalDate today = logicDate(now, zone);
+        LocalDate yesterday = today.minusDays(1);
+        return earlySleepFailedOn(today)
+                || !earlySleepChecked(today)
+                || (!earlySleepChecked(yesterday) && earlySleepChecked(yesterday.minusDays(1)));
+    }
+
+    String useStreakProtectForEarlySleep(long now, ZoneId zone) {
+        if (streakProtectCards <= 0) return null;
+        syncResetDay(now, zone);
+        LocalDate today = logicDate(now, zone);
+        LocalDate yesterday = today.minusDays(1);
+        String todayStr = today.toString();
+        String yesterdayStr = yesterday.toString();
+        String actionDetail;
+        if (earlySleepFailed.remove(todayStr)) {
+            earlySleepDays.add(todayStr);
+            actionDetail = "已修复今日早睡连续记录";
+        } else if (!earlySleepChecked(yesterday) && earlySleepChecked(yesterday.minusDays(1))) {
+            earlySleepFailed.remove(yesterdayStr);
+            earlySleepDays.add(yesterdayStr);
+            actionDetail = "已补签昨日早睡连续记录";
+        } else if (!earlySleepChecked(today)) {
+            earlySleepDays.add(todayStr);
+            actionDetail = "已守护今日早睡打卡记录";
+        } else {
+            return null;
+        }
+        streakProtectCards--;
+        logEvent(date(now, zone), now, "HABIT", "使用打卡保护卡", actionDetail, 0L);
+        return actionDetail;
+    }
+
+    boolean canUseStreakProtectForDiscipline(long now, ZoneId zone) {
+        if (streakProtectCards <= 0) return false;
+        LocalDate today = logicDate(now, zone);
+        LocalDate yesterday = today.minusDays(1);
+        return !disciplinedDays.contains(today.toString())
+                || (!disciplinedDays.contains(yesterday.toString())
+                        && disciplinedDays.contains(yesterday.minusDays(1).toString()));
+    }
+
+    String useStreakProtectForDiscipline(long now, ZoneId zone) {
+        if (streakProtectCards <= 0) return null;
+        syncResetDay(now, zone);
+        LocalDate today = logicDate(now, zone);
+        LocalDate yesterday = today.minusDays(1);
+        String todayStr = today.toString();
+        String yesterdayStr = yesterday.toString();
+        String actionDetail;
+        if (!disciplinedDays.contains(yesterdayStr) && disciplinedDays.contains(yesterday.minusDays(1).toString())) {
+            disciplinedDays.add(yesterdayStr);
+            actionDetail = "已补签昨日连续自律记录";
+        } else if (!disciplinedDays.contains(todayStr)) {
+            disciplinedDays.add(todayStr);
+            actionDetail = "已守护今日连续自律记录";
+        } else {
+            return null;
+        }
+        streakProtectCards--;
+        logEvent(date(now, zone), now, "HABIT", "使用打卡保护卡", actionDetail, 0L);
+        return actionDetail;
+    }
+
+    boolean buyVaultExpandCard(long now, ZoneId zone) {
+        if (!canBuyVaultExpandCard()) return false;
+        long costMs = VAULT_EXPAND_CARD_COST_MINUTES * MINUTE;
+        int afterCards = vaultExpandCards + 1;
+        if (!spendForShop(costMs, "购买储蓄扩容卡",
+                "可永久扩充 +15 分钟储蓄上限（背包 " + afterCards + " 张）", now, zone)) {
+            return false;
+        }
+        vaultExpandCards++;
+        return true;
+    }
+
+    boolean useVaultExpandCard(long now, ZoneId zone) {
+        if (vaultExpandCards <= 0 || !canExpandVault()) return false;
+        syncResetDay(now, zone);
+        vaultExpandCards--;
+        vaultExpansionCount++;
+        logEvent(date(now, zone), now, "CONFIG", "使用储蓄扩容卡",
+                "储蓄罐容量永久提升至 " + vaultCapacityMinutes() + " 分钟", 0L);
+        return true;
+    }
+
+    InstallmentResult contributeIndulgentInstallment(int requestedMinutes, long now, ZoneId zone) {
+        if (requestedMinutes <= 0) return InstallmentResult.INVALID;
+        syncResetDay(now, zone);
+        if (indulgentPasses >= MAX_INDULGENT_CARDS) return InstallmentResult.FULL_INVENTORY;
+        int remaining = Math.max(0, INDULGENT_INSTALLMENT_TOTAL_MINUTES - indulgentPaidMinutes);
+        int pay = remaining == 0 ? 0 : Math.min(requestedMinutes, remaining);
+        if (pay <= 0) return InstallmentResult.INVALID;
+        long costMs = pay * MINUTE;
+        if (!spendForShop(costMs, "放纵卡分期投入",
+                "累计进度 " + (indulgentPaidMinutes + pay) + "/" + INDULGENT_INSTALLMENT_TOTAL_MINUTES + " 分钟",
+                now, zone)) {
+            return InstallmentResult.INSUFFICIENT_TIME;
+        }
+        indulgentPaidMinutes += pay;
+        if (indulgentPaidMinutes >= INDULGENT_INSTALLMENT_TOTAL_MINUTES) {
+            indulgentPaidMinutes = 0;
+            indulgentPasses++;
+            normalizeIndulgentProgress();
+            logEvent(date(now, zone), now, "HABIT", "获得放纵卡（分期满 20 小时）",
+                    "放纵卡 " + indulgentPasses + "/" + MAX_INDULGENT_CARDS, 0L);
+            return InstallmentResult.COMPLETED;
+        }
+        return InstallmentResult.PAID;
+    }
+
+    boolean isShopItemOwned(String id) {
+        return "default".equals(id) || (id != null && !id.isEmpty() && ownedShopItems.contains(id));
+    }
+
+    boolean buyPermanentShopItem(String id, int costMinutes, String title, long now, ZoneId zone) {
+        if (id == null || id.isEmpty() || costMinutes <= 0 || isShopItemOwned(id)) return false;
+        long costMs = costMinutes * MINUTE;
+        if (!spendForShop(costMs, "兑换外观 · " + (title == null ? id : title), "永久收藏", now, zone)) {
+            return false;
+        }
+        ownedShopItems.add(id);
+        return true;
+    }
+
+    boolean equipPiggySkin(String id) {
+        if (!isShopItemOwned(id)) return false;
+        equippedPiggySkin = ShopCatalog.piggySkin(id).id();
+        return true;
+    }
+
+    boolean equipLiquidTheme(String id) {
+        if (!isShopItemOwned(id)) return false;
+        equippedLiquidTheme = ShopCatalog.liquidTheme(id).id();
+        return true;
+    }
+
+    boolean equipRedeemEffect(String id) {
+        if (!isShopItemOwned(id)) return false;
+        equippedRedeemEffect = ShopCatalog.redeemEffect(id).id();
+        return true;
+    }
+
+    int warehouseBadgeCount() {
+        return Math.max(0, streakProtectCards)
+                + Math.max(0, vaultExpandCards)
+                + Math.max(0, indulgentPasses)
+                + Math.max(0, layFlatCards)
+                + Math.max(0, pendingIndulgentRewards)
+                + unusedWishVoucherCount();
     }
 
     int learningRuleCount() {
@@ -1192,11 +1498,11 @@ final class FocusState {
     }
 
     long vaultRemainingCapacityMs() {
-        return Math.max(0L, MAX_VAULT_MS - vaultMs);
+        return Math.max(0L, vaultCapacityMs() - vaultMs);
     }
 
     boolean isVaultFull() {
-        return vaultMs >= MAX_VAULT_MS;
+        return vaultMs >= vaultCapacityMs();
     }
 
     long depositToVault(long requestedMs, long now, ZoneId zone) {
@@ -1208,7 +1514,7 @@ final class FocusState {
         creditMs -= moved;
         vaultMs += moved;
         logEvent(date(now, zone), now, "VAULT", "存入时间储蓄罐",
-                "已存 " + (vaultMs / MINUTE) + " / " + (MAX_VAULT_MS / MINUTE) + " 分钟", -moved);
+                "已存 " + (vaultMs / MINUTE) + " / " + vaultCapacityMinutes() + " 分钟", -moved);
         return moved;
     }
 
@@ -2022,7 +2328,7 @@ final class FocusState {
     }
 
     void debugAdjustVault(long deltaMs) {
-        vaultMs = Math.max(0L, Math.min(MAX_VAULT_MS, vaultMs + deltaMs));
+        vaultMs = Math.max(0L, Math.min(vaultCapacityMs(), vaultMs + deltaMs));
     }
 
     void debugUnlockAll(long now, ZoneId zone) {

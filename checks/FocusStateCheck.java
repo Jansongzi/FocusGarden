@@ -39,7 +39,7 @@ final class FocusStateCheck {
         equal(30, state.todoDailyCapMinutes);
         equal(25, state.habitDailyCapMinutes);
         equal(30, state.stepDailyCapMinutes);
-        equal(3, state.rewards.size());
+        equal(2, state.rewards.size());
 
         state.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING, 0));
         state.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 1));
@@ -122,8 +122,17 @@ final class FocusStateCheck {
         equal(FocusState.Transition.BREAK, paused.advance(noon + 122 * MINUTE, UTC));
         equal(8 * MINUTE, paused.creditMs);
 
-        // Vault deposit/withdraw + 2-hour cumulative cap (120 minutes)
+        // Vault deposit/withdraw: starts at 15m initial cap, expandable up to 120m
+        var initCap = new FocusState();
+        equal(15 * MINUTE, initCap.vaultCapacityMs());
+        initCap.creditMs = 25 * MINUTE;
+        equal(15 * MINUTE, initCap.depositToVault(25 * MINUTE, noon, UTC));
+        equal(15 * MINUTE, initCap.vaultMs);
+        equal(10 * MINUTE, initCap.creditMs);
+        equal(true, initCap.isVaultFull());
+
         var extra = new FocusState();
+        extra.vaultExpansionCount = 1; // 30m cap
         extra.creditMs = 25 * MINUTE;
         equal(10 * MINUTE, extra.depositToVault(10 * MINUTE, noon, UTC));
         equal(15 * MINUTE, extra.creditMs);
@@ -136,6 +145,7 @@ final class FocusStateCheck {
         equal(15 * MINUTE, extra.vaultMs);
 
         var capTest = new FocusState();
+        capTest.vaultExpansionCount = FocusState.MAX_VAULT_EXPANSION_COUNT;
         capTest.vaultMs = 100 * MINUTE;
         capTest.creditMs = 50 * MINUTE;
         equal(20 * MINUTE, capTest.vaultRemainingCapacityMs());
@@ -476,6 +486,7 @@ final class FocusStateCheck {
         equal(0L, strict.creditMs);
         strict.debugAdjustCredit(25 * MINUTE);
         equal(25 * MINUTE, strict.creditMs);
+        strict.vaultExpansionCount = FocusState.MAX_VAULT_EXPANSION_COUNT;
         strict.debugAdjustVault(200 * MINUTE);
         equal(120 * MINUTE, strict.vaultMs);
         strict.startOffline(noon);
@@ -617,6 +628,7 @@ final class FocusStateCheck {
 
         // Restricted app (BUDGET with 0 credit and 0 free quota) opened via Sober Mode paid from vaultMs
         var restrictedSober = new FocusState();
+        restrictedSober.vaultExpansionCount = 1;
         restrictedSober.putRule(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
         restrictedSober.creditMs = 0L;
         restrictedSober.vaultMs = 20 * MINUTE;
@@ -948,6 +960,125 @@ final class FocusStateCheck {
         equal(2, g.layFlatCards);
         equal(false, g.canExchangeLayFlatCard());
         equal(false, g.exchangeLayFlatCard(gNow, UTC));
+
+        // 8. Time Shop (时光杂货铺): vault expansion (15m -> 120m), streak protection, 20h installment, cosmetics, wish vouchers
+        var shop = new FocusState();
+        long shopNow = at("2026-11-24T12:00:00Z");
+        equal(15, shop.vaultCapacityMinutes());
+        equal(true, shop.canExpandVault());
+        equal(true, shop.canBuyVaultExpandCard());
+        shop.creditMs = 600 * MINUTE;
+        for (int step = 0; step < FocusState.MAX_VAULT_EXPANSION_COUNT; step++) {
+            equal(true, shop.buyVaultExpandCard(shopNow, UTC));
+        }
+        // Holding 7 expand cards == already enough for max 120m -> 8th purchase blocked
+        equal(7, shop.vaultExpandCards);
+        equal(false, shop.canBuyVaultExpandCard());
+        equal(false, shop.buyVaultExpandCard(shopNow, UTC));
+        for (int step = 0; step < FocusState.MAX_VAULT_EXPANSION_COUNT; step++) {
+            equal(true, shop.useVaultExpandCard(shopNow, UTC));
+        }
+        equal(0, shop.vaultExpandCards);
+        equal(120, shop.vaultCapacityMinutes());
+        equal(false, shop.canExpandVault());
+        equal(false, shop.useVaultExpandCard(shopNow, UTC));
+
+        // Streak protection card (10m, max 10) repairs early sleep / discipline streak without farming disciplinedProgress
+        var protect = new FocusState();
+        protect.creditMs = 200 * MINUTE;
+        for (int k = 0; k < FocusState.MAX_STREAK_PROTECT_CARDS; k++) {
+            equal(true, protect.buyStreakProtectCard(shopNow, UTC));
+        }
+        equal(10, protect.streakProtectCards);
+        equal(false, protect.buyStreakProtectCard(shopNow, UTC));
+        protect.earlySleepFailed.add("2026-11-24");
+        equal(true, protect.canUseStreakProtectForEarlySleep(shopNow, UTC));
+        equal(true, protect.useStreakProtectForEarlySleep(shopNow, UTC) != null);
+        equal(false, protect.earlySleepFailedOn(java.time.LocalDate.of(2026, 11, 24)));
+        equal(true, protect.earlySleepChecked(java.time.LocalDate.of(2026, 11, 24)));
+        equal(9, protect.streakProtectCards);
+        int progBefore = protect.disciplinedProgress;
+        protect.disciplinedDays.add("2026-11-22");
+        equal(true, protect.canUseStreakProtectForDiscipline(shopNow, UTC));
+        equal(true, protect.useStreakProtectForDiscipline(shopNow, UTC) != null);
+        equal(true, protect.disciplinedDays.contains("2026-11-23"));
+        equal(progBefore, protect.disciplinedProgress); // Must not farm free indulgent chest progress
+        equal(8, protect.streakProtectCards);
+
+        // Indulgent card 20h (1200m) installment + Lay-Flat vault-only rule
+        var inst = new FocusState();
+        inst.creditMs = 1500 * MINUTE;
+        equal(FocusState.InstallmentResult.INVALID, inst.contributeIndulgentInstallment(0, shopNow, UTC));
+        equal(FocusState.InstallmentResult.PAID, inst.contributeIndulgentInstallment(500, shopNow, UTC));
+        equal(500, inst.indulgentPaidMinutes);
+        equal(0, inst.indulgentPasses);
+        equal(FocusState.InstallmentResult.PAID, inst.contributeIndulgentInstallment(400, shopNow, UTC));
+        equal(900, inst.indulgentPaidMinutes);
+        equal(FocusState.InstallmentResult.COMPLETED, inst.contributeIndulgentInstallment(500, shopNow, UTC)); // Clamped to remaining 300m
+        equal(0, inst.indulgentPaidMinutes);
+        equal(1, inst.indulgentPasses);
+        equal(300 * MINUTE, inst.creditMs);
+        inst.indulgentPasses = FocusState.MAX_INDULGENT_CARDS;
+        equal(FocusState.InstallmentResult.FULL_INVENTORY, inst.contributeIndulgentInstallment(60, shopNow, UTC));
+        inst.indulgentPasses = 0;
+        inst.rateMode = FocusState.RateMode.LAY_FLAT;
+        inst.layFlatActiveDate = "2026-11-24";
+        inst.creditMs = 500 * MINUTE;
+        inst.vaultMs = 20 * MINUTE;
+        equal(FocusState.InstallmentResult.INSUFFICIENT_TIME, inst.contributeIndulgentInstallment(30, shopNow, UTC));
+        equal(FocusState.InstallmentResult.PAID, inst.contributeIndulgentInstallment(15, shopNow, UTC));
+        equal(5 * MINUTE, inst.vaultMs);
+        equal(500 * MINUTE, inst.creditMs);
+
+        // Cosmetics: permanent ownership idempotency + equip gating
+        var cos = new FocusState();
+        equal(true, cos.isShopItemOwned("default"));
+        equal(false, cos.isShopItemOwned("piggy_starry"));
+        equal(false, cos.equipPiggySkin("piggy_starry"));
+        cos.creditMs = 500 * MINUTE;
+        equal(true, cos.buyPermanentShopItem("piggy_starry", 150, "星空小猪", shopNow, UTC));
+        equal(350 * MINUTE, cos.creditMs);
+        equal(false, cos.buyPermanentShopItem("piggy_starry", 150, "星空小猪", shopNow, UTC));
+        equal(350 * MINUTE, cos.creditMs);
+        equal(true, cos.equipPiggySkin("piggy_starry"));
+        equal("piggy_starry", cos.equippedPiggySkin);
+        equal(true, cos.buyPermanentShopItem("liquid_mint", 45, "海盐薄荷", shopNow, UTC));
+        equal(true, cos.equipLiquidTheme("liquid_mint"));
+        equal("liquid_mint", cos.equippedLiquidTheme);
+        equal(true, cos.buyPermanentShopItem("fx_starlight", 60, "星河蓝焰", shopNow, UTC));
+        equal(true, cos.equipRedeemEffect("fx_starlight"));
+        equal("fx_starlight", cos.equippedRedeemEffect);
+
+        // Non-repeatable wish & WishVoucher lifecycle
+        var wish = new FocusState();
+        wish.creditMs = 200 * MINUTE;
+        wish.addReward("w_once", "限定盲盒", "只买一次", 50, 7, 4, false);
+        equal(true, wish.redeemReward("w_once", shopNow, UTC));
+        equal(150 * MINUTE, wish.creditMs);
+        equal(false, wish.redeemReward("w_once", shopNow + 1000, UTC));
+        equal(1, wish.unusedWishVoucherCount());
+        String vid = wish.wishVouchers.get(0).id;
+        equal(true, wish.useWishVoucher(vid, shopNow + 2000, UTC));
+        equal(0, wish.unusedWishVoucherCount());
+        equal(false, wish.useWishVoucher(vid, shopNow + 3000, UTC));
+        equal(150, ShopCatalog.piggySkin("piggy_starry").costMinutes());
+
+        // Regression: spendForShop syncs 04:00 reset before checking isLayFlat(), so post-reset purchases use creditMs
+        var lfShop = new FocusState();
+        lfShop.rateMode = FocusState.RateMode.SCHOLAR;
+        lfShop.previousMode = FocusState.RateMode.SCHOLAR;
+        lfShop.layFlatCards = 1;
+        equal(true, lfShop.activateLayFlatMode(at("2026-11-24T12:00:00Z"), UTC));
+        lfShop.vaultMs = 0L;
+        lfShop.creditMs = 200 * MINUTE;
+        long nextDayAfterReset = at("2026-11-25T04:05:00Z");
+        // Note: syncResetDay zeroes old creditMs when crossing 04:00; verify syncResetDay restores SCHOLAR and normal spend applies
+        equal(false, lfShop.buyStreakProtectCard(nextDayAfterReset, UTC));
+        equal(FocusState.RateMode.SCHOLAR, lfShop.rateMode);
+        lfShop.creditMs = 50 * MINUTE;
+        equal(true, lfShop.buyStreakProtectCard(nextDayAfterReset + 1_000, UTC));
+        equal(40 * MINUTE, lfShop.creditMs);
+        equal(1, lfShop.streakProtectCards);
     }
 
     private static long at(String instant) {

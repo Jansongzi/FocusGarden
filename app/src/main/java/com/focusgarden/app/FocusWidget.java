@@ -38,7 +38,8 @@ public final class FocusWidget extends AppWidgetProvider {
         boolean offlineUp = state.offlineRunning();
 
         String credit = "可用 " + GardenUi.duration(state.creditMs)
-                + (state.vaultMs > 0 ? " · 存 " + GardenUi.shortMinutes(state.vaultMs) + "/120分" : "");
+                + (state.vaultMs > 0 ? " · 存 " + GardenUi.shortMinutes(state.vaultMs)
+                        + "/" + state.vaultCapacityMinutes() + "分" : "");
         if (countingDown) {
             views.setViewVisibility(R.id.widget_clock, View.VISIBLE);
             views.setViewVisibility(R.id.widget_value, View.GONE);
