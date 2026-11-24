@@ -1145,10 +1145,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void showVaultInfoDialog() {
         LocalDate d = FocusState.today();
         int curScore = state.disciplineScore(d);
+        String chestNote = state.hasPendingIndulgentReward()
+                ? " · 待领宝箱 " + state.pendingIndulgentRewards + " 个" : "";
         String cardSummary = "放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
-                + " 张 · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张";
-        String progressInfo = "正常模式自律进度 " + state.disciplinedProgress + " / "
-                + FocusState.INDULGENT_UNLOCK_DAYS + " 天（每满 3 天兑换 1 张放纵卡）";
+                + " 张 · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张" + chestNote;
+        String progressInfo = "正常模式自律进度 " + state.indulgentTrackProgressDays() + " / "
+                + FocusState.INDULGENT_UNLOCK_DAYS + " 天（满 3 天解锁宝箱）";
         infoDialog(this, R.drawable.ic_info, BLUE_SOFT, BLUE,
                 "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / 120 分钟",
                 "储蓄罐内时长每日凌晨 04:00 不清零，上限 2 小时。\n\n今日自律指数：" + curScore + "%\n"
@@ -1303,16 +1305,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         boolean layFlat = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgent = state.rateMode == FocusState.RateMode.INDULGENT;
-        int pillBg = layFlat ? PURPLE_SOFT : indulgent ? AMBER_SOFT : CARD;
-        int pillStroke = layFlat ? PURPLE : indulgent ? AMBER : BORDER;
-        int pillTint = layFlat ? PURPLE : indulgent ? AMBER : INK;
-        int iconTint = layFlat ? PURPLE : indulgent ? AMBER : INK_SUB;
+        boolean chestReady = state.canClaimIndulgentReward();
+        int pillBg = layFlat ? PURPLE_SOFT : (indulgent || chestReady) ? AMBER_SOFT : CARD;
+        int pillStroke = layFlat ? PURPLE : (indulgent || chestReady) ? AMBER : BORDER;
+        int pillTint = layFlat ? PURPLE : (indulgent || chestReady) ? AMBER : INK;
+        int iconTint = layFlat ? PURPLE : (indulgent || chestReady) ? AMBER : INK_SUB;
         LinearLayout ratePill = row(this);
         ratePill.setBackground(touchCard(this, pillBg, pillStroke, 12));
         ratePill.setPadding(dp(this, 11), dp(this, 7), dp(this, 11), dp(this, 7));
         ratePill.addView(iconView(this, R.drawable.ic_tune, 14, iconTint));
         space(ratePill, 5);
-        ratePill.addView(text(this, state.rateMode.label, 12, pillTint, true));
+        ratePill.addView(text(this, chestReady ? state.rateMode.label + " · 宝箱" : state.rateMode.label,
+                12, pillTint, true));
         ratePill.setOnClickListener(v -> {
             tapHaptic(v);
             FocusSheets.showRateSettings(this, state, this::changed);
@@ -3015,7 +3019,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(rates, 6);
         String switchStatus = switchedToday ? "今日已切换" : "每日限切 1 次";
         String cardStatus = " · 放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
-                + " · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS;
+                + " · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS
+                + (state.hasPendingIndulgentReward() ? " · 待领宝箱 " + state.pendingIndulgentRewards : "");
         rates.addView(text(this, switchStatus + cardStatus, 12, MUTED, false));
         gap(rates, 12);
         TextView switchBtn = secondaryButton(this, "切换模式与每日上限");

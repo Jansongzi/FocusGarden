@@ -332,7 +332,7 @@ final class FocusStateCheck {
         equal(0L, sw.creditMs);
         equal(5 * MINUTE, sw.vaultMs);
 
-        // 3 cumulative normal disciplined days unlock INDULGENT (1:2), 1-day activation & auto-restore at next 04:00 AM
+        // 3 cumulative normal disciplined days unlock INDULGENT chest (claimed manually), 1-day activation & auto-restore at next 04:00 AM
         var ind = new FocusState();
         ind.rateMode = FocusState.RateMode.SCHOLAR;
         ind.previousMode = FocusState.RateMode.SCHOLAR;
@@ -342,10 +342,18 @@ final class FocusStateCheck {
             equal(FocusState.Transition.FINISHED, ind.advance(t + 12 * MINUTE, UTC));
             if (d < 2) {
                 equal(d + 1, ind.disciplinedProgress);
+                equal(0, ind.pendingIndulgentRewards);
                 equal(0, ind.indulgentPasses);
             }
         }
         equal(0, ind.disciplinedProgress);
+        equal(1, ind.pendingIndulgentRewards);
+        equal(3, ind.indulgentTrackProgressDays());
+        equal(true, ind.canClaimIndulgentReward());
+        equal(0, ind.indulgentPasses);
+        equal(true, ind.claimPendingIndulgentReward(at("2026-11-12T13:00:00Z"), UTC));
+        equal(false, ind.claimPendingIndulgentReward(at("2026-11-12T13:01:00Z"), UTC));
+        equal(0, ind.pendingIndulgentRewards);
         equal(1, ind.indulgentPasses);
         long day5Time = at("2026-11-14T15:00:00Z");
         equal(true, ind.canActivateIndulgent(day5Time, UTC));
@@ -899,6 +907,47 @@ final class FocusStateCheck {
         equal(true, lr.redeemReward("rw_big", at("2026-11-25T04:05:00Z"), UTC));
         equal(0L, lr.creditMs);
         equal(5 * MINUTE, lr.vaultMs);
+
+        // 7. Gamified chest overflow, cap-at-5 deferment & crafting atomicity
+        var g = new FocusState();
+        long gNow = at("2026-11-24T12:00:00Z");
+        equal(true, g.debugAdvanceDisciplinedProgress(gNow, UTC));
+        equal(true, g.debugAdvanceDisciplinedProgress(gNow, UTC));
+        equal(2, g.indulgentTrackProgressDays());
+        equal(false, g.hasPendingIndulgentReward());
+        equal(true, g.debugAdvanceDisciplinedProgress(gNow, UTC)); // 3/3 unlocks chest #1
+        equal(1, g.pendingIndulgentRewards);
+        equal(3, g.indulgentTrackProgressDays());
+        equal(true, g.debugAdvanceDisciplinedProgress(gNow, UTC)); // Day 4 overflow while chest #1 still unclaimed
+        equal(1, g.pendingIndulgentRewards);
+        equal(1, g.disciplinedProgress);
+        equal(3, g.indulgentTrackProgressDays());
+        equal(true, g.claimPendingIndulgentReward(gNow, UTC)); // claims chest #1; Day 4 progress preserved
+        equal(1, g.indulgentPasses);
+        equal(0, g.pendingIndulgentRewards);
+        equal(1, g.indulgentTrackProgressDays());
+
+        // Cap at 5 cards + capped overflow 3 days -> crafting 2->1 frees space and unlocks chest (no auto-grant!)
+        g.indulgentPasses = 5;
+        g.pendingIndulgentRewards = 0;
+        g.disciplinedProgress = 3;
+        g.normalizeIndulgentProgress();
+        equal(5, g.indulgentPasses);
+        equal(0, g.pendingIndulgentRewards);
+        equal(false, g.canClaimIndulgentReward());
+        equal(true, g.exchangeLayFlatCard(gNow, UTC));
+        equal(3, g.indulgentPasses);
+        equal(1, g.layFlatCards);
+        equal(1, g.pendingIndulgentRewards);
+        equal(true, g.canClaimIndulgentReward());
+        equal(true, g.claimPendingIndulgentReward(gNow, UTC));
+        equal(4, g.indulgentPasses);
+        equal(0, g.pendingIndulgentRewards);
+        equal(true, g.exchangeLayFlatCard(gNow, UTC));
+        equal(2, g.indulgentPasses);
+        equal(2, g.layFlatCards);
+        equal(false, g.canExchangeLayFlatCard());
+        equal(false, g.exchangeLayFlatCard(gNow, UTC));
     }
 
     private static long at(String instant) {

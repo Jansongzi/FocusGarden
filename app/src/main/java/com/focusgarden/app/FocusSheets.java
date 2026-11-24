@@ -2169,10 +2169,13 @@ final class FocusSheets {
         body.addView(capsWrap);
 
         Runnable[] rebuild = new Runnable[1];
+        String[] pulsePillKey = {null};
+        boolean[] cardActionBusy = {false};
         rebuild[0] = () -> {
             long now = System.currentTimeMillis();
             ZoneId zone = ZoneId.systemDefault();
             state.syncResetDay(now, zone);
+            state.normalizeIndulgentProgress();
             boolean switchedToday = state.hasSwitchedModeToday(now, zone);
 
             modesWrap.removeAllViews();
@@ -2270,12 +2273,19 @@ final class FocusSheets {
                 gap(modesWrap, 8);
             }
 
-            // 5th special mode: 放纵模式 1:2 (3d normal discipline -> 1 card, max 5)
+            // 5th special mode: 放纵模式 1:2 (3-node achievement track -> golden treasure chest)
             boolean indulgentActive = state.rateMode == FocusState.RateMode.INDULGENT;
             boolean hasPass = state.indulgentPasses > 0;
+            boolean chestClaimable = state.canClaimIndulgentReward();
+            boolean chestAtMax = !chestClaimable
+                    && state.indulgentPasses >= FocusState.MAX_INDULGENT_CARDS
+                    && (state.hasPendingIndulgentReward() || state.disciplinedProgress >= FocusState.INDULGENT_UNLOCK_DAYS);
+            int trackDays = state.indulgentTrackProgressDays();
+
             LinearLayout indCard = column(activity);
-            indCard.setBackground(touchCard(activity, indulgentActive || hasPass ? AMBER_SOFT : SURFACE_SUBTLE,
-                    indulgentActive || hasPass ? AMBER : BORDER, 16));
+            indCard.setBackground(touchCard(activity,
+                    indulgentActive || chestClaimable ? AMBER_SOFT : CARD,
+                    indulgentActive || hasPass || chestClaimable ? AMBER : BORDER, 16));
             indCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
 
             LinearLayout indTop = row(activity);
@@ -2286,46 +2296,84 @@ final class FocusSheets {
             indRatio.setBackground(shape(activity, indulgentActive ? AMBER : AMBER_SOFT, 10));
             indRatio.setPadding(dp(activity, 8), dp(activity, 7), dp(activity, 8), dp(activity, 7));
             indTop.addView(indRatio);
-            space(indTop, 12);
+            space(indTop, 10);
 
-            weight(indTop, titleWithInfo(activity, FocusState.RateMode.INDULGENT.label, 15,
+            LinearLayout indTitles = column(activity);
+            indTitles.addView(titleWithInfo(activity, FocusState.RateMode.INDULGENT.label, 15,
                     indulgentActive ? AMBER : INK,
                     "放纵模式（1:2）",
-                    "正常模式下累计达成 3 个自律日可兑换 1 张放纵卡（最多囤 5 张）；开启后今日按 1:2 双倍兑换，次日凌晨 04:00 自动恢复上一正常模式。"));
+                    "正常模式下每累计达成 3 个自律日即可解锁 1 个放纵卡宝箱（主动开启领取放纵卡，最多持有 5 张）；开启放纵模式后今日按 1:2 双倍兑换，次日凌晨 04:00 自动恢复上一正常模式。"));
+            indTitles.addView(text(activity, "双倍兑换 · 放肆之后依然继续", 11, MUTED, false));
+            weight(indTop, indTitles);
             space(indTop, 8);
 
-            String indActionLabel = indulgentActive ? "生效中"
-                    : hasPass ? "立即开启"
-                    : "待解锁";
-            TextView indBtn = text(activity, indActionLabel, 13,
-                    indulgentActive || hasPass ? ON_ACCENT : MUTED, true);
-            indBtn.setGravity(Gravity.CENTER);
-            indBtn.setMinWidth(dp(activity, 68));
-            indBtn.setMinHeight(dp(activity, 36));
-            indBtn.setBackground(shape(activity, indulgentActive ? AMBER : hasPass ? BLUE : CARD, 11));
-            indBtn.setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8));
-            indTop.addView(indBtn);
+            TextView indStockPill = text(activity,
+                    "持有 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + " 张",
+                    11, AMBER, true);
+            indStockPill.setBackground(shape(activity, indulgentActive || chestClaimable ? CARD : AMBER_SOFT, 9));
+            indStockPill.setPadding(dp(activity, 9), dp(activity, 5), dp(activity, 9), dp(activity, 5));
+            indTop.addView(indStockPill);
             indCard.addView(indTop);
             gap(indCard, 10);
 
-            CapsuleBar progressBar = new CapsuleBar(activity);
-            progressBar.setColors(isDark() ? 0xff3b301a : 0xffe9e2d2, indulgentActive || hasPass ? AMBER : BLUE);
-            float pVal = (indulgentActive || state.indulgentPasses >= FocusState.MAX_INDULGENT_CARDS)
-                    ? 1f
-                    : Math.min(1f, (float) state.disciplinedProgress / FocusState.INDULGENT_UNLOCK_DAYS);
-            progressBar.setProgress(pVal);
-            indCard.addView(progressBar, -1, dp(activity, 6));
-            gap(indCard, 6);
+            Runnable openIndulgentChest = () -> {
+                if (cardActionBusy[0]) return;
+                if (state.canClaimIndulgentReward()) {
+                    cardActionBusy[0] = true;
+                    tapHaptic(indCard);
+                    CardCraftUi.showChestRewardModal(activity, state, indStockPill, () -> {
+                        cardActionBusy[0] = false;
+                        pulsePillKey[0] = "indulgent";
+                        onChanged.run();
+                        rebuild[0].run();
+                    }, () -> cardActionBusy[0] = false);
+                    return;
+                }
+                if (chestAtMax || state.hasPendingIndulgentReward()) {
+                    haptic(indCard, state.hapticFeedback, HapticKind.REJECT);
+                    infoDialog(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
+                            "放纵卡库存已满（" + FocusState.MAX_INDULGENT_CARDS + " 张）",
+                            "当前放纵卡已达 5 张上限，先使用 1 张放纵卡开启（1:2），或在下方合成 1 张躺平卡后，即可开启待领宝箱。",
+                            "知道了");
+                    return;
+                }
+                haptic(indCard, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity,
+                        "正常模式下再达标 " + (FocusState.INDULGENT_UNLOCK_DAYS - trackDays) + " 个自律日即可开启宝箱",
+                        Toast.LENGTH_SHORT).show();
+            };
 
-            String indFoot = indulgentActive
-                    ? "生效中 · 明日 04:00 恢复为" + state.previousMode.label + " · 余放纵卡 "
-                    + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + " 张"
-                    : "正常模式自律进度 " + state.disciplinedProgress + "/" + FocusState.INDULGENT_UNLOCK_DAYS
-                    + " 天 · 放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + " 张";
-            indCard.addView(text(activity, indFoot, 11, indulgentActive ? AMBER : INK_SUB, indulgentActive || hasPass));
+            CardCraftUi.MilestoneTrackView trackView = new CardCraftUi.MilestoneTrackView(
+                    activity, trackDays, state.pendingIndulgentRewards, chestAtMax, openIndulgentChest);
+            indCard.addView(trackView, -1, -2);
+            gap(indCard, 10);
 
-            indCard.setOnClickListener(v -> {
-                tapHaptic(v);
+            if (chestClaimable) {
+                String openLabel = state.pendingIndulgentRewards > 1
+                        ? "开启宝箱 · 领取放纵卡（待领 " + state.pendingIndulgentRewards + "）"
+                        : "开启宝箱 · 领取放纵卡";
+                TextView chestBtn = text(activity, openLabel, 13, 0xff3b2404, true);
+                chestBtn.setGravity(Gravity.CENTER);
+                chestBtn.setMinHeight(dp(activity, 42));
+                chestBtn.setBackground(gradientBg(activity, 0xfff6ce68, 0xffd99c28, 12));
+                chestBtn.setPadding(dp(activity, 14), dp(activity, 9), dp(activity, 14), dp(activity, 9));
+                elevate(chestBtn, 2);
+                chestBtn.setOnClickListener(v -> openIndulgentChest.run());
+                indCard.addView(chestBtn, -1, -2);
+                gap(indCard, 8);
+            } else if (chestAtMax) {
+                TextView fullNotice = text(activity, "宝箱已解锁 · 放纵卡库存已满 5/5（使用或合成后可领）",
+                        11, AMBER, true);
+                fullNotice.setGravity(Gravity.CENTER);
+                fullNotice.setBackground(shape(activity, AMBER_SOFT, 10));
+                fullNotice.setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 8));
+                fullNotice.setOnClickListener(v -> openIndulgentChest.run());
+                indCard.addView(fullNotice, -1, -2);
+                gap(indCard, 8);
+            }
+
+            Runnable activateIndulgent = () -> {
+                tapHaptic(indCard);
                 if (state.rateMode == FocusState.RateMode.INDULGENT) {
                     infoDialog(activity, R.drawable.ic_check, AMBER_SOFT, AMBER,
                             "放纵模式生效中（1:2）",
@@ -2352,25 +2400,48 @@ final class FocusSheets {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
                                 }
                             });
-                    return;
+                } else {
+                    openIndulgentChest.run();
                 }
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                infoDialog(activity, R.drawable.ic_shield, AMBER_SOFT, AMBER,
-                        "放纵模式尚未解锁",
-                        "正常模式下累计达成 3 个自律日（当日评分 ≥ 80% 且有正向自律记录，未破早睡戒）自动获赠 1 张放纵卡，最多囤 5 张。\n\n"
-                                + "当前正常模式自律进度：" + state.disciplinedProgress + " / " + FocusState.INDULGENT_UNLOCK_DAYS + " 天。",
-                        "知道了");
-            });
+            };
+
+            if (indulgentActive || hasPass || !chestClaimable) {
+                String indActionTxt = indulgentActive
+                        ? "放纵模式生效中（1:2）· 明日 04:00 恢复为" + state.previousMode.label
+                        : hasPass
+                        ? "使用 1 张放纵卡开启（1:2）"
+                        : "还差 " + Math.max(0, FocusState.INDULGENT_UNLOCK_DAYS - trackDays) + " 个自律日解锁宝箱";
+                TextView indActionBtn = text(activity, indActionTxt, 13,
+                        indulgentActive ? ON_ACCENT : hasPass ? ON_ACCENT : MUTED,
+                        indulgentActive || hasPass);
+                indActionBtn.setGravity(Gravity.CENTER);
+                indActionBtn.setMinHeight(dp(activity, 40));
+                indActionBtn.setBackground(indulgentActive
+                        ? shape(activity, AMBER, 11)
+                        : hasPass
+                        ? touch(activity, BLUE, 11)
+                        : shape(activity, SURFACE_SUBTLE, 11));
+                indActionBtn.setPadding(dp(activity, 12), dp(activity, 8), dp(activity, 12), dp(activity, 8));
+                indActionBtn.setOnClickListener(v -> activateIndulgent.run());
+                indCard.addView(indActionBtn, -1, -2);
+            }
             modesWrap.addView(indCard);
             gap(modesWrap, 8);
 
-            // 6th special mode: 躺平模式 (all apps unrestricted today; 2 放纵卡 -> 1 躺平卡, max 2)
+            if ("indulgent".equals(pulsePillKey[0])) {
+                pulsePillKey[0] = null;
+                indStockPill.post(() -> CardCraftUi.bouncePill(indStockPill));
+            }
+
+            // 6th special mode: 躺平模式 (gamified crafting bench: 2 金放纵卡 → 1 紫躺平卡)
             boolean layFlatActive = state.rateMode == FocusState.RateMode.LAY_FLAT;
             boolean hasLayCard = state.layFlatCards > 0;
-            boolean canExchange = state.canExchangeLayFlatCard();
+            boolean canCraft = state.canExchangeLayFlatCard();
+
             LinearLayout layCard = column(activity);
-            layCard.setBackground(touchCard(activity, layFlatActive || hasLayCard ? PURPLE_SOFT : SURFACE_SUBTLE,
-                    layFlatActive || hasLayCard ? PURPLE : BORDER, 16));
+            layCard.setBackground(touchCard(activity,
+                    layFlatActive ? PURPLE_SOFT : CARD,
+                    layFlatActive || hasLayCard || canCraft ? PURPLE : BORDER, 16));
             layCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
 
             LinearLayout layTop = row(activity);
@@ -2381,67 +2452,70 @@ final class FocusSheets {
             layRatio.setBackground(shape(activity, layFlatActive ? PURPLE : PURPLE_SOFT, 10));
             layRatio.setPadding(dp(activity, 8), dp(activity, 7), dp(activity, 8), dp(activity, 7));
             layTop.addView(layRatio);
-            space(layTop, 12);
+            space(layTop, 10);
 
-            weight(layTop, titleWithInfo(activity, FocusState.RateMode.LAY_FLAT.label, 15,
+            LinearLayout layTitles = column(activity);
+            layTitles.addView(titleWithInfo(activity, FocusState.RateMode.LAY_FLAT.label, 15,
                     layFlatActive ? PURPLE : INK,
                     "躺平模式（全天免限）",
-                    "开启后一整天全部应用不受限（不扣除可用与基础免费额度），当日无法再兑换时间且储蓄罐保持不变；次日凌晨 04:00 自动恢复上一正常模式。每 2 张放纵卡可兑换 1 张躺平卡，最多囤 2 张。"));
+                    "消耗 2 张金色放纵卡可合成 1 张紫色躺平卡（最多持有 2 张）；开启躺平后一整天全部应用不受限且暂停当日时间兑换，储蓄罐保持不变，明日凌晨 04:00 自动恢复上一正常模式。"));
+            layTitles.addView(text(activity, "全天免限 · 属于自己的自由时间", 11, MUTED, false));
+            weight(layTop, layTitles);
             space(layTop, 8);
 
-            String layActionLabel = layFlatActive ? "生效中"
-                    : hasLayCard ? "立即开启"
-                    : "待兑换";
-            TextView layBtn = text(activity, layActionLabel, 13,
-                    layFlatActive || hasLayCard ? ON_ACCENT : MUTED, true);
-            layBtn.setGravity(Gravity.CENTER);
-            layBtn.setMinWidth(dp(activity, 68));
-            layBtn.setMinHeight(dp(activity, 36));
-            layBtn.setBackground(shape(activity, layFlatActive ? PURPLE : hasLayCard ? PURPLE : CARD, 11));
-            layBtn.setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8));
-            layTop.addView(layBtn);
+            TextView layStockPill = text(activity,
+                    "持有 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张",
+                    11, PURPLE, true);
+            layStockPill.setBackground(shape(activity, layFlatActive ? CARD : PURPLE_SOFT, 9));
+            layStockPill.setPadding(dp(activity, 9), dp(activity, 5), dp(activity, 9), dp(activity, 5));
+            layTop.addView(layStockPill);
             layCard.addView(layTop);
             gap(layCard, 10);
 
-            CapsuleBar layBar = new CapsuleBar(activity);
-            layBar.setColors(isDark() ? 0xff2d244d : 0xffe7e2f7, PURPLE);
-            layBar.setProgress(layFlatActive ? 1f : Math.min(1f, (float) state.layFlatCards / FocusState.MAX_LAY_FLAT_CARDS));
-            layCard.addView(layBar, -1, dp(activity, 6));
-            gap(layCard, 6);
-
-            LinearLayout layFootRow = row(activity);
-            String layFoot = layFlatActive
-                    ? "生效中 · 全天免限 · 明日 04:00 恢复为" + state.previousMode.label
-                    : "躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS
-                    + " 张 · " + FocusState.INDULGENT_CARDS_PER_LAY_FLAT + " 张放纵卡兑 1 张";
-            weight(layFootRow, text(activity, layFoot, 11, layFlatActive ? PURPLE : INK_SUB, layFlatActive || hasLayCard));
-            if (state.layFlatCards < FocusState.MAX_LAY_FLAT_CARDS) {
-                space(layFootRow, 6);
-                TextView exBtn = text(activity, "2放纵卡兑1张", 11,
-                        canExchange ? ON_ACCENT : BLUE_DISABLED_TEXT, true);
-                exBtn.setBackground(canExchange
-                        ? touch(activity, BLUE, 8)
-                        : shape(activity, BLUE_DISABLED_BG, 8));
-                exBtn.setPadding(dp(activity, 9), dp(activity, 4), dp(activity, 9), dp(activity, 4));
-                exBtn.setOnClickListener(v -> {
-                    if (!state.canExchangeLayFlatCard()) {
-                        haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                        Toast.makeText(activity, "需至少 2 张放纵卡才可兑换 1 张躺平卡", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    if (state.exchangeLayFlatCard(System.currentTimeMillis(), ZoneId.systemDefault())) {
-                        haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            CardCraftUi.CraftingBenchView bench = new CardCraftUi.CraftingBenchView(
+                    activity, state.indulgentPasses, state.layFlatCards, canCraft, () -> {
+                        if (cardActionBusy[0]) return;
+                        if (!state.canExchangeLayFlatCard()) {
+                            haptic(layCard, state.hapticFeedback, HapticKind.REJECT);
+                            Toast.makeText(activity, state.layFlatCards >= FocusState.MAX_LAY_FLAT_CARDS
+                                    ? "躺平卡已达囤卡上限 2 张"
+                                    : "需至少 2 张放纵卡才可合成躺平卡", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        cardActionBusy[0] = true;
+                        long clickNow = System.currentTimeMillis();
+                        if (!state.exchangeLayFlatCard(clickNow, ZoneId.systemDefault())) {
+                            cardActionBusy[0] = false;
+                            haptic(layCard, state.hapticFeedback, HapticKind.REJECT);
+                            return;
+                        }
+                        FocusStore.get(activity).save();
                         onChanged.run();
-                        rebuild[0].run();
-                        Toast.makeText(activity, "已兑换 1 张躺平卡（当前 " + state.layFlatCards + "/"
-                                + FocusState.MAX_LAY_FLAT_CARDS + "）", Toast.LENGTH_SHORT).show();
-                    }
-                });
-                layFootRow.addView(exBtn);
-            }
-            layCard.addView(layFootRow);
+                        CardCraftUi.showCraftFusionModal(activity, state, layStockPill, () -> {
+                            cardActionBusy[0] = false;
+                            pulsePillKey[0] = "layflat";
+                            onChanged.run();
+                            rebuild[0].run();
+                        });
+                    });
+            layCard.addView(bench, -1, -2);
+            gap(layCard, 10);
 
-            layCard.setOnClickListener(v -> {
+            String layActionTxt = layFlatActive
+                    ? "躺平模式生效中 · 明日 04:00 恢复为" + state.previousMode.label
+                    : hasLayCard
+                    ? "使用 1 张躺平卡 · 今日全天免限"
+                    : "合成配方：放纵卡 × 2 → 躺平卡 × 1";
+            TextView layActionBtn = text(activity, layActionTxt, 13,
+                    layFlatActive || hasLayCard ? ON_ACCENT : MUTED,
+                    layFlatActive || hasLayCard);
+            layActionBtn.setGravity(Gravity.CENTER);
+            layActionBtn.setMinHeight(dp(activity, 40));
+            layActionBtn.setBackground(layFlatActive || hasLayCard
+                    ? touch(activity, PURPLE, 11)
+                    : shape(activity, SURFACE_SUBTLE, 11));
+            layActionBtn.setPadding(dp(activity, 12), dp(activity, 8), dp(activity, 12), dp(activity, 8));
+            layActionBtn.setOnClickListener(v -> {
                 tapHaptic(v);
                 if (state.rateMode == FocusState.RateMode.LAY_FLAT) {
                     infoDialog(activity, R.drawable.ic_check, PURPLE_SOFT, PURPLE,
@@ -2473,12 +2547,18 @@ final class FocusSheets {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
                 infoDialog(activity, R.drawable.ic_shield, PURPLE_SOFT, PURPLE,
                         "躺平模式需要躺平卡解锁",
-                        "每 2 张放纵卡可兑换 1 张躺平卡（最多囤 2 张）；每连续 3 天正常自律可获 1 张放纵卡。\n\n"
+                        "每 2 张金色放纵卡可合成为 1 张紫色躺平卡（最多囤 2 张）；每连续 3 天正常自律可开启宝箱领取 1 张放纵卡。\n\n"
                                 + "当前持有：放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
                                 + " 张，躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + " 张。",
                         "知道了");
             });
+            layCard.addView(layActionBtn, -1, -2);
             modesWrap.addView(layCard);
+
+            if ("layflat".equals(pulsePillKey[0])) {
+                pulsePillKey[0] = null;
+                layStockPill.post(() -> CardCraftUi.bouncePill(layStockPill));
+            }
 
             capsWrap.removeAllViews();
             capsWrap.addView(rateRow(activity, "待办每日上限", null,
@@ -3068,7 +3148,7 @@ final class FocusSheets {
         body.addView(githubCard);
         gap(body, 10);
 
-        String giteeUrl = GitHubUpdates.GITEE_RELEASES_URL + "/latest";
+        String giteeUrl = GitHubUpdates.GITEE_RELEASES_URL;
         body.addView(settingRow(activity, R.drawable.ic_info, BLUE_SOFT, BLUE,
                 "Gitee 国内下载", "打开正式版 APK 下载页", null, () -> {
                     try {
@@ -3154,12 +3234,14 @@ final class FocusSheets {
 
         boolean layFlat = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgent = state.rateMode == FocusState.RateMode.INDULGENT;
-        int rateBg = layFlat ? PURPLE_SOFT : indulgent ? AMBER_SOFT : BLUE_SOFT;
-        int rateFg = layFlat ? PURPLE : indulgent ? AMBER : BLUE;
+        boolean hasChest = state.canClaimIndulgentReward();
+        int rateBg = hasChest ? AMBER_SOFT : layFlat ? PURPLE_SOFT : indulgent ? AMBER_SOFT : BLUE_SOFT;
+        int rateFg = hasChest ? AMBER : layFlat ? PURPLE : indulgent ? AMBER : BLUE;
+        String rateStatusChip = hasChest ? "宝箱待领" : state.rateMode.label;
         body.addView(settingRow(activity, R.drawable.ic_tune,
                 rateBg, rateFg,
-                "时间获取模式与上限", null,
-                state.rateMode.label, null, () -> {
+                "时间获取模式与上限", hasChest ? "已解锁放纵卡宝箱，点击领取" : null,
+                rateStatusChip, null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onRates.run();
                 }));
@@ -3234,6 +3316,7 @@ final class FocusSheets {
         gap(body, 14);
 
         TextView passBtn = secondaryButton(activity, "");
+        TextView progBtn = secondaryButton(activity, "");
         TextView layBtn = secondaryButton(activity, "");
         Runnable[] refreshStatus = new Runnable[1];
         refreshStatus[0] = () -> {
@@ -3250,6 +3333,8 @@ final class FocusSheets {
             if (state.soberActive(now)) locks.append("目的模式 ");
             lockTv.setText("状态：" + (locks.length() == 0 ? "未处于任何锁定" : locks.toString().trim()));
             passBtn.setText("发放 +1 放纵卡（当前 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS + "）");
+            progBtn.setText("模拟 +1 天自律进度（当前 " + state.indulgentTrackProgressDays()
+                    + "/3 · 待领宝箱 " + state.pendingIndulgentRewards + "）");
             layBtn.setText("发放 +1 躺平卡（当前 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS + "）");
         };
 
@@ -3363,6 +3448,7 @@ final class FocusSheets {
             tapHaptic(v);
             if (state.indulgentPasses < FocusState.MAX_INDULGENT_CARDS) {
                 state.indulgentPasses++;
+                state.normalizeIndulgentProgress();
                 onChanged.run();
                 refreshStatus[0].run();
                 Toast.makeText(activity, "已发放 1 张放纵卡", Toast.LENGTH_SHORT).show();
@@ -3371,6 +3457,23 @@ final class FocusSheets {
             }
         });
         body.addView(passBtn, -1, -2);
+        gap(body, 8);
+
+        progBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            boolean ok = state.debugAdvanceDisciplinedProgress(System.currentTimeMillis(), ZoneId.systemDefault());
+            if (ok) {
+                onChanged.run();
+                refreshStatus[0].run();
+                Toast.makeText(activity, state.hasPendingIndulgentReward()
+                        ? "已点亮第 3 天 · 放纵卡宝箱已解锁！"
+                        : "自律进度已推进至 " + state.indulgentTrackProgressDays() + "/3 天",
+                        Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(activity, "已达放纵卡与待领宝箱上限（5 张）", Toast.LENGTH_SHORT).show();
+            }
+        });
+        body.addView(progBtn, -1, -2);
         gap(body, 8);
 
         layBtn.setOnClickListener(v -> {

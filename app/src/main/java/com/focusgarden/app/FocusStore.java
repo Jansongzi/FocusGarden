@@ -47,8 +47,10 @@ final class FocusStore {
         state.indulgentActiveDate = root.optString("indulgentActiveDate", "");
         state.layFlatActiveDate = root.optString("layFlatActiveDate", "");
         state.indulgentPasses = Math.max(0, Math.min(FocusState.MAX_INDULGENT_CARDS, root.optInt("indulgentPasses", 0)));
+        state.pendingIndulgentRewards = Math.max(0, root.optInt("pendingIndulgentRewards", 0));
         state.layFlatCards = Math.max(0, Math.min(FocusState.MAX_LAY_FLAT_CARDS, root.optInt("layFlatCards", 0)));
         state.disciplinedProgress = Math.max(0, root.optInt("disciplinedProgress", 0));
+        state.normalizeIndulgentProgress();
         state.totalDisciplineSessions = Math.max(0, root.optInt("totalDisciplineSessions", 0));
         state.lastResetDate = root.optString("lastResetDate", "");
         state.syncLegacyPercents();
@@ -407,6 +409,7 @@ final class FocusStore {
                     .put("indulgentActiveDate", state.indulgentActiveDate)
                     .put("layFlatActiveDate", state.layFlatActiveDate)
                     .put("indulgentPasses", state.indulgentPasses)
+                    .put("pendingIndulgentRewards", state.pendingIndulgentRewards)
                     .put("layFlatCards", state.layFlatCards)
                     .put("disciplinedProgress", state.disciplinedProgress)
                     .put("totalDisciplineSessions", state.totalDisciplineSessions)

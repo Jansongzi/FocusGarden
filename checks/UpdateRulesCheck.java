@@ -62,6 +62,9 @@ final class UpdateRulesCheck {
         if (!"GitHub".equals(fallback) || githubCalls.get() != 1)
             throw new AssertionError("GitHub must be tried once when Gitee fails");
 
+        if (!"https://gitee.com/jiansz/focusgarden/releases".equals(GitHubUpdates.GITEE_RELEASES_URL))
+            throw new AssertionError("Gitee releases URL mismatch");
+
         System.out.println("PASS: repository, stable version comparison, digest validation, web release parsing and update source priority");
     }
 

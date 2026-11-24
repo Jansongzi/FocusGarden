@@ -247,6 +247,7 @@ final class FocusState {
     String indulgentActiveDate = "";
     String layFlatActiveDate = "";
     int indulgentPasses;
+    int pendingIndulgentRewards;
     int layFlatCards;
     int disciplinedProgress;
     int totalDisciplineSessions;
@@ -725,25 +726,75 @@ final class FocusState {
         return hasPositive && disciplineScore(ld) >= 80;
     }
 
+    void normalizeIndulgentProgress() {
+        indulgentPasses = Math.max(0, Math.min(MAX_INDULGENT_CARDS, indulgentPasses));
+        pendingIndulgentRewards = Math.max(0, Math.min(MAX_INDULGENT_CARDS - indulgentPasses, pendingIndulgentRewards));
+        while (disciplinedProgress >= INDULGENT_UNLOCK_DAYS
+                && indulgentPasses + pendingIndulgentRewards < MAX_INDULGENT_CARDS) {
+            disciplinedProgress -= INDULGENT_UNLOCK_DAYS;
+            pendingIndulgentRewards++;
+        }
+        if (indulgentPasses + pendingIndulgentRewards >= MAX_INDULGENT_CARDS) {
+            disciplinedProgress = Math.min(disciplinedProgress, INDULGENT_UNLOCK_DAYS);
+        }
+    }
+
     boolean evaluateDisciplinedDay(long now, ZoneId zone) {
         String d = date(now, zone);
         if (disciplinedDays.contains(d) || !isDisciplinedDayQualified(d)) return false;
         disciplinedDays.add(d);
         if (!rateMode.isNormal()) return false;
         disciplinedProgress++;
-        boolean unlocked = false;
-        while (disciplinedProgress >= INDULGENT_UNLOCK_DAYS && indulgentPasses < MAX_INDULGENT_CARDS) {
-            disciplinedProgress -= INDULGENT_UNLOCK_DAYS;
-            indulgentPasses++;
-            unlocked = true;
-            logEvent(d, now, "HABIT", "获得放纵卡",
-                    "正常模式累计自律满 " + INDULGENT_UNLOCK_DAYS + " 天 · 放纵卡 "
-                            + indulgentPasses + "/" + MAX_INDULGENT_CARDS, 0L);
-        }
-        if (indulgentPasses >= MAX_INDULGENT_CARDS) {
-            disciplinedProgress = Math.min(disciplinedProgress, INDULGENT_UNLOCK_DAYS);
+        int beforePending = pendingIndulgentRewards;
+        normalizeIndulgentProgress();
+        boolean unlocked = pendingIndulgentRewards > beforePending;
+        if (unlocked) {
+            logEvent(d, now, "HABIT", "解锁放纵卡宝箱",
+                    "正常模式累计自律满 " + INDULGENT_UNLOCK_DAYS + " 天 · 可开启宝箱领取放纵卡", 0L);
         }
         return unlocked;
+    }
+
+    boolean hasPendingIndulgentReward() {
+        return pendingIndulgentRewards > 0;
+    }
+
+    boolean canClaimIndulgentReward() {
+        return pendingIndulgentRewards > 0 && indulgentPasses < MAX_INDULGENT_CARDS;
+    }
+
+    int indulgentTrackProgressDays() {
+        return pendingIndulgentRewards > 0
+                ? INDULGENT_UNLOCK_DAYS
+                : Math.min(INDULGENT_UNLOCK_DAYS, Math.max(0, disciplinedProgress));
+    }
+
+    boolean claimPendingIndulgentReward(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        if (!canClaimIndulgentReward()) return false;
+        pendingIndulgentRewards--;
+        indulgentPasses++;
+        normalizeIndulgentProgress();
+        logEvent(date(now, zone), now, "HABIT", "领取放纵卡",
+                "开启自律 " + INDULGENT_UNLOCK_DAYS + " 天成就宝箱 · 放纵卡 "
+                        + indulgentPasses + "/" + MAX_INDULGENT_CARDS, 0L);
+        return true;
+    }
+
+    boolean debugAdvanceDisciplinedProgress(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        if (indulgentPasses + pendingIndulgentRewards >= MAX_INDULGENT_CARDS
+                && disciplinedProgress >= INDULGENT_UNLOCK_DAYS) {
+            return false;
+        }
+        disciplinedProgress++;
+        int before = pendingIndulgentRewards;
+        normalizeIndulgentProgress();
+        if (pendingIndulgentRewards > before) {
+            logEvent(date(now, zone), now, "HABIT", "解锁放纵卡宝箱",
+                    "累计自律满 " + INDULGENT_UNLOCK_DAYS + " 天 · 可开启宝箱领取放纵卡", 0L);
+        }
+        return true;
     }
 
     boolean canActivateIndulgent(long now, ZoneId zone) {
@@ -759,6 +810,7 @@ final class FocusState {
         indulgentActiveDate = date(now, zone);
         layFlatActiveDate = "";
         indulgentPasses--;
+        normalizeIndulgentProgress();
         creditRemainder = 0;
         syncLegacyPercents();
         logEvent(indulgentActiveDate, now, "CONFIG", "开启放纵模式",
@@ -775,14 +827,11 @@ final class FocusState {
         syncResetDay(now, zone);
         indulgentPasses -= INDULGENT_CARDS_PER_LAY_FLAT;
         layFlatCards++;
+        normalizeIndulgentProgress();
         String d = date(now, zone);
-        logEvent(d, now, "CONFIG", "兑换躺平卡",
-                "消耗 " + INDULGENT_CARDS_PER_LAY_FLAT + " 张放纵卡 · 躺平卡 "
+        logEvent(d, now, "CONFIG", "合成躺平卡",
+                "消耗 " + INDULGENT_CARDS_PER_LAY_FLAT + " 张放纵卡合成 · 躺平卡 "
                         + layFlatCards + "/" + MAX_LAY_FLAT_CARDS, 0L);
-        while (disciplinedProgress >= INDULGENT_UNLOCK_DAYS && indulgentPasses < MAX_INDULGENT_CARDS) {
-            disciplinedProgress -= INDULGENT_UNLOCK_DAYS;
-            indulgentPasses++;
-        }
         return true;
     }
 
