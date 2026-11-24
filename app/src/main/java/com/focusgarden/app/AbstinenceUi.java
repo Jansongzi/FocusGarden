@@ -388,9 +388,8 @@ final class AbstinenceUi {
 
         LinearLayout header = row(activity);
         LinearLayout hLeft = column(activity);
-        hLeft.addView(text(activity, "复发日记", 16, INK, true));
-        gap(hLeft, 2);
-        hLeft.addView(text(activity, "点击日期记录复发与日记", 11, MUTED, false));
+        hLeft.addView(titleWithInfo(activity, "复发日记", 16, INK,
+                "复发日记", "点按日期可记录复发（红叉）或写日记。"));
         weight(header, hLeft);
 
         LinearLayout monthNav = row(activity);
@@ -625,7 +624,7 @@ final class AbstinenceUi {
         Collections.sort(dates, Collections.reverseOrder());
 
         if (dates.isEmpty()) {
-            logCard.addView(text(activity, "暂无复发或日记记录，可在「总览」日历中点按日期添加", 13, MUTED, false));
+            logCard.addView(text(activity, "暂无复发或日记记录", 13, MUTED, false));
         } else {
             for (int i = 0; i < dates.size(); i++) {
                 String ds = dates.get(i);
@@ -675,7 +674,7 @@ final class AbstinenceUi {
 
         if (canClaim) {
             boolean layFlat = state.isLayFlat();
-            TextView btn = pillButton(activity, layFlat ? "躺平模式今日暂停兑换" : "立即领取奖励",
+            TextView btn = pillButton(activity, layFlat ? "躺平中暂不可领" : "立即领取奖励",
                     ON_ACCENT, layFlat ? MUTED : 0xff143b32, 14, 44);
             btn.setOnClickListener(v -> {
                 if (state.isLayFlat()) {
@@ -692,7 +691,7 @@ final class AbstinenceUi {
             });
             hero.addView(btn, -1, -2);
         } else if (reached) {
-            TextView btn = pillButton(activity, "已领本轮奖励 · 开启新一轮", ON_ACCENT, 0xff143b32, 14, 44);
+            TextView btn = pillButton(activity, "开启新一轮", ON_ACCENT, 0xff143b32, 14, 44);
             btn.setOnClickListener(v -> {
                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 state.resetAbstinence(a.id, System.currentTimeMillis(), ZoneId.systemDefault(), false);

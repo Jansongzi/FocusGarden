@@ -113,8 +113,8 @@ final class SoberModeUi {
         body.addView(start, -1, -2);
 
         Dialog sheet = bottomSheet(activity, "开启目的模式", null, body, true,
-                "目的模式说明",
-                "开启时会先扣除等额可用时间（不足部分从储蓄罐扣除）；期间仅可使用所选目的应用，回到桌面或打开其他应用都会被拦截；暂停或提前结束会自动退回未用时长。");
+                "目的模式",
+                "先扣等额时长，期间仅可用所选应用，提前退出自动退回未用时长。");
         start.setOnClickListener(v -> {
             if (chosen.isEmpty()) {
                 message(activity, "请先选择至少一个目的应用");
@@ -185,8 +185,8 @@ final class SoberModeUi {
         TextView finish = secondaryButton(activity, "结束目的模式");
         body.addView(finish, -1, -2);
         Dialog sheet = bottomSheet(activity, "目的模式已暂停", null, body, true,
-                "目的模式暂停说明",
-                "未用时长已退回余额，继续目的模式时将重新扣除剩余时长。");
+                "目的模式",
+                "未用时长已退回，继续时重新扣除剩余时长。");
         resume.setOnClickListener(v -> {
             if (!canStart(activity, state)) return;
             if (!hasAnyLaunchablePurposeApp(activity, state)) {

@@ -102,11 +102,31 @@ final class TimeShopUi {
     }
 
     private static GradientDrawable shopInteriorBg(Context context) {
+        return createStoreCardBg(context, 22);
+    }
+
+    static GradientDrawable createStoreCardBg(Context context, int radiusDp) {
         GradientDrawable d = new GradientDrawable();
         d.setColor(ShopColors.interiorBg());
-        d.setCornerRadius(dp(context, 22));
+        d.setCornerRadius(dp(context, radiusDp));
         d.setStroke(dp(context, 1), ShopColors.interiorBorder());
         return d;
+    }
+
+    static View createMiniAwning(Context context) {
+        return new AwningView(context, 14, 7, 2, 2);
+    }
+
+    static View createCoinBadge(Context context) {
+        return new CoinBadgeView(context);
+    }
+
+    static int storeInkColor() {
+        return ShopColors.ink();
+    }
+
+    static int storeMutedColor() {
+        return ShopColors.muted();
     }
 
     private static String shortDuration(int minutes) {
@@ -120,9 +140,21 @@ final class TimeShopUi {
         private final Path archClip = new Path();
         private final Path shadowPath = new Path();
         private final RectF oval = new RectF();
+        private final int stripes;
+        private final int minBodyDp;
+        private final int bottomPadDp;
+        private final int shadowOffDp;
 
         AwningView(Context context) {
+            this(context, 10, 12, 4, 3);
+        }
+
+        AwningView(Context context, int stripes, int minBodyDp, int bottomPadDp, int shadowOffDp) {
             super(context);
+            this.stripes = stripes;
+            this.minBodyDp = minBodyDp;
+            this.bottomPadDp = bottomPadDp;
+            this.shadowOffDp = shadowOffDp;
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
 
@@ -131,17 +163,18 @@ final class TimeShopUi {
             float h = getHeight();
             if (w <= 0f || h <= 0f) return;
 
-            int stripes = 10;
+            Context ctx = getContext();
             float stripeW = w / stripes;
-            float archR = stripeW * 0.5f;
-            float bodyBottom = Math.max(dp(getContext(), 12), h - archR - dp(getContext(), 4));
+            float rx = stripeW * 0.5f;
+            float ry = Math.min(rx, Math.max(dp(ctx, 4), h * 0.40f));
+            float bodyBottom = Math.max(dp(ctx, minBodyDp), h - ry - dp(ctx, bottomPadDp));
 
             shadowPath.reset();
-            shadowPath.moveTo(0f, bodyBottom + dp(getContext(), 2));
+            shadowPath.moveTo(0f, bodyBottom + dp(ctx, Math.max(1, bottomPadDp - 1)));
             for (int i = 0; i < stripes; i++) {
-                float cx = i * stripeW + archR;
-                oval.set(cx - archR, bodyBottom - archR + dp(getContext(), 3),
-                        cx + archR, bodyBottom + archR + dp(getContext(), 3));
+                float cx = i * stripeW + rx;
+                oval.set(cx - rx, bodyBottom - ry + dp(ctx, shadowOffDp),
+                        cx + rx, bodyBottom + ry + dp(ctx, shadowOffDp));
                 shadowPath.arcTo(oval, 180f, -180f, i == 0);
             }
             shadowPath.lineTo(w, 0f);
@@ -155,8 +188,8 @@ final class TimeShopUi {
             archClip.lineTo(w, 0f);
             archClip.lineTo(w, bodyBottom);
             for (int i = stripes - 1; i >= 0; i--) {
-                float cx = i * stripeW + archR;
-                oval.set(cx - archR, bodyBottom - archR, cx + archR, bodyBottom + archR);
+                float cx = i * stripeW + rx;
+                oval.set(cx - rx, bodyBottom - ry, cx + rx, bodyBottom + ry);
                 archClip.arcTo(oval, 0f, 180f, false);
             }
             archClip.close();
@@ -169,9 +202,9 @@ final class TimeShopUi {
                 paint.setColor((i % 2 == 0) ? blue : cream);
                 canvas.drawRect(i * stripeW, 0f, (i + 1) * stripeW + 0.5f, h, paint);
             }
-            paint.setShader(new LinearGradient(0f, 0f, 0f, bodyBottom + archR,
+            paint.setShader(new LinearGradient(0f, 0f, 0f, bodyBottom + ry,
                     0x14ffffff, 0x16000000, Shader.TileMode.CLAMP));
-            canvas.drawRect(0f, 0f, w, bodyBottom + archR, paint);
+            canvas.drawRect(0f, 0f, w, bodyBottom + ry, paint);
             paint.setShader(null);
             canvas.restore();
         }
@@ -1171,10 +1204,11 @@ final class TimeShopUi {
         float cornerR = dp(activity, 24);
         sheetBg.setCornerRadii(new float[]{cornerR, cornerR, cornerR, cornerR, 0, 0, 0, 0});
         overlayHost.setBackground(sheetBg);
+        overlayHost.setClipToOutline(true);
 
         LinearLayout sheet = column(activity);
-        sheet.setClipChildren(false);
-        sheet.setClipToPadding(false);
+        sheet.setClipChildren(true);
+        sheet.setClipToPadding(true);
 
         FrameLayout grip = new FrameLayout(activity);
         grip.setContentDescription("向下拖动关闭面板");
@@ -1212,11 +1246,18 @@ final class TimeShopUi {
 
         // 3.1 Fixed Top Header: 时间商店 + Backpack Entry
         LinearLayout topHeader = row(activity);
-        topHeader.setPadding(dp(activity, 20), dp(activity, 2), dp(activity, 20), dp(activity, 10));
+        topHeader.setPadding(dp(activity, 20), dp(activity, 6), dp(activity, 20), dp(activity, 10));
+        topHeader.setClipChildren(false);
+        topHeader.setClipToPadding(false);
         LinearLayout titleCol = column(activity);
-        titleCol.addView(text(activity, "时间商店", 22, ShopColors.ink(), true));
+        titleCol.addView(titleWithInfo(activity, "时间商店", 22, ShopColors.ink(),
+                "时间商店说明",
+                "消耗自由时间兑换道具、外观与心愿（躺平仅扣储蓄罐），已购物品在右上角背包。"));
         gap(titleCol, 2);
-        titleCol.addView(text(activity, "每一份努力，都值得被奖励。", 11, ShopColors.muted(), false));
+        TextView topSubTv = text(activity, "每一份努力，都值得被奖励。", 11, ShopColors.muted(), false);
+        topSubTv.setSingleLine(true);
+        topSubTv.setEllipsize(TextUtils.TruncateAt.END);
+        titleCol.addView(topSubTv);
         weight(topHeader, titleCol);
 
         FrameLayout bagBtnWrap = new FrameLayout(activity);
@@ -1250,8 +1291,10 @@ final class TimeShopUi {
 
         ScrollView scroller = new ScrollView(activity);
         scroller.setVerticalScrollBarEnabled(false);
+        scroller.setClipChildren(true);
+        scroller.setClipToPadding(true);
         LinearLayout scrollBody = column(activity);
-        scrollBody.setPadding(dp(activity, 16), dp(activity, 2), dp(activity, 16), dp(activity, 24));
+        scrollBody.setPadding(dp(activity, 16), dp(activity, 4), dp(activity, 16), dp(activity, 24));
         scroller.addView(scrollBody, -1, -2);
         sheet.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -1263,6 +1306,8 @@ final class TimeShopUi {
         space(balanceBar, 12);
         LinearLayout balCenter = column(activity);
         TextView balLabelTv = text(activity, "我的时间余额", 12, ShopColors.muted(), false);
+        balLabelTv.setSingleLine(true);
+        balLabelTv.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout balValRow = row(activity);
         TextView balNumTv = text(activity, "0", 25, ShopColors.blue(), true);
         balNumTv.setFontFeatureSettings("tnum");
@@ -1309,6 +1354,7 @@ final class TimeShopUi {
         gap(interior, 8);
         interior.addView(new ShopFooterDecorView(activity), -1, dp(activity, 48));
         TextView footerQuote = text(activity, "慢慢积攒，好好生活。", 11, ShopColors.muted(), false);
+        footerQuote.setSingleLine(true);
         footerQuote.setGravity(Gravity.CENTER);
         footerQuote.setPadding(0, dp(activity, 4), 0, dp(activity, 18));
         interior.addView(footerQuote, -1, -2);
@@ -1336,7 +1382,7 @@ final class TimeShopUi {
             int targetMins = (int) Math.max(0L, state.rewardSpendableMs() / FocusState.MINUTE);
 
             balLabelTv.setText(layFlat
-                    ? "躺平状态 · 仅限储蓄余额（可用 " + duration(state.vaultMs) + "）"
+                    ? "躺平 · 仅用储蓄 " + duration(state.vaultMs)
                     : "我的时间余额");
             balLabelTv.setTextColor(layFlat ? PURPLE : ShopColors.muted());
             balNumTv.setTextColor(layFlat ? PURPLE : ShopColors.blue());
@@ -1387,6 +1433,7 @@ final class TimeShopUi {
         for (int i = 0; i < navLabels.length; i++) {
             final int tabIdx = i;
             TextView pill = text(activity, navLabels[i], 13, ShopColors.muted(), true);
+pill.setSingleLine(true);
             pill.setGravity(Gravity.CENTER);
             pill.setPadding(dp(activity, 16), dp(activity, 7), dp(activity, 16), dp(activity, 7));
             pill.setOnClickListener(v -> {
@@ -1573,7 +1620,15 @@ final class TimeShopUi {
             String subtitle,
             RedeemUi.Pressable3DButton.Mode btnMode,
             String btnLabel,
-            Runnable onTap) {}
+            Runnable onTap,
+            float progressRatio,
+            int progressFillColor,
+            int progressTrackColor) {
+        ShelfItem(ShopIllustrationView illustration, String name, String subtitle,
+                  RedeemUi.Pressable3DButton.Mode btnMode, String btnLabel, Runnable onTap) {
+            this(illustration, name, subtitle, btnMode, btnLabel, onTap, -1f, 0, 0);
+        }
+    }
 
     private static void addShelfSection(MainActivity activity, LinearLayout parent, String title,
                                         ShelfItem left, ShelfItem right) {
@@ -1623,7 +1678,19 @@ final class TimeShopUi {
         subTv.setMaxLines(1);
         subTv.setEllipsize(TextUtils.TruncateAt.END);
         col.addView(subTv, -1, -2);
-        gap(col, 8);
+        if (item.progressRatio() >= 0f) {
+            gap(col, 4);
+            CapsuleBar bar = new CapsuleBar(activity);
+            bar.setColors(item.progressTrackColor(), item.progressFillColor());
+            bar.setProgress(item.progressRatio());
+            LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(activity, 4));
+            barLp.leftMargin = dp(activity, 6);
+            barLp.rightMargin = dp(activity, 6);
+            col.addView(bar, barLp);
+            gap(col, 6);
+        } else {
+            gap(col, 8);
+        }
 
         RedeemUi.Pressable3DButton btn = new RedeemUi.Pressable3DButton(activity, 36, 11, 13, 10, false);
         btn.applyState(item.btnMode(), item.btnLabel());
@@ -1647,8 +1714,8 @@ final class TimeShopUi {
                 : RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
         String btnTxt = full ? "库存已满" : cost + " 分钟";
         String sub = state.streakProtectCards > 0
-                ? "已有 " + state.streakProtectCards + " 张 · 守护连签"
-                : "守护一次坚持的记录";
+                ? "已有 " + state.streakProtectCards + " 张 · 补护连签"
+                : "补护连签一次";
 
         return new ShelfItem(art, "打卡保护卡", sub, mode, btnTxt, () -> {
             if (busy[0]) return;
@@ -1685,7 +1752,7 @@ final class TimeShopUi {
                 ? RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED
                 : RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
         String btnTxt = !canBuy ? "已达 2 小时" : cost + " 分钟";
-        String sub = "储蓄上限 " + state.vaultCapacityMinutes() + "/120 分钟";
+        String sub = "上限 " + state.vaultCapacityMinutes() + "/120 分";
 
         return new ShelfItem(art, "储蓄扩容卡", sub, mode, btnTxt, () -> {
             if (busy[0]) return;
@@ -1742,16 +1809,18 @@ final class TimeShopUi {
                 : RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
         int paid = state.indulgentPaidMinutes;
         int total = FocusState.INDULGENT_INSTALLMENT_TOTAL_MINUTES;
-        String btnTxt = full ? "已满 5 张" : paid > 0 ? "续存分期" : "20h 分期";
+        String btnTxt = full ? "已满 5 张" : paid > 0 ? "继续积攒" : "20h 分期";
         String sub = paid > 0
-                ? "已存 " + paid + "/" + total + " 分"
-                : "20h分期 · 或3天宝箱";
+                ? "已存 " + paid + "/" + total + "分"
+                : "20h分期或开箱";
+        float progress = full ? -1f : (paid <= 0 ? 0f : Math.max(0.04f, Math.min(1f, (float) paid / total)));
+        int trackColor = isDark() ? 0xff46361a : 0xfff5e3bc;
 
         return new ShelfItem(art, "放纵卡", sub, mode, btnTxt, () -> {
             if (busy[0]) return;
             tapHaptic(art);
             showIndulgentInstallmentDialog(activity, state, busy, art, flyOverlay, bagTarget, onUpdated);
-        });
+        }, progress, AMBER, trackColor);
     }
 
     private static ShelfItem buildLayFlatShelfEntry(MainActivity activity, FocusState state,
@@ -1765,7 +1834,7 @@ final class TimeShopUi {
                 ? RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED
                 : RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
         String btnTxt = full ? "已满 2 张" : canCraft ? "立即合成" : "2卡合成";
-        String sub = "持有 " + state.layFlatCards + "/2 张 · 2放纵合成";
+        String sub = "持有 " + state.layFlatCards + "/2 · 2放纵合成";
 
         return new ShelfItem(art, "躺平卡", sub, mode, btnTxt, () -> {
             if (busy[0]) return;
@@ -1787,7 +1856,7 @@ final class TimeShopUi {
             } else {
                 infoDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
                         "躺平卡（全天免限）",
-                        full ? "当前已持有上限 2 张躺平卡，可前往「背包 → 卡牌」或「设置 → 时间获取模式与上限」开启使用。"
+                        full ? "当前已持有上限 2 张躺平卡，可前往「背包 → 卡牌」或「设置 → 模式切换」开启使用。"
                                 : "每 2 张金色放纵卡可在下方合成台合成为 1 张紫色躺平卡。\n\n当前放纵卡："
                                 + state.indulgentPasses + "/2 张。",
                         "知道了");
@@ -1850,9 +1919,13 @@ final class TimeShopUi {
                                                 boolean[] busy, View bagTarget, Runnable onUpdated) {
         LinearLayout head = row(activity);
         head.setPadding(dp(activity, 2), dp(activity, 2), dp(activity, 2), dp(activity, 6));
-        weight(head, text(activity, "自律宝箱与卡牌合成", 12, ShopColors.muted(), true));
-        head.addView(text(activity, "持有 放纵 " + state.indulgentPasses + "/5 · 躺平 " + state.layFlatCards + "/2",
-                11, ShopColors.warmInk(), true));
+        weight(head, titleWithInfo(activity, "自律宝箱与卡牌合成", 12, ShopColors.muted(),
+                "宝箱与卡牌",
+                "正常自律 3 天开箱得放纵卡（1:2，上限 5 张）；2 张放纵卡合成 1 张躺平卡（免限，上限 2 张）。"));
+        TextView craftStockTv = text(activity, "放纵 " + state.indulgentPasses + "/5 · 躺平 " + state.layFlatCards + "/2",
+                11, ShopColors.warmInk(), true);
+        craftStockTv.setSingleLine(true);
+        head.addView(craftStockTv);
         parent.addView(head, -1, -2);
 
         boolean chestClaimable = state.canClaimIndulgentReward();
@@ -1896,9 +1969,11 @@ final class TimeShopUi {
         if (chestClaimable) {
             TextView chestBtn = text(activity,
                     state.pendingIndulgentRewards > 1
-                            ? "开启宝箱 · 领取放纵卡（待领 " + state.pendingIndulgentRewards + "）"
+                            ? "开启宝箱 · 领放纵卡 (" + state.pendingIndulgentRewards + ")"
                             : "开启宝箱 · 领取放纵卡",
                     13, 0xff3b2404, true);
+            chestBtn.setSingleLine(true);
+            chestBtn.setEllipsize(TextUtils.TruncateAt.END);
             chestBtn.setGravity(Gravity.CENTER);
             chestBtn.setMinHeight(dp(activity, 40));
             chestBtn.setBackground(gradientBg(activity, 0xfff6ce68, 0xffd99c28, 12));
@@ -1908,8 +1983,10 @@ final class TimeShopUi {
             parent.addView(chestBtn, -1, -2);
             gap(parent, 8);
         } else if (chestAtMax) {
-            TextView fullNotice = text(activity, "宝箱已解锁 · 放纵卡已满 5/5（使用或合成后可领）",
+            TextView fullNotice = text(activity, "放纵卡已满 5/5（使用或合成后可领）",
                     11, AMBER, true);
+            fullNotice.setSingleLine(true);
+            fullNotice.setEllipsize(TextUtils.TruncateAt.END);
             fullNotice.setGravity(Gravity.CENTER);
             fullNotice.setBackground(shape(activity, AMBER_SOFT, 10));
             fullNotice.setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 8));
@@ -1974,7 +2051,7 @@ final class TimeShopUi {
             empty.setGravity(Gravity.CENTER);
             empty.addView(text(activity, "心愿墙还是空的", 14, ShopColors.ink(), true));
             gap(empty, 4);
-            empty.addView(text(activity, "点击右上角 + 挂一张属于自己的现实小奖励", 12, ShopColors.muted(), false));
+            empty.addView(text(activity, "点击右上角 + 添加自定义心愿", 12, ShopColors.muted(), false));
             empty.setOnClickListener(v -> {
                 tapHaptic(v);
                 onAddWish.run();
@@ -2004,12 +2081,25 @@ final class TimeShopUi {
             space(mainRow, 10);
 
             LinearLayout copyCol = column(activity);
-            copyCol.addView(text(activity, r.title, 14, ShopColors.ink(), true));
-            String meta = (r.subtitle != null && !r.subtitle.isEmpty() ? r.subtitle + " · " : "")
-                    + (claimedOnceLocked ? "已达成（单次）"
+            TextView wishTitleTv = text(activity, r.title, 14, ShopColors.ink(), true);
+            wishTitleTv.setSingleLine(true);
+            wishTitleTv.setEllipsize(TextUtils.TruncateAt.END);
+            copyCol.addView(wishTitleTv);
+            StringBuilder metaSb = new StringBuilder();
+            if (r.subtitle != null && !r.subtitle.isEmpty()) metaSb.append(r.subtitle);
+            String tail = claimedOnceLocked ? "已达成"
                     : r.redeemedCount > 0 ? "已兑 " + r.redeemedCount + " 次"
-                    : r.repeatable ? "可重复" : "单次心愿");
-            copyCol.addView(text(activity, meta, 11, ShopColors.muted(), false));
+                    : r.repeatable ? "" : "单次心愿";
+            if (!tail.isEmpty()) {
+                if (metaSb.length() > 0) metaSb.append(" · ");
+                metaSb.append(tail);
+            }
+            if (metaSb.length() > 0) {
+                TextView metaTv = text(activity, metaSb.toString(), 11, ShopColors.muted(), false);
+                metaTv.setSingleLine(true);
+                metaTv.setEllipsize(TextUtils.TruncateAt.END);
+                copyCol.addView(metaTv);
+            }
             weight(mainRow, copyCol);
             space(mainRow, 6);
 
@@ -2026,6 +2116,7 @@ final class TimeShopUi {
             String pillLabel = claimedOnceLocked ? "已达成" : r.costMinutes + " 分钟";
             TextView pricePill = text(activity, pillLabel, 12,
                     afford ? ShopColors.blue() : ShopColors.muted(), true);
+            pricePill.setSingleLine(true);
             pricePill.setFontFeatureSettings("tnum");
             pricePill.setGravity(Gravity.CENTER);
             pricePill.setBackground(roundedShape(activity,
@@ -2608,8 +2699,9 @@ final class TimeShopUi {
         for (int i = 0; i < tabNames.length; i++) {
             final int tIdx = i;
             TextView tv = text(activity, tabNames[i], 12, MUTED, true);
+            tv.setSingleLine(true);
             tv.setGravity(Gravity.CENTER);
-            tv.setPadding(dp(activity, 10), dp(activity, 7), dp(activity, 10), dp(activity, 7));
+            tv.setPadding(dp(activity, 6), dp(activity, 7), dp(activity, 6), dp(activity, 7));
             tv.setOnClickListener(v -> {
                 if (bagTab[0] == tIdx) return;
                 tapHaptic(v);
@@ -2646,7 +2738,7 @@ final class TimeShopUi {
                 listWrap.addView(buildWarehouseRow(activity,
                         new ShopIllustrationView(activity, ShopIllustrationView.Kind.CARD, "streak_protect", 0f),
                         "打卡保护卡 × " + state.streakProtectCards,
-                        "保护一次早睡或自律连续记录（上限 " + FocusState.MAX_STREAK_PROTECT_CARDS + " 张）",
+                        "补护早睡/自律连签 · 上限 " + FocusState.MAX_STREAK_PROTECT_CARDS + " 张",
                         state.streakProtectCards > 0 ? "使用" : "暂无",
                         state.streakProtectCards > 0, BLUE, () -> showStreakProtectPickerDialog(activity, state, () -> {
                             onUpdated.run();
@@ -2659,7 +2751,7 @@ final class TimeShopUi {
                 listWrap.addView(buildWarehouseRow(activity,
                         new ShopIllustrationView(activity, ShopIllustrationView.Kind.CARD, "vault_expand", 0f),
                         "储蓄扩容卡 × " + state.vaultExpandCards,
-                        "当前储蓄上限 " + state.vaultCapacityMinutes() + " / " + FocusState.MAX_VAULT_MINUTES + " 分钟",
+                        "储蓄上限 " + state.vaultCapacityMinutes() + "/" + FocusState.MAX_VAULT_MINUTES + " 分钟",
                         canUseExpand ? "使用 +15m" : state.canExpandVault() ? "暂无" : "已满级",
                         canUseExpand, BLUE, () -> {
                             if (state.useVaultExpandCard(System.currentTimeMillis(), ZoneId.systemDefault())) {
@@ -2686,8 +2778,8 @@ final class TimeShopUi {
                 if (state.canClaimIndulgentReward()) {
                     listWrap.addView(buildWarehouseRow(activity,
                             new ShopIllustrationView(activity, ShopIllustrationView.Kind.CARD, "indulgent_card", 0f),
-                            "待开启放纵卡宝箱 × " + state.pendingIndulgentRewards,
-                            "连续 3 天正常自律已解锁，点击开启领取",
+                            "待开箱放纵卡 × " + state.pendingIndulgentRewards,
+                            "3天自律已解锁 · 点击开启",
                             "开启宝箱", true, AMBER, () -> CardCraftUi.showChestRewardModal(activity, state, null, () -> {
                                 onUpdated.run();
                                 rebuild[0].run();
@@ -2698,9 +2790,9 @@ final class TimeShopUi {
                 boolean canInd = state.canActivateIndulgent(now, zone);
                 listWrap.addView(buildWarehouseRow(activity,
                         new ShopIllustrationView(activity, ShopIllustrationView.Kind.CARD, "indulgent_card", 0f),
-                        "放纵卡 × " + state.indulgentPasses + " / " + FocusState.MAX_INDULGENT_CARDS,
-                        indActive ? "放纵模式生效中（1:2）· 次日 04:00 恢复"
-                                : "开启后当日按 1:2 双倍兑换（分期 " + state.indulgentPaidMinutes + "/1200 分）",
+                        "放纵卡 × " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS,
+                        indActive ? "生效中（1:2）· 明日04:00恢复"
+                                : "当日 1:2 · 分期 " + state.indulgentPaidMinutes + "/1200分",
                         indActive ? "生效中" : canInd ? "开启 1:2" : "暂无",
                         canInd, AMBER, () -> confirmDialog(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
                                 "消耗 1 张放纵卡开启（1:2）？",
@@ -2719,9 +2811,9 @@ final class TimeShopUi {
                 boolean canLay = state.canActivateLayFlat(now, zone);
                 listWrap.addView(buildWarehouseRow(activity,
                         new ShopIllustrationView(activity, ShopIllustrationView.Kind.CARD, "lay_flat_card", 0f),
-                        "躺平卡 × " + state.layFlatCards + " / " + FocusState.MAX_LAY_FLAT_CARDS,
-                        layActive ? "躺平模式生效中 · 全天应用免限，明日 04:00 恢复"
-                                : "消耗 1 张今天全天所有应用不受限制",
+                        "躺平卡 × " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS,
+                        layActive ? "生效中 · 明日04:00恢复"
+                                : "全天免限 · 暂停当日兑换",
                         layActive ? "生效中" : canLay ? "开启免限" : "暂无",
                         canLay, PURPLE, () -> confirmDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
                                 "消耗 1 张躺平卡开启全天免限？",
@@ -2804,12 +2896,12 @@ final class TimeShopUi {
                 }
                 if (state.wishVouchers.isEmpty()) {
                     if (t == BAG_VOUCHER || !anyShown) {
-                        TextView empty = text(activity, "还没有已兑换的心愿券，去商店兑换一张现实奖励吧。", 12, MUTED, false);
+                        TextView empty = text(activity, "暂无心愿兑换券，可在时间商店兑换", 12, MUTED, false);
                         empty.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 14));
                         empty.setPadding(dp(activity, 14), dp(activity, 16), dp(activity, 14), dp(activity, 16));
                         listWrap.addView(empty, -1, -2);
                     } else {
-                        listWrap.addView(text(activity, "暂无已兑换心愿券", 12, MUTED, false));
+                        listWrap.addView(text(activity, "暂无心愿券", 12, MUTED, false));
                     }
                 } else {
                     List<FocusState.WishVoucher> sorted = new ArrayList<>();
@@ -2819,8 +2911,8 @@ final class TimeShopUi {
                         ShopCatalog.WishStyle ws = ShopCatalog.wishStyle(v.colorIndex);
                         int accent = isDark() ? ws.accentDark() : ws.accentLight();
                         String sub = v.used
-                                ? "已于 " + formatVoucherTime(v.usedMs) + " 核销"
-                                : "已兑 " + formatVoucherTime(v.issuedMs) + " · 价值 " + v.costMinutes + " 分钟";
+                                ? formatVoucherTime(v.usedMs) + " 已核销"
+                                : formatVoucherTime(v.issuedMs) + " · " + v.costMinutes + "分钟";
                         listWrap.addView(buildWarehouseRow(activity,
                                 new WishIconView(activity, v.iconIndex, v.used ? MUTED : accent),
                                 v.title, sub,
@@ -2844,7 +2936,7 @@ final class TimeShopUi {
         };
 
         rebuild[0].run();
-        bottomSheet(activity, "我的背包仓库", "统一管理时间道具、模式卡券、外观收藏与心愿兑换券", body);
+        bottomSheet(activity, "我的背包仓库", null, body);
     }
 
     private static LinearLayout buildWarehouseRow(MainActivity activity, View iconView, String title, String sub,
@@ -2860,15 +2952,24 @@ final class TimeShopUi {
         space(r, 10);
 
         LinearLayout info = column(activity);
-        info.addView(text(activity, title, 14, INK, true));
-        gap(info, 2);
-        info.addView(text(activity, sub, 11, MUTED, false));
+        TextView titleTv = text(activity, title, 14, INK, true);
+        titleTv.setSingleLine(true);
+        titleTv.setEllipsize(TextUtils.TruncateAt.END);
+        info.addView(titleTv);
+        if (sub != null && !sub.isEmpty()) {
+            gap(info, 2);
+            TextView subTv = text(activity, sub, 11, MUTED, false);
+            subTv.setSingleLine(true);
+            subTv.setEllipsize(TextUtils.TruncateAt.END);
+            info.addView(subTv);
+        }
         weight(r, info);
         space(r, 8);
 
         TextView btn = pillButton(activity, btnText,
                 enabled ? accentColor : SURFACE_SUBTLE,
                 enabled ? ON_ACCENT : MUTED, 10, 34);
+        btn.setSingleLine(true);
         btn.setTextSize(12);
         if (!enabled) btn.setBackground(shape(activity, SURFACE_SUBTLE, 10));
         else btn.setOnClickListener(v -> {

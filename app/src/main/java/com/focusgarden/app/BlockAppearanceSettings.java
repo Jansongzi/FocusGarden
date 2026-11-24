@@ -29,7 +29,7 @@ final class BlockAppearanceSettings {
         LinearLayout body = column(activity);
         LinearLayout rotateRow = row(activity);
         weight(rotateRow, titleWithInfo(activity, "轮换显示", 15, INK,
-                "轮换显示说明", "开启后，每次触发新的应用拦截都会按下方列表顺序切换展示不同拦截界面。"));
+                "轮换显示", "开启后每次拦截按列表顺序切换界面。"));
         SwitchView rotation = new SwitchView(activity, state.rotateBlockAppearances);
         rotation.setContentDescription("轮换显示");
         rotation.setOnToggleListener(enabled -> {

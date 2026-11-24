@@ -318,6 +318,7 @@ final class GardenUi {
 
     static TextView redeemPill(Context context, String label, boolean active) {
         TextView v = text(context, label, 13, active ? ON_ACCENT : BLUE_DISABLED_TEXT, true);
+        v.setSingleLine(true);
         v.setGravity(Gravity.CENTER);
         v.setMinWidth(dp(context, 96));
         v.setMinHeight(dp(context, 42));
@@ -398,6 +399,7 @@ final class GardenUi {
             int idx = i;
             boolean active = i == selectedIndex;
             TextView chip = text(context, labels[i], 13, active ? BLUE : INK_SUB, active);
+            chip.setSingleLine(true);
             chip.setGravity(Gravity.CENTER);
             chip.setMinHeight(dp(context, 36));
             chip.setPadding(dp(context, 10), dp(context, 6), dp(context, 10), dp(context, 6));

@@ -37,19 +37,19 @@ final class RedeemUi {
         return !ValueAnimator.areAnimatorsEnabled();
     }
 
-    static int voucherBg() { return isDark() ? 0xff152440 : 0xffe6eefc; }
-    static int voucherStroke() { return isDark() ? 0xff223659 : 0xffd5e3fa; }
-    static int voucherDash() { return isDark() ? 0xff2d4670 : 0xffbfd2f2; }
-    static int voucherTitleInk() { return isDark() ? 0xff9bb2d6 : 0xff5a6f90; }
-    static int voucherBigInk() { return isDark() ? 0xfff1f6ff : 0xff113b7e; }
-    static int voucherSubInk() { return isDark() ? 0xff8299bd : 0xff6b7e9b; }
-    static int haloBg() { return isDark() ? 0xff1e355e : 0xffd4e2fa; }
+    static int voucherBg() { return 0xff2576ff; }
+    static int voucherStroke() { return 0x28ffffff; }
+    static int voucherDash() { return 0x55ffffff; }
+    static int voucherTitleInk() { return 0xe0ffffff; }
+    static int voucherBigInk() { return ON_ACCENT; }
+    static int voucherSubInk() { return 0xc8ffffff; }
+    static int haloBg() { return 0x26ffffff; }
 
     static int goldFace() { return isDark() ? 0xffe6c068 : 0xfff3d184; }
     static int goldBase() { return isDark() ? 0xffa67c30 : 0xffc99d4c; }
     static int goldInk() { return 0xff442f08; }
-    static int goldDisabledBg() { return isDark() ? 0xff1d2b44 : 0xffdce5f4; }
-    static int goldDisabledInk() { return isDark() ? 0xff5f7394 : 0xff8a9bb5; }
+    static int goldDisabledBg() { return 0x28ffffff; }
+    static int goldDisabledInk() { return 0xd8ffffff; }
 
     static int blueFace() { return 0xff3278f6; }
     static int blueBase() { return 0xff194fb9; }
@@ -94,8 +94,10 @@ final class RedeemUi {
             cardRect.set(inset, inset, w - inset, h - inset);
 
             fillPaint.setStyle(Paint.Style.FILL);
-            fillPaint.setColor(voucherBg());
+            fillPaint.setShader(new LinearGradient(0f, 0f, w, h,
+                    0xff2576ff, BLUE_DARK, Shader.TileMode.CLAMP));
             canvas.drawRoundRect(cardRect, radius, radius, fillPaint);
+            fillPaint.setShader(null);
 
             strokePaint.setStrokeWidth(dp(getContext(), 1));
             strokePaint.setColor(voucherStroke());
@@ -211,7 +213,7 @@ final class RedeemUi {
             canvas.drawCircle(cx, cy, dp(getContext(), 2.3f), paint);
 
             drawSparkle(canvas, cx + m * 0.36f, cy - m * 0.30f, dp(getContext(), 5.5f), 0xfff5b942);
-            drawSparkle(canvas, cx - m * 0.36f, cy + m * 0.30f, dp(getContext(), 4.5f), 0xff6a9bf7);
+            drawSparkle(canvas, cx - m * 0.36f, cy + m * 0.30f, dp(getContext(), 4.5f), 0xccffffff);
         }
 
         private void drawSparkle(Canvas canvas, float sx, float sy, float r, int color) {

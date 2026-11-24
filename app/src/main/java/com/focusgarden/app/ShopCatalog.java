@@ -82,7 +82,7 @@ final class ShopCatalog {
 
     private static final List<PiggySkinPalette> PIGGY_SKINS = Collections.unmodifiableList(Arrays.asList(
             new PiggySkinPalette(
-                    "default", "经典粉桃", "温暖柔和的原版储蓄罐", 0,
+                    "default", "经典粉桃", "温暖柔粉储蓄罐", 0,
                     0xFFFFF0EB, 0xFFFFD9CE, 0xFFEDA899,
                     0xFFF7B0A0, 0xFFFFC4B5, 0xFFFFC8B9,
                     0xFF4A3531, 0x40FF8674, 0xFFBD6F60, 0xFFFFB88C,
@@ -94,7 +94,7 @@ final class ShopCatalog {
                     0xFFF8F4FF, 0x44DDD6FE, 0xFF463291, 0xFFA78BFA,
                     "stars"),
             new PiggySkinPalette(
-                    "piggy_gold", "黄金小猪", "把每一刻都镀上微光", 180,
+                    "piggy_gold", "黄金小猪", "每刻都镀微光", 180,
                     0xFFFFF2BE, 0xFFE0A42E, 0xFFB87B16,
                     0xFFFEE599, 0xFFFAD370, 0xFFE6AC3E,
                     0xFF5C3B07, 0x40F59E0B, 0xFF9C6611, 0xFFF6CD68,
@@ -112,13 +112,13 @@ final class ShopCatalog {
                     0xFF5C3545, 0x44FB7185, 0xFFC26C8F, 0xFFF9A8D4,
                     "sakura"),
             new PiggySkinPalette(
-                    "piggy_jade", "翡翠小猪", "温润青瓷伴你安静前行", 90,
+                    "piggy_jade", "翡翠小猪", "温润青瓷质感", 90,
                     0xFFECFCF4, 0xFFB6EBD0, 0xFF63B891,
                     0xFFCFF2DF, 0xFFC2EED7, 0xFFAAE3C6,
                     0xFF234F3C, 0x4034D399, 0xFF478F6E, 0xFF6EE7B7,
                     "jade"),
             new PiggySkinPalette(
-                    "piggy_obsidian", "墨夜小猪", "静谧夜色里的沉稳守护", 120,
+                    "piggy_obsidian", "墨夜小猪", "静谧夜色守护", 120,
                     0xFF394258, 0xFF1D2333, 0xFF6E7FA3,
                     0xFF49546E, 0xFF3A445C, 0xFF2B3347,
                     0xFFF5E6B8, 0x3393C5FD, 0xFF141824, 0xFF818CF8,
@@ -148,13 +148,13 @@ final class ShopCatalog {
                     "default", "暖金流光", "经典金色时间微粒", 0,
                     new int[]{0xfff3d184, 0xffffe599, 0xffe2b14c, 0xff6299ff}, "circle"),
             new RedeemEffectPalette(
-                    "fx_starlight", "星河蓝焰", "兑换时绽放蓝银星芒", 60,
+                    "fx_starlight", "星河蓝焰", "蓝银星芒动效", 60,
                     new int[]{0xff5fa8ff, 0xff9ecaff, 0xffd7ecff, 0xff3278f6}, "star"),
             new RedeemEffectPalette(
-                    "fx_sakura", "樱花纷飞", "兑换时飘起柔和花瓣", 60,
+                    "fx_sakura", "樱花纷飞", "柔和樱花动效", 60,
                     new int[]{0xffffb3cb, 0xffffd6e4, 0xffffeff4, 0xfff584aa}, "petal"),
             new RedeemEffectPalette(
-                    "fx_aurora", "极光彩粒", "兑换时闪烁蓝紫青星尘", 80,
+                    "fx_aurora", "极光彩粒", "极光星尘动效", 80,
                     new int[]{0xff5eead4, 0xffa78bfa, 0xff60a5fa, 0xffe0f2fe}, "star")
     ));
 
