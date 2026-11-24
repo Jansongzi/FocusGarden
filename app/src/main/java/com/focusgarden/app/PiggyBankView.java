@@ -257,7 +257,7 @@ final class PiggyBankView extends View {
 
         // Ground shadow
         oval.set(cx - rx * 0.78f, cy + ry * 1.07f, cx + rx * 0.80f, cy + ry * 1.24f);
-        fillPaint.setColor(0x1A324A6E);
+        fillPaint.setColor(GardenUi.isDark() ? 0x42000000 : 0x1A324A6E);
         canvas.drawOval(oval, fillPaint);
 
         // Warm outer halo when piggy bank reaches full 2h

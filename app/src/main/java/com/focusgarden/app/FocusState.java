@@ -29,10 +29,14 @@ final class FocusState {
     static final long MAX_DAILY_BASE_FREE_MS = MAX_DAILY_BASE_FREE_MINUTES * MINUTE;
     static final int SLEEP_CONFIG_COST_MINUTES = 35;
     static final int MODE_SWITCH_COST_MINUTES = 30;
+    static final int DAILY_CAP_CHANGE_COST_MINUTES = 30;
     static final int INDULGENT_UNLOCK_DAYS = 3;
     static final int MAX_INDULGENT_CARDS = 5;
     static final int INDULGENT_CARDS_PER_LAY_FLAT = 2;
     static final int MAX_LAY_FLAT_CARDS = 2;
+    static final int THEME_SYSTEM = 0;
+    static final int THEME_LIGHT = 1;
+    static final int THEME_DARK = 2;
 
     enum Category { LEARNING, LIMITED }
     enum Restriction { NONE, FOCUS, BEDTIME, BUDGET, SOBER }
@@ -166,9 +170,21 @@ final class FocusState {
         int relapseCount;
         long longestMs;
         boolean rewardClaimed;
+        String reason;
+        double dailySavingYuan;
+        int iconIndex;
+        final TreeSet<String> relapseDates = new TreeSet<>();
+        final Map<String, String> diaryNotes = new LinkedHashMap<>();
 
         Abstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
                    int completedCount, int relapseCount, long longestMs, boolean rewardClaimed) {
+            this(id, name, startedMs, targetHours, rewardMinutes, completedCount, relapseCount,
+                    longestMs, rewardClaimed, "", 0.0, 0);
+        }
+
+        Abstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
+                   int completedCount, int relapseCount, long longestMs, boolean rewardClaimed,
+                   String reason, double dailySavingYuan, int iconIndex) {
             this.id = id;
             this.name = name;
             this.startedMs = startedMs;
@@ -178,6 +194,10 @@ final class FocusState {
             this.relapseCount = Math.max(0, relapseCount);
             this.longestMs = Math.max(0L, longestMs);
             this.rewardClaimed = rewardClaimed;
+            this.reason = reason == null ? "" : reason.trim();
+            this.dailySavingYuan = (Double.isFinite(dailySavingYuan) && dailySavingYuan > 0.0)
+                    ? Math.min(100_000.0, dailySavingYuan) : 0.0;
+            this.iconIndex = Math.max(0, iconIndex);
         }
     }
 
@@ -239,10 +259,14 @@ final class FocusState {
     int sleepStart = 23 * 60;
     int sleepEnd = 7 * 60;
     long sleepTargetEndMs;
+    long sleepLockBypassEndMs;
+    String earlySleepPendingClaimDate = "";
     int earlySleepRewardMinutes = 10;
     int todoDailyCapMinutes = 30;
     int habitDailyCapMinutes = 25;
     int stepDailyCapMinutes = 30;
+    int themeMode = THEME_SYSTEM;
+    final Set<String> freeConfigUsedKeys = new LinkedHashSet<>();
 
     int presetWork = 25;
     int pomodoroWork = 25;
@@ -473,7 +497,7 @@ final class FocusState {
     }
 
     boolean canStartSober(long now, ZoneId zone) {
-        return !soberActive(now) && !active() && !offlineActive() && !bedtimeAt(now, zone);
+        return !soberActive(now) && !active() && !offlineActive() && !isSleepLocked(now, zone);
     }
 
     boolean startSober(String pkg, String label, int minutes, long now, ZoneId zone) {
@@ -619,12 +643,22 @@ final class FocusState {
         return date(now, zone).equals(modeSwitchDate);
     }
 
+    boolean isFirstConfigModifyFree(String key) {
+        return key != null && !key.isEmpty() && !freeConfigUsedKeys.contains(key);
+    }
+
+    void markFirstConfigModifyUsed(String key) {
+        if (key != null && !key.isEmpty()) freeConfigUsedKeys.add(key);
+    }
+
     ModeSwitchCheck checkSwitchMode(RateMode target, long now, ZoneId zone) {
         if (target == null || target == rateMode) return ModeSwitchCheck.SAME_MODE;
         if (!target.isNormal()) return ModeSwitchCheck.INDULGENT_LOCKED;
         syncResetDay(now, zone);
         if (hasSwitchedModeToday(now, zone)) return ModeSwitchCheck.DAILY_LIMIT_REACHED;
-        if (!canAfford(MODE_SWITCH_COST_MINUTES * MINUTE)) return ModeSwitchCheck.INSUFFICIENT_TIME;
+        if (!isFirstConfigModifyFree("mode_switch") && !canAfford(MODE_SWITCH_COST_MINUTES * MINUTE)) {
+            return ModeSwitchCheck.INSUFFICIENT_TIME;
+        }
         return ModeSwitchCheck.OK;
     }
 
@@ -632,7 +666,10 @@ final class FocusState {
         ModeSwitchCheck status = checkSwitchMode(target, now, zone);
         if (status != ModeSwitchCheck.OK) return status;
         String detail = rateMode.label + " → " + target.label;
-        if (!spendTime(MODE_SWITCH_COST_MINUTES * MINUTE, "CONFIG", "切换时间获取模式", detail, now, zone)) {
+        if (isFirstConfigModifyFree("mode_switch")) {
+            markFirstConfigModifyUsed("mode_switch");
+            logEvent(date(now, zone), now, "CONFIG", "首次免费切换时间获取模式", detail, 0L);
+        } else if (!spendTime(MODE_SWITCH_COST_MINUTES * MINUTE, "CONFIG", "切换时间获取模式", detail, now, zone)) {
             return ModeSwitchCheck.INSUFFICIENT_TIME;
         }
         rateMode = target;
@@ -745,8 +782,12 @@ final class FocusState {
         return true;
     }
 
+    boolean isLayFlat() {
+        return rateMode == RateMode.LAY_FLAT;
+    }
+
     long convertByMode(long effortMs) {
-        if (effortMs <= 0L) return 0L;
+        if (effortMs <= 0L || rateMode == RateMode.LAY_FLAT) return 0L;
         return (effortMs * rateMode.rewardNum) / rateMode.rewardDen;
     }
 
@@ -885,7 +926,7 @@ final class FocusState {
 
     int dailyCapChangeCostMinutes(int oldCap, int newCap) {
         if (oldCap == newCap) return 0;
-        return newCap > oldCap ? 15 : 10;
+        return DAILY_CAP_CHANGE_COST_MINUTES;
     }
 
     boolean offlineRunning() {
@@ -933,6 +974,7 @@ final class FocusState {
     }
 
     boolean canClaimOffline(long now) {
+        if (rateMode == RateMode.LAY_FLAT) return false;
         long total = offlineUnredeemedMs + offlineElapsed(now);
         return total >= MIN_OFFLINE_CLAIM_MS && claimableOfflineMs(now) >= MINUTE;
     }
@@ -944,6 +986,7 @@ final class FocusState {
 
     long claimOffline(long now, ZoneId zone) {
         syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
         long live = offlineElapsed(now);
         long totalRaw = offlineUnredeemedMs + live;
         if (totalRaw < MIN_OFFLINE_CLAIM_MS) return 0L;
@@ -989,7 +1032,7 @@ final class FocusState {
     Restriction restriction(String pkg, long now, ZoneId zone) {
         if (pkg == null || pkg.isEmpty()) return Restriction.NONE;
         if (rateMode == RateMode.LAY_FLAT) return Restriction.NONE;
-        if (bedtimeAt(now, zone)) return Restriction.BEDTIME;
+        if (isSleepLocked(now, zone)) return Restriction.BEDTIME;
         Rule rule = rules.get(pkg);
         if (isDisciplineLocked(now)) {
             return (rule != null && rule.category == Category.LEARNING)
@@ -1057,6 +1100,7 @@ final class FocusState {
     }
 
     private long earnByMode(Day day, long duration) {
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
         long numerator = duration * rateMode.rewardNum + creditRemainder;
         creditRemainder = (int) (numerator % rateMode.rewardDen);
         long value = numerator / rateMode.rewardDen;
@@ -1079,6 +1123,7 @@ final class FocusState {
 
     long depositToVault(long requestedMs, long now, ZoneId zone) {
         syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
         long cap = vaultRemainingCapacityMs();
         long moved = Math.max(0L, Math.min(requestedMs, Math.min(creditMs, cap)));
         if (moved <= 0L) return 0L;
@@ -1091,6 +1136,7 @@ final class FocusState {
 
     long withdrawFromVault(long requestedMs, long now, ZoneId zone) {
         syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
         long moved = Math.max(0L, Math.min(requestedMs, vaultMs));
         if (moved <= 0L) return 0L;
         vaultMs -= moved;
@@ -1127,7 +1173,7 @@ final class FocusState {
         day.checkIns++;
         long capLeft = remainingHabitCapMs(today);
         long raw = Math.max(0, habit.rewardMinutes) * MINUTE;
-        long reward = Math.min(raw, capLeft);
+        long reward = rateMode == RateMode.LAY_FLAT ? 0L : Math.min(raw, capLeft);
         day.habitEarnedMs += reward;
         if (reward > 0L) grant(day, reward);
         String detail = "连续 " + habit.streak(today) + " 天" + (reward < raw ? " · 今日习惯已达上限" : "");
@@ -1179,7 +1225,7 @@ final class FocusState {
     }
 
     boolean claimEarlySleep(long now, ZoneId zone) {
-        if (!isEarlySleepClaimWindow(now, zone)) return false;
+        if (rateMode == RateMode.LAY_FLAT || !isEarlySleepClaimWindow(now, zone)) return false;
         syncResetDay(now, zone);
         String date = date(now, zone);
         if (earlySleepFailed.contains(date) || !earlySleepDays.add(date)) return false;
@@ -1190,6 +1236,22 @@ final class FocusState {
         logEvent(date, now, "SLEEP", "早睡挑战打卡", "目标入睡 " + target, reward);
         evaluateDisciplinedDay(now, zone);
         return true;
+    }
+
+    long currentSleepWindowEndMs(long now, ZoneId zone) {
+        if (!bedtime || sleepStart == sleepEnd || !bedtimeAt(now, zone)) return 0L;
+        ZonedDateTime zdt = Instant.ofEpochMilli(now).atZone(zone);
+        LocalDate curDate = zdt.toLocalDate();
+        int minute = zdt.getHour() * 60 + zdt.getMinute();
+        LocalTime endClock = LocalTime.ofSecondOfDay(Math.max(0, Math.min(1439, sleepEnd)) * 60L);
+        LocalDate endDate = (sleepStart > sleepEnd && minute >= sleepStart) ? curDate.plusDays(1) : curDate;
+        return endDate.atTime(endClock).atZone(zone).toInstant().toEpochMilli();
+    }
+
+    boolean isSleepLocked(long now, ZoneId zone) {
+        if (!bedtime || rateMode == RateMode.LAY_FLAT || !bedtimeAt(now, zone)) return false;
+        long winEnd = currentSleepWindowEndMs(now, zone);
+        return winEnd > 0L && winEnd != sleepLockBypassEndMs;
     }
 
     long computeNextSleepEndMs(long afterMs, ZoneId zone) {
@@ -1209,10 +1271,16 @@ final class FocusState {
 
     void enableBedtime(long now, ZoneId zone) {
         bedtime = true;
+        sleepLockBypassEndMs = 0L;
         sleepTargetEndMs = computeNextSleepEndMs(now, zone);
     }
 
     boolean evaluateEarlySleep(long now, ZoneId zone) {
+        String curLogicDate = date(now, zone);
+        if (earlySleepPendingClaimDate != null && !earlySleepPendingClaimDate.isEmpty()
+                && curLogicDate.compareTo(earlySleepPendingClaimDate) > 0) {
+            earlySleepPendingClaimDate = "";
+        }
         if (!bedtime || sleepStart == sleepEnd) {
             if (sleepTargetEndMs != 0L) {
                 sleepTargetEndMs = 0L;
@@ -1229,29 +1297,107 @@ final class FocusState {
         long completedEnd = sleepTargetEndMs;
         sleepTargetEndMs = computeNextSleepEndMs(now, zone);
         String targetDate = date(completedEnd, zone);
-        if (earlySleepFailed.contains(targetDate) || !earlySleepDays.add(targetDate)) return true;
+        if (earlySleepFailed.contains(targetDate) || earlySleepDays.contains(targetDate)) return true;
 
+        if (targetDate.equals(curLogicDate)) {
+            earlySleepPendingClaimDate = targetDate;
+            logEvent(curLogicDate, now, "SLEEP", "完成夜间锁机 · 待领取奖励", "请主动领取早睡奖励", 0L);
+        }
+        return true;
+    }
+
+    boolean hasPendingEarlySleepReward(long now, ZoneId zone) {
+        evaluateEarlySleep(now, zone);
+        String d = date(now, zone);
+        return earlySleepPendingClaimDate != null
+                && earlySleepPendingClaimDate.equals(d)
+                && !earlySleepFailed.contains(d)
+                && !earlySleepDays.contains(d);
+    }
+
+    long claimPendingEarlySleep(long now, ZoneId zone) {
         syncResetDay(now, zone);
-        String rewardDay = date(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
+        if (!hasPendingEarlySleepReward(now, zone)) return 0L;
+        String d = date(now, zone);
+        earlySleepPendingClaimDate = "";
+        earlySleepDays.add(d);
         long reward = Math.max(0, earlySleepRewardMinutes) * MINUTE;
-        Day d = day(rewardDay);
-        if (reward > 0L) grant(d, reward);
-        logEvent(rewardDay, now, "SLEEP", "早睡挑战自动完成", "正常完成夜间锁机", reward);
+        Day day = day(d);
+        if (reward > 0L) grant(day, reward);
+        logEvent(d, now, "SLEEP", "领取早睡挑战奖励", "完成夜间锁机后主动领取", reward);
         evaluateDisciplinedDay(now, zone);
+        return reward;
+    }
+
+    boolean exitActiveSleepLock(long now, ZoneId zone) {
+        if (!isSleepLocked(now, zone)) return false;
+        long winEnd = currentSleepWindowEndMs(now, zone);
+        if (!spendTime(SLEEP_CONFIG_COST_MINUTES * MINUTE, "CONFIG",
+                "主动退出早睡锁机", "消耗 35 分钟提前退出，本轮不可领奖", now, zone)) {
+            return false;
+        }
+        sleepLockBypassEndMs = winEnd;
+        String curDate = date(now, zone);
+        String wakeDate = winEnd > 0L ? date(winEnd, zone) : curDate;
+        if (!earlySleepDays.contains(curDate) && earlySleepFailed.add(curDate)) {
+            logEvent(curDate, now, "SLEEP", "早睡挑战失败", "主动退出早睡锁机", 0L);
+        }
+        if (!earlySleepDays.contains(wakeDate)) earlySleepFailed.add(wakeDate);
+        if (curDate.equals(earlySleepPendingClaimDate) || wakeDate.equals(earlySleepPendingClaimDate)) {
+            earlySleepPendingClaimDate = "";
+        }
+        sleepTargetEndMs = computeNextSleepEndMs(Math.max(now, winEnd) + MINUTE, zone);
+        return true;
+    }
+
+    boolean delayActiveSleepLock(int newSleepStart, int newSleepEnd, long now, ZoneId zone) {
+        if (newSleepStart == newSleepEnd) return false;
+        long prevWinEnd = currentSleepWindowEndMs(now, zone);
+        long prevTarget = sleepTargetEndMs;
+        if (!spendTime(SLEEP_CONFIG_COST_MINUTES * MINUTE, "CONFIG",
+                "修改延后早睡时间", "消耗 35 分钟延后睡眠时段，本轮不可领奖", now, zone)) {
+            return false;
+        }
+        sleepStart = newSleepStart;
+        sleepEnd = newSleepEnd;
+        String curDate = date(now, zone);
+        String wakeDate = prevWinEnd > 0L ? date(prevWinEnd, zone)
+                : (prevTarget > 0L ? date(prevTarget, zone) : curDate);
+        if (!earlySleepDays.contains(curDate) && earlySleepFailed.add(curDate)) {
+            logEvent(curDate, now, "SLEEP", "早睡挑战失败", "修改延后早睡时间", 0L);
+        }
+        if (!earlySleepDays.contains(wakeDate)) earlySleepFailed.add(wakeDate);
+        earlySleepPendingClaimDate = "";
+        long afterBase = Math.max(now, Math.max(prevWinEnd, prevTarget) + MINUTE);
+        sleepTargetEndMs = computeNextSleepEndMs(afterBase, zone);
         return true;
     }
 
     boolean failEarlySleepByConfigChange(long now, ZoneId zone, String reason, boolean disableBedtime) {
         String date = date(now, zone);
         long prevTarget = sleepTargetEndMs;
+        long activeWinEnd = currentSleepWindowEndMs(now, zone);
         boolean newlyFailed = false;
         if (!earlySleepDays.contains(date) && earlySleepFailed.add(date)) {
             logEvent(date, now, "SLEEP", "早睡挑战失败", reason, 0L);
             newlyFailed = true;
         }
+        if (activeWinEnd > 0L) {
+            String winWakeDate = date(activeWinEnd, zone);
+            if (!earlySleepDays.contains(winWakeDate)) earlySleepFailed.add(winWakeDate);
+            if (winWakeDate.equals(earlySleepPendingClaimDate)) earlySleepPendingClaimDate = "";
+        }
+        if (prevTarget > 0L) {
+            String prevWakeDate = date(prevTarget, zone);
+            if (!earlySleepDays.contains(prevWakeDate)) earlySleepFailed.add(prevWakeDate);
+            if (prevWakeDate.equals(earlySleepPendingClaimDate)) earlySleepPendingClaimDate = "";
+        }
+        if (date.equals(earlySleepPendingClaimDate)) earlySleepPendingClaimDate = "";
         if (disableBedtime) {
             bedtime = false;
             sleepTargetEndMs = 0L;
+            sleepLockBypassEndMs = 0L;
         } else if (bedtime) {
             sleepTargetEndMs = computeNextSleepEndMs(Math.max(now, prevTarget + MINUTE), zone);
         }
@@ -1275,14 +1421,27 @@ final class FocusState {
     }
 
     void addAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes) {
+        addAbstinence(id, name, startedMs, targetHours, rewardMinutes, "", 0.0, 0);
+    }
+
+    void addAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
+                       String reason, double dailySavingYuan, int iconIndex) {
         if (id == null || name == null) return;
         String trimmed = name.trim();
         if (trimmed.isEmpty()) return;
-        abstinences.put(id, new Abstinence(id, trimmed, startedMs, targetHours, rewardMinutes, 0, 0, 0L, false));
+        abstinences.put(id, new Abstinence(id, trimmed, startedMs, targetHours, rewardMinutes,
+                0, 0, 0L, false, reason, dailySavingYuan, iconIndex));
         freeHabitSlotUsed = true;
     }
 
     void updateAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes, long now) {
+        Abstinence a = abstinences.get(id);
+        if (a == null) return;
+        updateAbstinence(id, name, startedMs, targetHours, rewardMinutes, a.reason, a.dailySavingYuan, a.iconIndex, now);
+    }
+
+    void updateAbstinence(String id, String name, long startedMs, int targetHours, int rewardMinutes,
+                          String reason, double dailySavingYuan, int iconIndex, long now) {
         Abstinence a = abstinences.get(id);
         if (a == null || name == null) return;
         String trimmed = name.trim();
@@ -1291,6 +1450,10 @@ final class FocusState {
         a.startedMs = startedMs;
         a.targetHours = Math.max(1, Math.min(8760, targetHours));
         a.rewardMinutes = Math.max(5, Math.min(480, rewardMinutes));
+        a.reason = reason == null ? "" : reason.trim();
+        a.dailySavingYuan = (Double.isFinite(dailySavingYuan) && dailySavingYuan > 0.0)
+                ? Math.min(100_000.0, dailySavingYuan) : 0.0;
+        a.iconIndex = Math.max(0, iconIndex);
         if (abstinenceElapsedMs(a, now) < abstinenceTargetMs(a)) {
             a.rewardClaimed = false;
         }
@@ -1302,8 +1465,9 @@ final class FocusState {
 
     long claimAbstinence(String id, long now, ZoneId zone) {
         Abstinence a = abstinences.get(id);
-        if (!canClaimAbstinence(a, now)) return 0L;
         syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
+        if (!canClaimAbstinence(a, now)) return 0L;
         long elapsed = abstinenceElapsedMs(a, now);
         a.rewardClaimed = true;
         a.completedCount++;
@@ -1321,17 +1485,66 @@ final class FocusState {
     }
 
     void resetAbstinence(String id, long now, ZoneId zone, boolean relapse) {
+        resetAbstinence(id, now, zone, relapse, "");
+    }
+
+    void resetAbstinence(String id, long now, ZoneId zone, boolean relapse, String diaryNote) {
         Abstinence a = abstinences.get(id);
         if (a == null) return;
         long elapsed = abstinenceElapsedMs(a, now);
         a.longestMs = Math.max(a.longestMs, elapsed);
-        if (relapse) a.relapseCount++;
+        if (relapse) {
+            String calDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toString();
+            if (a.relapseDates.add(calDate) || elapsed >= 0L) {
+                a.relapseCount++;
+            }
+            if (diaryNote != null && !diaryNote.trim().isEmpty()) {
+                a.diaryNotes.put(calDate, diaryNote.trim());
+            }
+        }
         a.startedMs = now;
         a.rewardClaimed = false;
         syncResetDay(now, zone);
         logEvent(date(now, zone), now, "HABIT",
                 (relapse ? "戒断破戒重计 · " : "开启新一轮戒断 · ") + a.name,
                 elapsed >= MINUTE ? "本轮坚持 " + (elapsed / MINUTE) + " 分钟" : "重新开始计时", 0L);
+    }
+
+    void setAbstinenceCalendarRecord(String id, LocalDate targetDate, boolean relapsed,
+                                     String note, long now, ZoneId zone) {
+        Abstinence a = abstinences.get(id);
+        if (a == null || targetDate == null) return;
+        LocalDate calToday = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
+        if (targetDate.isAfter(calToday)) return;
+        String key = targetDate.toString();
+        String trimmedNote = note == null ? "" : note.trim();
+        if (trimmedNote.isEmpty()) a.diaryNotes.remove(key);
+        else a.diaryNotes.put(key, trimmedNote);
+
+        boolean wasRelapsed = a.relapseDates.contains(key);
+        if (relapsed && !wasRelapsed) {
+            a.relapseDates.add(key);
+            a.relapseCount++;
+            LocalDate startDay = Instant.ofEpochMilli(a.startedMs).atZone(zone).toLocalDate();
+            if (!targetDate.isBefore(startDay)) {
+                a.longestMs = Math.max(a.longestMs, abstinenceElapsedMs(a, now));
+                if (targetDate.equals(calToday)) {
+                    a.startedMs = now;
+                    a.rewardClaimed = false;
+                } else {
+                    a.startedMs = Math.min(now, targetDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli());
+                    if (abstinenceElapsedMs(a, now) < abstinenceTargetMs(a)) {
+                        a.rewardClaimed = false;
+                    }
+                }
+            }
+            syncResetDay(now, zone);
+            logEvent(date(now, zone), now, "HABIT", "记录戒断复发 · " + a.name,
+                    key + (trimmedNote.isEmpty() ? "" : " · " + trimmedNote), 0L);
+        } else if (!relapsed && wasRelapsed) {
+            a.relapseDates.remove(key);
+            a.relapseCount = Math.max(0, a.relapseCount - 1);
+        }
     }
 
     int totalAbstinenceCompleted() {
@@ -1464,6 +1677,7 @@ final class FocusState {
 
     long claimTodos(long now, ZoneId zone) {
         syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
         LocalDate today = logicDate(now, zone);
         long capLeft = remainingTodoCapMs(today);
         if (capLeft <= 0L) return 0L;
@@ -1528,6 +1742,7 @@ final class FocusState {
 
     long claimSteps(long now, ZoneId zone) {
         syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
         LocalDate today = logicDate(now, zone);
         int units = claimableStepUnits(today);
         if (units <= 0) return 0L;
@@ -1677,6 +1892,7 @@ final class FocusState {
         offlineAccumulatedMs = 0L;
         bedtime = false;
         sleepTargetEndMs = 0L;
+        sleepLockBypassEndMs = 0L;
         stopSober(now, zone);
         logEvent(date(now, zone), now, "DEBUG", "调试一键解锁", "已解除全部自律、睡眠与目的模式锁定", 0L);
     }

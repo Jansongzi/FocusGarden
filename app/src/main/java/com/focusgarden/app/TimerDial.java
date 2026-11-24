@@ -60,7 +60,7 @@ final class TimerDial extends View {
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setStrokeWidth(GardenUi.dp(getContext(), 7));
-        paint.setColor(0xffe8effa);
+        paint.setColor(GardenUi.isDark() ? 0xff233044 : 0xffe8effa);
         canvas.drawOval(ring, paint);
 
         // Progress arc

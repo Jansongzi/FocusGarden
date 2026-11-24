@@ -187,7 +187,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
 
         ImageView icon = new ImageView(this);
         icon.setImageResource(R.drawable.ic_bubble);
-        icon.setColorFilter(GardenUi.CARD);
+        icon.setColorFilter(GardenUi.ON_ACCENT);
         int iconPx = GardenUi.dp(this, 12);
         orb.addView(icon, new FrameLayout.LayoutParams(iconPx, iconPx, Gravity.CENTER));
         container.addView(orb, new FrameLayout.LayoutParams(visualSize, visualSize, Gravity.CENTER));

@@ -435,6 +435,7 @@ public final class FocusService extends AccessibilityService {
         }
         ZoneId zone = ZoneId.systemDefault();
         boolean sober = store.state.soberActive(now);
+        boolean sleepLock = store.state.isSleepLocked(now, zone);
         if (sober && SystemClock.elapsedRealtime() < soberLaunchGraceUntil) {
             if (store.state.isSoberAllowed(foreground)) {
                 soberTargetSeen = true;
@@ -454,9 +455,9 @@ public final class FocusService extends AccessibilityService {
         }
 
         boolean layFlatNow = store.state.rateMode == FocusState.RateMode.LAY_FLAT;
-        boolean focusGuardActive = !layFlatNow
+        boolean focusGuardActive = !layFlatNow && !sleepLock
                 && store.state.guardSettingsDuringFocus
-                && (store.state.isDisciplineLocked(now) || store.state.bedtimeAt(now, zone))
+                && store.state.isDisciplineLocked(now)
                 && "com.android.settings".equals(foreground)
                 && now > settingsBypassUntil;
 
@@ -471,16 +472,16 @@ public final class FocusService extends AccessibilityService {
             return;
         }
 
-        boolean exempt = isSystemExempt(foreground, sober);
+        boolean strictExempt = sober || sleepLock;
+        boolean exempt = isSystemExempt(foreground, strictExempt);
         FocusState.Restriction reason = exempt
                 ? FocusState.Restriction.NONE
                 : store.state.restriction(foreground, now, zone);
 
-        // Bedtime violation tracking if limited app is ever foregrounded during bedtime
-        if (!layFlatNow && reason == FocusState.Restriction.NONE && foreground != null) {
+        // Bedtime violation tracking if limited app is ever foregrounded during active sleep lock
+        if (!layFlatNow && sleepLock && reason == FocusState.Restriction.NONE && foreground != null) {
             FocusState.Rule rule = store.state.rules.get(foreground);
-            if (rule != null && rule.category() == FocusState.Category.LIMITED
-                    && store.state.bedtimeAt(now, zone)) {
+            if (rule != null && rule.category() == FocusState.Category.LIMITED) {
                 if (store.state.markEarlySleepFailed(now, zone)) {
                     usageDirty = true;
                     flushUsage();
@@ -490,18 +491,19 @@ public final class FocusService extends AccessibilityService {
 
         if (reason == FocusState.Restriction.NONE) {
             hideOverlay();
-            if (sober) hideAwarenessBar();
+            if (sober || sleepLock) hideAwarenessBar();
             else updateAwarenessBar(now);
         } else {
             hideSoberPill();
             hideAwarenessBar();
-            if (showingGuard || !foreground.equals(blockedPackage) || reason != showing || overlay == null) {
+            String fgKey = foreground == null ? "" : foreground;
+            if (showingGuard || !fgKey.equals(blockedPackage) || reason != showing || overlay == null) {
                 flushUsage();
-                showOverlay(foreground, reason);
+                showOverlay(fgKey, reason);
             }
         }
 
-        boolean showPill = sober && reason == FocusState.Restriction.NONE
+        boolean showPill = sober && !sleepLock && reason == FocusState.Restriction.NONE
                 && foreground != null && !getPackageName().equals(foreground);
         if (showPill) updateSoberPill(now);
         else hideSoberPill();
@@ -514,6 +516,7 @@ public final class FocusService extends AccessibilityService {
                         : "自律倒计时  " + GardenUi.countdown(state.remaining(now));
                 case BUDGET -> "可用时间已耗尽";
                 case SOBER -> "目的模式进行中 · 剩余 " + SoberModeUi.clockText(state.soberRemaining(now));
+                case BEDTIME -> "早睡锁机中 · 明早 " + GardenUi.clock(state.sleepEnd) + " 解锁";
                 default -> "";
             };
             blockScreen.setStatus(status);
@@ -529,9 +532,10 @@ public final class FocusService extends AccessibilityService {
                 || reason == FocusState.Restriction.BEDTIME
                 || reason == FocusState.Restriction.SOBER))
                 || sober
+                || sleepLock
                 || store.state.isDisciplineLocked(now)
                 || store.state.bedtimeAt(now, zone);
-        if (focused == null && (sober || SystemClock.elapsedRealtime() < recoverWindowUntil)) {
+        if (focused == null && (sober || sleepLock || SystemClock.elapsedRealtime() < recoverWindowUntil)) {
             main.postDelayed(pulse, 250);
         } else if (keepTicking) {
             main.postDelayed(pulse, 1000);
@@ -623,7 +627,7 @@ public final class FocusService extends AccessibilityService {
     private void updateSoberPill(long now) {
         String remaining = SoberModeUi.clockText(store.state.soberRemaining(now));
         if (soberPill == null) {
-            TextView pill = GardenUi.pillButton(this, remaining, 0x994a5058, GardenUi.CARD, 19, 36);
+            TextView pill = GardenUi.pillButton(this, remaining, 0x994a5058, GardenUi.ON_ACCENT, 19, 36);
             pill.setBackground(GardenUi.touchCard(this, 0x994a5058, 0x44ffffff, 19));
             pill.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
             pill.setTextSize(13);
@@ -734,6 +738,7 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void showSettingsGuardOverlay() {
+        GardenUi.applyTheme(this, store.state.themeMode);
         blockScreen = null;
         blockedPackage = "com.android.settings";
         showing = FocusState.Restriction.FOCUS;
@@ -783,9 +788,8 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void showOverlay(String pkg, FocusState.Restriction reason) {
-        boolean soberOverlay = reason == FocusState.Restriction.SOBER;
-        boolean continuing = blockScreen != null && pkg.equals(blockedPackage)
-                && soberOverlay == (showing == FocusState.Restriction.SOBER);
+        boolean returnToApp = reason == FocusState.Restriction.SOBER || reason == FocusState.Restriction.BEDTIME;
+        boolean continuing = blockScreen != null && pkg.equals(blockedPackage) && reason == showing;
         blockedPackage = pkg;
         showing = reason;
         showingGuard = false;
@@ -798,8 +802,10 @@ public final class FocusService extends AccessibilityService {
         }
 
         FocusState.BlockAppearance appearance = state.nextBlockAppearance();
-        String buttonLabel = soberOverlay ? "返回目的模式" : "返回桌面";
-        Runnable primaryAction = soberOverlay
+        String buttonLabel = reason == FocusState.Restriction.SOBER ? "返回目的模式"
+                : reason == FocusState.Restriction.BEDTIME ? "返回早睡锁机"
+                : "返回桌面";
+        Runnable primaryAction = returnToApp
                 ? () -> {
                     startActivity(new Intent(this, MainActivity.class)
                             .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP));

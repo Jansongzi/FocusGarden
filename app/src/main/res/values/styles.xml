@@ -4,7 +4,7 @@
         <item name="android:colorAccent">#1A6BFF</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:windowBackground">#F4F6FA</item>
+        <item name="android:windowBackground">@color/paper</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
     <style name="Animation.FocusGarden.BottomSheet" parent="">

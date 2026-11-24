@@ -77,7 +77,7 @@ final class BlockScreen extends FrameLayout {
             if (!appearance.text().isEmpty()) gap(content, 20);
         }
         if (!appearance.text().isEmpty()) {
-            TextView heading = text(context, appearance.text(), appearance.textSize(), CARD, true);
+            TextView heading = text(context, appearance.text(), appearance.textSize(), ON_ACCENT, true);
             heading.setGravity(Gravity.CENTER);
             content.addView(heading, -1, -2);
         }

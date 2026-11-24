@@ -32,6 +32,7 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.FocusGarden">
         <activity android:name=".MainActivity" android:exported="true"
+            android:configChanges="uiMode"
             android:enableOnBackInvokedCallback="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

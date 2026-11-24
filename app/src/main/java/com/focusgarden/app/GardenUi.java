@@ -6,6 +6,7 @@ import android.app.Dialog;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Outline;
 import android.graphics.Paint;
@@ -27,6 +28,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewOutlineProvider;
 import android.view.Window;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
@@ -40,42 +42,166 @@ import java.util.Locale;
 import java.util.function.IntConsumer;
 
 final class GardenUi {
-    static final int PAPER = 0xfff4f6fa;
-    static final int CARD = 0xffffffff;
-    static final int SURFACE_SUBTLE = 0xfff7f9fc;
-    static final int BORDER = 0xffe8eef5;
-    static final int LINE = 0xffedf1f7;
+    static final int ON_ACCENT = 0xffffffff;
 
-    static final int INK = 0xff151d2b;
-    static final int INK_SUB = 0xff5c697c;
-    static final int MUTED = 0xff8a96a8;
+    static int PAPER = 0xfff4f6fa;
+    static int CARD = 0xffffffff;
+    static int SURFACE_SUBTLE = 0xfff7f9fc;
+    static int BORDER = 0xffe8eef5;
+    static int LINE = 0xffedf1f7;
 
-    static final int BLUE = 0xff1a6bff;
-    static final int BLUE_LIGHT = 0xff3b84ff;
-    static final int BLUE_DARK = 0xff1153d6;
-    static final int BLUE_SOFT = 0xffeaf2ff;
-    static final int BLUE_DISABLED_BG = 0xffeff3f9;
-    static final int BLUE_DISABLED_TEXT = 0xff9aa7bc;
+    static int INK = 0xff151d2b;
+    static int INK_SUB = 0xff5c697c;
+    static int MUTED = 0xff8a96a8;
 
-    static final int GREEN = 0xff16b364;
-    static final int GREEN_SOFT = 0xffe8f8f0;
-    static final int RED = 0xfff04438;
-    static final int RED_SOFT = 0xfffeeceb;
-    static final int AMBER = 0xfff59e0b;
-    static final int AMBER_SOFT = 0xfffef5e4;
-    static final int PURPLE = 0xff7c5cff;
-    static final int PURPLE_SOFT = 0xfff1eeff;
-    static final int CYAN = 0xff0ea5e9;
-    static final int CYAN_SOFT = 0xffe6f6fe;
+    static int BLUE = 0xff1a6bff;
+    static int BLUE_LIGHT = 0xff3b84ff;
+    static int BLUE_DARK = 0xff1153d6;
+    static int BLUE_SOFT = 0xffeaf2ff;
+    static int BLUE_DISABLED_BG = 0xffeff3f9;
+    static int BLUE_DISABLED_TEXT = 0xff9aa7bc;
+
+    static int GREEN = 0xff16b364;
+    static int GREEN_SOFT = 0xffe8f8f0;
+    static int RED = 0xfff04438;
+    static int RED_SOFT = 0xfffeeceb;
+    static int AMBER = 0xfff59e0b;
+    static int AMBER_SOFT = 0xfffef5e4;
+    static int PURPLE = 0xff7c5cff;
+    static int PURPLE_SOFT = 0xfff1eeff;
+    static int CYAN = 0xff0ea5e9;
+    static int CYAN_SOFT = 0xffe6f6fe;
 
     // Legacy aliases preserved for internal compatibility
-    static final int FOREST = 0xff1346b8;
-    static final int MINT = BLUE_SOFT;
-    static final int LIME = 0xffd7e8ff;
-    static final int PALE = 0xffd8e6ff;
-    static final int GOLD = AMBER;
-    static final int SAGE = GREEN;
-    static final int SAND = AMBER_SOFT;
+    static int FOREST = 0xff1346b8;
+    static int MINT = BLUE_SOFT;
+    static int LIME = 0xffd7e8ff;
+    static int PALE = 0xffd8e6ff;
+    static int GOLD = AMBER;
+    static int SAGE = GREEN;
+    static int SAND = AMBER_SOFT;
+
+    private static boolean darkTheme;
+
+    static boolean isDark() {
+        return darkTheme;
+    }
+
+    static boolean applyTheme(Context context, int themeMode) {
+        boolean shouldBeDark;
+        if (themeMode == FocusState.THEME_DARK) {
+            shouldBeDark = true;
+        } else if (themeMode == FocusState.THEME_LIGHT) {
+            shouldBeDark = false;
+        } else {
+            int mask = context == null ? 0
+                    : (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK);
+            shouldBeDark = mask == Configuration.UI_MODE_NIGHT_YES;
+        }
+        boolean changed = darkTheme != shouldBeDark;
+        darkTheme = shouldBeDark;
+        if (shouldBeDark) {
+            PAPER = 0xff0b0f17;
+            CARD = 0xff151c28;
+            SURFACE_SUBTLE = 0xff1c2534;
+            BORDER = 0xff273246;
+            LINE = 0xff222c3d;
+            INK = 0xfff1f5f9;
+            INK_SUB = 0xff9fb0c7;
+            MUTED = 0xff6e7f96;
+            BLUE = 0xff478cff;
+            BLUE_LIGHT = 0xff609cff;
+            BLUE_DARK = 0xff1d56c9;
+            BLUE_SOFT = 0xff17294a;
+            BLUE_DISABLED_BG = 0xff1c2534;
+            BLUE_DISABLED_TEXT = 0xff586880;
+            GREEN = 0xff2bd47d;
+            GREEN_SOFT = 0xff122f24;
+            RED = 0xfff96056;
+            RED_SOFT = 0xff35191d;
+            AMBER = 0xfffbb02d;
+            AMBER_SOFT = 0xff332611;
+            PURPLE = 0xff9b82ff;
+            PURPLE_SOFT = 0xff251d42;
+            CYAN = 0xff38bdf8;
+            CYAN_SOFT = 0xff112b3c;
+            FOREST = 0xff2d6be8;
+        } else {
+            PAPER = 0xfff4f6fa;
+            CARD = 0xffffffff;
+            SURFACE_SUBTLE = 0xfff7f9fc;
+            BORDER = 0xffe8eef5;
+            LINE = 0xffedf1f7;
+            INK = 0xff151d2b;
+            INK_SUB = 0xff5c697c;
+            MUTED = 0xff8a96a8;
+            BLUE = 0xff1a6bff;
+            BLUE_LIGHT = 0xff3b84ff;
+            BLUE_DARK = 0xff1153d6;
+            BLUE_SOFT = 0xffeaf2ff;
+            BLUE_DISABLED_BG = 0xffeff3f9;
+            BLUE_DISABLED_TEXT = 0xff9aa7bc;
+            GREEN = 0xff16b364;
+            GREEN_SOFT = 0xffe8f8f0;
+            RED = 0xfff04438;
+            RED_SOFT = 0xfffeeceb;
+            AMBER = 0xfff59e0b;
+            AMBER_SOFT = 0xfffef5e4;
+            PURPLE = 0xff7c5cff;
+            PURPLE_SOFT = 0xfff1eeff;
+            CYAN = 0xff0ea5e9;
+            CYAN_SOFT = 0xffe6f6fe;
+            FOREST = 0xff1346b8;
+        }
+        MINT = BLUE_SOFT;
+        LIME = darkTheme ? 0xff1e355e : 0xffd7e8ff;
+        PALE = 0xffd8e6ff;
+        GOLD = AMBER;
+        SAGE = GREEN;
+        SAND = AMBER_SOFT;
+        return changed;
+    }
+
+    static int blueStroke() {
+        return darkTheme ? 0xff294980 : 0xffcfe0ff;
+    }
+
+    static int greenStroke() {
+        return darkTheme ? 0xff1f5740 : 0xffbcecd3;
+    }
+
+    static int redStroke() {
+        return darkTheme ? 0xff632a30 : 0xfffbd5d2;
+    }
+
+    static int amberStroke() {
+        return darkTheme ? 0xff5e451c : 0xfff5dcb1;
+    }
+
+    static int cyanStroke() {
+        return darkTheme ? 0xff1c4d6b : 0xffccebfb;
+    }
+
+    static int mutedCircleBorder() {
+        return darkTheme ? 0xff3b4961 : 0xffc6d2e2;
+    }
+
+    static void applySystemBars(Window win, boolean darkBackground) {
+        if (win == null) return;
+        if (Build.VERSION.SDK_INT >= 30) {
+            var controller = win.getInsetsController();
+            if (controller != null) {
+                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                controller.setSystemBarsAppearance(darkBackground ? 0 : mask, mask);
+            }
+        } else {
+            View decor = win.getDecorView();
+            int current = decor.getSystemUiVisibility();
+            int mask = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            decor.setSystemUiVisibility(darkBackground ? (current & ~mask) : (current | mask));
+        }
+    }
 
     static int dp(Context context, float size) {
         return Math.round(size * context.getResources().getDisplayMetrics().density);
@@ -171,11 +297,11 @@ final class GardenUi {
     }
 
     static TextView button(Context context, String title, boolean primary) {
-        return pillButton(context, title, primary ? BLUE : BLUE_SOFT, primary ? CARD : BLUE, 14, 44);
+        return pillButton(context, title, primary ? BLUE : BLUE_SOFT, primary ? ON_ACCENT : BLUE, 14, 44);
     }
 
     static TextView primaryButton(Context context, String title) {
-        return pillButton(context, title, BLUE, CARD, 14, 46);
+        return pillButton(context, title, BLUE, ON_ACCENT, 14, 46);
     }
 
     static TextView secondaryButton(Context context, String title) {
@@ -187,7 +313,7 @@ final class GardenUi {
     }
 
     static TextView redeemPill(Context context, String label, boolean active) {
-        TextView v = text(context, label, 13, active ? CARD : BLUE_DISABLED_TEXT, true);
+        TextView v = text(context, label, 13, active ? ON_ACCENT : BLUE_DISABLED_TEXT, true);
         v.setGravity(Gravity.CENTER);
         v.setMinWidth(dp(context, 96));
         v.setMinHeight(dp(context, 42));
@@ -257,7 +383,7 @@ final class GardenUi {
         input.setInputType(inputType);
         input.setSingleLine(true);
         if (initial != null) input.setText(initial);
-        input.setBackground(cardBg(context, SURFACE_SUBTLE, 0xffd9e2ef, 14));
+        input.setBackground(cardBg(context, SURFACE_SUBTLE, BORDER, 14));
         input.setPadding(dp(context, 14), dp(context, 12), dp(context, 14), dp(context, 12));
         return input;
     }
@@ -335,7 +461,7 @@ final class GardenUi {
         grip.setContentDescription("向下拖动关闭面板");
         grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         View handle = new View(activity);
-        handle.setBackground(shape(activity, 0xffd5dde9, 3));
+        handle.setBackground(shape(activity, darkTheme ? 0xff3a4860 : 0xffd5dde9, 3));
         grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, 42), dp(activity, 4), Gravity.CENTER));
         sheet.addView(grip, -1, dp(activity, 34));
         int touchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
@@ -421,7 +547,7 @@ final class GardenUi {
             win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
                     | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
             win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            win.setDimAmount(0.42f);
+            win.setDimAmount(darkTheme ? 0.62f : 0.42f);
             win.setWindowAnimations(R.style.Animation_FocusGarden_BottomSheet);
         }
         dialog.show();
@@ -490,7 +616,7 @@ final class GardenUi {
             }
             if (confirmLabel != null) {
                 TextView okBtn = pillButton(activity, confirmLabel,
-                        danger ? RED : BLUE, CARD, 13, 44);
+                        danger ? RED : BLUE, ON_ACCENT, 13, 44);
                 okBtn.setOnClickListener(v -> {
                     tapHaptic(v);
                     dialog.dismiss();
@@ -720,7 +846,7 @@ final class GardenUi {
             float radius = h / 2f;
             track.set(0, 0, w, h);
 
-            paint.setColor(blend(0xffdce4f0, BLUE, thumbPos));
+            paint.setColor(blend(darkTheme ? 0xff2c384c : 0xffdce4f0, BLUE, thumbPos));
             canvas.drawRoundRect(track, radius, radius, paint);
 
             float thumbR = (h - pad * 2f) / 2f;
@@ -731,7 +857,7 @@ final class GardenUi {
 
             paint.setColor(0x1f000000);
             canvas.drawCircle(cx, cy + dp(getContext(), 1), thumbR, paint);
-            paint.setColor(CARD);
+            paint.setColor(ON_ACCENT);
             canvas.drawCircle(cx, cy, thumbR, paint);
         }
 
@@ -748,11 +874,13 @@ final class GardenUi {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private float progress;
-        private int trackColor = LINE;
-        private int fillColor = BLUE;
+        private int trackColor;
+        private int fillColor;
 
         CapsuleBar(Context context) {
             super(context);
+            this.trackColor = LINE;
+            this.fillColor = BLUE;
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         }
 
@@ -815,7 +943,7 @@ final class GardenUi {
             float radius = barW * 0.45f;
             for (int i = 0; i < n; i++) {
                 int state = buckets[i];
-                paint.setColor(state == 2 ? BLUE : state == 1 ? 0xfff5c52c : 0xffe4ebf4);
+                paint.setColor(state == 2 ? BLUE : state == 1 ? 0xfff5c52c : (darkTheme ? 0xff243044 : 0xffe4ebf4));
                 float left = i * step + offset;
                 slot.set(left, 0, left + barW, h);
                 canvas.drawRoundRect(slot, radius, radius, paint);

@@ -1,12 +1,16 @@
 # 界面参照
 
-截图来自 Android 15 模拟器，展示 `v1.6.1` 界面与测试记录。构建或验证说明见 [项目 README](../README.md)。
+截图来自 Android 15 模拟器，展示 `v1.6.2` 界面（含浅色 / 深色模式、躺平紫卡、折叠兑换卡、续步风格戒断与复发日历、全屏早睡锁机及拦截）。构建或验证说明见 [项目 README](../README.md)。
 
 | 界面 | 截图 |
 | --- | --- |
-| 首页 | [home.png](screenshots/home.png) |
-| 兑换 | [redeem.png](screenshots/redeem.png) |
-| 戒断 | [abstain.png](screenshots/abstain.png) |
+| 首页（浅色） | [home.png](screenshots/home.png) |
+| 首页（深色） | [home_dark.png](screenshots/home_dark.png) |
+| 首页（躺平模式紫卡） | [home_layflat.png](screenshots/home_layflat.png) |
+| 兑换（折叠卡片） | [redeem.png](screenshots/redeem.png) |
+| 戒断主页 | [abstain.png](screenshots/abstain.png) |
+| 戒断详情与复发日记 | [abstain_detail.png](screenshots/abstain_detail.png) |
+| 早睡全屏锁机 | [sleep_lock.png](screenshots/sleep_lock.png) |
 | 洞察 | [insights.png](screenshots/insights.png) |
 | 应用规则 | [rules.png](screenshots/rules.png) |
 | 拦截页 | [block.png](screenshots/block.png) |

@@ -24,6 +24,8 @@ final class FocusStateCheck {
         equal(15 * MINUTE, FocusState.MAX_DAILY_BASE_FREE_MS);
         equal(35, FocusState.SLEEP_CONFIG_COST_MINUTES);
         equal(30, FocusState.MODE_SWITCH_COST_MINUTES);
+        equal(30, FocusState.DAILY_CAP_CHANGE_COST_MINUTES);
+        equal(FocusState.THEME_SYSTEM, state.themeMode);
         equal(3, FocusState.INDULGENT_UNLOCK_DAYS);
         equal(5, FocusState.MAX_INDULGENT_CARDS);
         equal(2, FocusState.INDULGENT_CARDS_PER_LAY_FLAT);
@@ -301,32 +303,34 @@ final class FocusStateCheck {
         equal(1, resetTest.day("2026-11-23").events.size());
         equal("RESET", resetTest.day("2026-11-23").events.get(0).type());
 
-        // Mode switching: INDULGENT blocked, <30m blocked, 30m 1/day limit, unlocked again after next 04:00 AM
+        // Mode switching: 1st switch is free (with reminder); 2nd+ costs 30m, 1/day limit, unlocked again after next 04:00 AM
         var sw = new FocusState();
         sw.creditMs = 20 * MINUTE;
         sw.vaultMs = 0L;
         equal(FocusState.ModeSwitchCheck.SAME_MODE, sw.checkSwitchMode(FocusState.RateMode.MODERATE, noon, UTC));
         equal(FocusState.ModeSwitchCheck.INDULGENT_LOCKED, sw.checkSwitchMode(FocusState.RateMode.INDULGENT, noon, UTC));
-        equal(FocusState.ModeSwitchCheck.INSUFFICIENT_TIME, sw.checkSwitchMode(FocusState.RateMode.RELAXED, noon, UTC));
-        sw.vaultMs = 20 * MINUTE; // total 40m spendable
+        equal(true, sw.isFirstConfigModifyFree("mode_switch"));
         equal(FocusState.ModeSwitchCheck.OK, sw.checkSwitchMode(FocusState.RateMode.RELAXED, noon, UTC));
         equal(FocusState.ModeSwitchCheck.OK, sw.switchMode(FocusState.RateMode.RELAXED, noon, UTC));
         equal(FocusState.RateMode.RELAXED, sw.rateMode);
-        equal(0L, sw.creditMs);
-        equal(10 * MINUTE, sw.vaultMs);
+        equal(20 * MINUTE, sw.creditMs); // 1st time free!
+        equal(false, sw.isFirstConfigModifyFree("mode_switch"));
         equal("2026-11-22", sw.modeSwitchDate);
         // Same day 2nd attempt (even with extra credit) blocked by daily limit
         sw.creditMs = 40 * MINUTE;
         equal(FocusState.ModeSwitchCheck.DAILY_LIMIT_REACHED,
                 sw.checkSwitchMode(FocusState.RateMode.SCHOLAR, at("2026-11-23T03:30:00Z"), UTC));
-        // After 04:00 AM reset: old 40m credit resets, deposit/earn 35m credit -> switching succeeds again
+        // After 04:00 AM reset: 2nd lifetime switch requires >=30m spendable and deducts 30m
         long nextDayNoon = at("2026-11-23T12:00:00Z");
         sw.syncResetDay(nextDayNoon, UTC);
         equal(0L, sw.creditMs);
-        sw.creditMs = 35 * MINUTE;
+        sw.creditMs = 20 * MINUTE;
+        equal(FocusState.ModeSwitchCheck.INSUFFICIENT_TIME, sw.checkSwitchMode(FocusState.RateMode.SCHOLAR, nextDayNoon, UTC));
+        sw.vaultMs = 15 * MINUTE; // total 35m spendable -> deducts 20m credit + 10m vault = 5m vault left
         equal(FocusState.ModeSwitchCheck.OK, sw.switchMode(FocusState.RateMode.SCHOLAR, nextDayNoon, UTC));
         equal(FocusState.RateMode.SCHOLAR, sw.rateMode);
-        equal(5 * MINUTE, sw.creditMs);
+        equal(0L, sw.creditMs);
+        equal(5 * MINUTE, sw.vaultMs);
 
         // 3 cumulative normal disciplined days unlock INDULGENT (1:2), 1-day activation & auto-restore at next 04:00 AM
         var ind = new FocusState();
@@ -482,8 +486,9 @@ final class FocusStateCheck {
         equal(10, eco.habitChangeCostMinutes(null, 5));
         eco.addHabit("h0", new FocusState.Habit("Read", 5, ""));
         equal(15, eco.habitChangeCostMinutes(eco.habits.get("h0"), 8));
-        equal(15, eco.dailyCapChangeCostMinutes(30, 45));
-        equal(10, eco.dailyCapChangeCostMinutes(30, 20));
+        equal(30, eco.dailyCapChangeCostMinutes(30, 45));
+        equal(30, eco.dailyCapChangeCostMinutes(30, 20));
+        equal(0, eco.dailyCapChangeCostMinutes(30, 30));
 
         equal(true, eco.spendTime(10 * MINUTE, "CONFIG", "调整上限", "待办改为45分", noon + 2_000, UTC));
         equal(0L, eco.vaultMs);
@@ -661,7 +666,7 @@ final class FocusStateCheck {
         cards.syncResetDay(at("2026-11-21T04:00:00Z"), UTC);
         equal(FocusState.RateMode.SCHOLAR, cards.rateMode);
 
-        // 2. Early Sleep automatic completion & failure on mid-night edit or mid-sleep enable
+        // 2. Early Sleep manual next-day claim + active sleep lock 35m exit/delay failure
         var sleep = new FocusState();
         sleep.sleepStart = 1380; // 23:00
         sleep.sleepEnd = 420;    // 07:00
@@ -669,36 +674,64 @@ final class FocusStateCheck {
         equal(at("2026-11-25T07:00:00Z"), sleep.sleepTargetEndMs);
         equal(false, sleep.evaluateEarlySleep(at("2026-11-25T06:59:59Z"), UTC));
         equal(true, sleep.evaluateEarlySleep(at("2026-11-25T07:00:00Z"), UTC));
-        equal(true, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
+        // v1.6.2: reward is NOT auto-granted; waits for manual claim
+        equal(0L, sleep.creditMs);
+        equal(false, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
+        equal(true, sleep.hasPendingEarlySleepReward(at("2026-11-25T07:05:00Z"), UTC));
+        equal(10 * MINUTE, sleep.claimPendingEarlySleep(at("2026-11-25T08:00:00Z"), UTC));
         equal(10 * MINUTE, sleep.creditMs);
+        equal(true, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
+        equal(false, sleep.hasPendingEarlySleepReward(at("2026-11-25T08:05:00Z"), UTC));
+        equal(0L, sleep.claimPendingEarlySleep(at("2026-11-25T08:05:00Z"), UTC));
 
-        // Enabling bedtime at 06:50 inside an existing sleep window must require the next full 23:00->07:00 cycle
+        // Enabling bedtime at 06:50 inside an existing sleep window must lock now, but require next full 23:00->07:00 cycle for reward
         var midEnable = new FocusState();
         midEnable.sleepStart = 1380;
         midEnable.sleepEnd = 420;
         midEnable.enableBedtime(at("2026-11-26T06:50:00Z"), UTC);
+        equal(true, midEnable.isSleepLocked(at("2026-11-26T06:50:00Z"), UTC));
         equal(at("2026-11-27T07:00:00Z"), midEnable.sleepTargetEndMs);
         equal(false, midEnable.evaluateEarlySleep(at("2026-11-26T07:00:00Z"), UTC));
 
-        // Modifying sleep window at 23:30 fails today and does NOT award tomorrow 07:00
+        // Active sleep lock 35m paid exit & delay prevent claiming tomorrow's reward
+        var lockExit = new FocusState();
+        lockExit.sleepStart = 1380;
+        lockExit.sleepEnd = 420;
+        lockExit.creditMs = 40 * MINUTE;
+        lockExit.enableBedtime(at("2026-11-27T22:00:00Z"), UTC);
+        long sleepNight = at("2026-11-27T23:30:00Z");
+        equal(true, lockExit.isSleepLocked(sleepNight, UTC));
+        equal(BEDTIME, lockExit.restriction(VIDEO, sleepNight, UTC));
+        equal(true, lockExit.exitActiveSleepLock(sleepNight, UTC));
+        equal(5 * MINUTE, lockExit.creditMs);
+        equal(false, lockExit.isSleepLocked(sleepNight + MINUTE, UTC));
+        equal(NONE, lockExit.restriction(VIDEO, sleepNight + MINUTE, UTC));
+        equal(true, lockExit.earlySleepFailedOn(LocalDate.parse("2026-11-28")));
+        equal(false, lockExit.hasPendingEarlySleepReward(at("2026-11-28T07:05:00Z"), UTC));
+
         var sleepFail = new FocusState();
         sleepFail.sleepStart = 1380;
         sleepFail.sleepEnd = 420;
+        sleepFail.creditMs = 40 * MINUTE;
         sleepFail.enableBedtime(at("2026-11-27T22:00:00Z"), UTC);
-        sleepFail.sleepStart = 1320; // 22:00
-        equal(true, sleepFail.failEarlySleepByConfigChange(at("2026-11-27T23:30:00Z"), UTC, "调整入睡时间", false));
+        equal(true, sleepFail.delayActiveSleepLock(1435, 420, at("2026-11-27T23:30:00Z"), UTC)); // push start to 23:55
+        equal(5 * MINUTE, sleepFail.creditMs);
+        equal(1435, sleepFail.sleepStart);
+        equal(false, sleepFail.isSleepLocked(at("2026-11-27T23:31:00Z"), UTC));
         equal(true, sleepFail.earlySleepFailedOn(LocalDate.parse("2026-11-27")));
-        equal(false, sleepFail.evaluateEarlySleep(at("2026-11-28T07:05:00Z"), UTC));
-        equal(0L, sleepFail.creditMs);
+        equal(false, sleepFail.hasPendingEarlySleepReward(at("2026-11-28T07:05:00Z"), UTC));
         // Next clean overnight cycle completes properly
         equal(true, sleepFail.evaluateEarlySleep(at("2026-11-29T07:05:00Z"), UTC));
-        equal(true, sleepFail.earlySleepChecked(LocalDate.parse("2026-11-29")));
+        equal(true, sleepFail.hasPendingEarlySleepReward(at("2026-11-29T07:05:00Z"), UTC));
 
-        // 3. Abstinence lifecycle + anti-reclaim edit guard + permanent stats
+        // 3. Abstinence lifecycle + anti-reclaim edit guard + calendar relapse diary + permanent stats
         var abs = new FocusState();
         long startAbs = at("2026-11-20T08:00:00Z");
-        abs.addAbstinence("a1", "戒熬夜刷手机", startAbs, 24, 25);
+        abs.addAbstinence("a1", "戒熬夜刷手机", startAbs, 24, 25, "想要早睡精力更好", 15.0, 1);
         var item = abs.abstinences.get("a1");
+        equal("想要早睡精力更好", item.reason);
+        equal(15.0, item.dailySavingYuan);
+        equal(1, item.iconIndex);
         equal(false, abs.abstinenceReached(item, startAbs + 23 * 60 * MINUTE));
         equal(0L, abs.claimAbstinence("a1", startAbs + 23 * 60 * MINUTE, UTC));
         long hitAbs = startAbs + 24 * 60 * MINUTE;
@@ -712,9 +745,63 @@ final class FocusStateCheck {
         // Next round & relapse tracking
         abs.resetAbstinence("a1", hitAbs + 3 * MINUTE, UTC, false);
         equal(true, abs.longestAbstinenceMs(hitAbs + 3 * MINUTE) >= 24 * 60 * MINUTE);
-        abs.resetAbstinence("a1", hitAbs + 10 * MINUTE, UTC, true);
+        abs.resetAbstinence("a1", hitAbs + 10 * MINUTE, UTC, true, "刷太晚");
         equal(1, item.relapseCount);
+        equal(true, item.relapseDates.contains("2026-11-21"));
+        equal("刷太晚", item.diaryNotes.get("2026-11-21"));
         equal(1, abs.totalAbstinenceCompleted());
+        // Calendar diary edit & clear cross
+        LocalDate nov22 = LocalDate.parse("2026-11-22");
+        long nov22Noon = at("2026-11-22T12:00:00Z");
+        abs.setAbstinenceCalendarRecord("a1", nov22, true, "压力大破戒一次", nov22Noon, UTC);
+        equal(2, item.relapseCount);
+        equal(true, item.relapseDates.contains("2026-11-22"));
+        equal("压力大破戒一次", item.diaryNotes.get("2026-11-22"));
+        equal(nov22Noon, item.startedMs);
+        abs.setAbstinenceCalendarRecord("a1", nov22, false, "补充复盘", nov22Noon + MINUTE, UTC);
+        equal(1, item.relapseCount);
+        equal(false, item.relapseDates.contains("2026-11-22"));
+        equal("补充复盘", item.diaryNotes.get("2026-11-22"));
+
+        // 4. Lay-Flat Mode v1.6.2 freeze: zero time earning/claiming & vault untouched
+        var lf = new FocusState();
+        lf.rules.put(STUDY, new FocusState.Rule("Study", LEARNING, 0));
+        lf.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED, 0));
+        lf.creditMs = 15 * MINUTE;
+        lf.vaultMs = 25 * MINUTE;
+        lf.layFlatCards = 1;
+        long lfNow = at("2026-11-22T12:00:00Z");
+        LocalDate lfDay = LocalDate.parse("2026-11-22");
+        lf.addTodo("lt1", "Write notes", 10, lfDay, lfNow - 20 * MINUTE);
+        lf.toggleTodo("lt1", lfDay);
+        lf.recordStepCounter(100, lfDay);
+        lf.recordStepCounter(4100, lfDay);
+        lf.addAbstinence("la1", "戒短视频", lfNow - 30L * 60 * MINUTE, 24, 20);
+        lf.earlySleepPendingClaimDate = "2026-11-22";
+        lf.startOffline(lfNow - 10 * MINUTE);
+        equal(true, lf.activateLayFlatMode(lfNow, UTC));
+        equal(true, lf.isLayFlat());
+        // Learning, offline, todo, steps, abstinence, early sleep, vault all frozen during LAY_FLAT
+        lf.addUsage(STUDY, lfNow, lfNow + 9 * MINUTE, UTC);
+        equal(15 * MINUTE, lf.creditMs);
+        equal(false, lf.canClaimOffline(lfNow + 10 * MINUTE));
+        equal(0L, lf.claimOffline(lfNow + 10 * MINUTE, UTC));
+        equal(0L, lf.claimTodos(lfNow + 10 * MINUTE, UTC));
+        equal(false, lf.todos.get("lt1").claimed);
+        equal(0L, lf.claimSteps(lfNow + 10 * MINUTE, UTC));
+        equal(0L, lf.claimAbstinence("la1", lfNow + 10 * MINUTE, UTC));
+        equal(false, lf.abstinences.get("la1").rewardClaimed);
+        equal(0L, lf.claimPendingEarlySleep(lfNow + 10 * MINUTE, UTC));
+        equal(0L, lf.depositToVault(10 * MINUTE, lfNow + 10 * MINUTE, UTC));
+        equal(0L, lf.withdrawFromVault(10 * MINUTE, lfNow + 10 * MINUTE, UTC));
+        equal(25 * MINUTE, lf.vaultMs);
+        // Next day 04:00 reset restores MODERATE and preserves vault & claimable rewards
+        lf.syncResetDay(at("2026-11-23T04:00:00Z"), UTC);
+        equal(FocusState.RateMode.MODERATE, lf.rateMode);
+        equal(25 * MINUTE, lf.vaultMs);
+        equal(0L, lf.creditMs);
+        equal(10 * MINUTE, lf.claimTodos(at("2026-11-23T04:01:00Z"), UTC));
+        equal(20 * MINUTE, lf.claimAbstinence("la1", at("2026-11-23T04:02:00Z"), UTC));
 
         // 4. Permanent discipline stats (sessions + lifetime + month + streaks)
         var perm = new FocusState();

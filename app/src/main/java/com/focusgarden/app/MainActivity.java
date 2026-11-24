@@ -7,6 +7,8 @@ import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Icon;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
@@ -36,8 +38,10 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import static com.focusgarden.app.GardenUi.*;
 
@@ -91,6 +95,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private FrameLayout homeFloatingSettings;
     private TextView homeVaultBig;
     private TextView homeCreditBig;
+    private TextView homeCreditUnit;
+    private ImageView homeCreditEditIcon;
     private TextView homeLimitedSub;
     private TextView homeSoberBadge;
     private TextView homeSoberSub;
@@ -99,6 +105,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private TextView homeTimerSub;
     private TextView homeTimerReward;
     private TextView homeTimerEarnedLabel;
+    private TextView homeTimerCollapsedSub;
+    private TextView homeTimerCollapsedBadge;
     private LinearLayout homeTimerSetup;
     private LinearLayout homeTimerModeSwitchRow;
     private TextView homeTimerTabUp;
@@ -117,6 +125,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private LinearLayout homeTimerIdleRow;
     private LinearLayout homeTimerStopWatchRunRow;
     private LinearLayout homeTimerCountdownRunRow;
+    private final Set<String> expandedRedeemCards = new LinkedHashSet<>();
+    private String selectedAbstinenceId;
+    private int abstinenceQuoteOffset;
+    private AbstinenceHeroTicker abstinenceHeroTicker;
     private String lastLogicDate = "";
     private boolean lastAccessibilityEnabled;
     private Dialog timerConfirmation;
@@ -126,11 +138,31 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Boolean lastSoberBadgeActive;
     private Boolean lastOfflineCanClaim;
     private Boolean lastStopwatchRunning;
+    private Integer lastTimerBadgeState;
     private FocusSheets.LiveRefresh liveTimerSheet;
     private FocusSheets.LiveRefresh liveStepsSheet;
     private SoberModeUi.Timer soberTimer;
+    private SleepLockUi sleepLockUi;
     private FocusSheets.LiveRefresh liveKeepAliveSheet;
     private final List<AbstinenceTicker> liveAbstinenceTickers = new ArrayList<>();
+
+    private static final class AbstinenceHeroTicker {
+        final FocusState.Abstinence item;
+        final TextView durView;
+        final AbstinenceUi.AbstinenceRingView ringView;
+        final TextView leftTileVal;
+        final TextView rightTileVal;
+
+        AbstinenceHeroTicker(FocusState.Abstinence item, TextView durView,
+                             AbstinenceUi.AbstinenceRingView ringView,
+                             TextView leftTileVal, TextView rightTileVal) {
+            this.item = item;
+            this.durView = durView;
+            this.ringView = ringView;
+            this.leftTileVal = leftTileVal;
+            this.rightTileVal = rightTileVal;
+        }
+    }
 
     private static final class AbstinenceTicker {
         final FocusState.Abstinence item;
@@ -138,19 +170,21 @@ public final class MainActivity extends Activity implements SensorEventListener 
         final TextView pctView;
         final CapsuleBar bar;
         final TextView actionBtn;
+        final TextView pillView;
         final boolean compact;
         boolean lastReached;
         boolean lastCanClaim;
         float lastBarProgress;
 
         AbstinenceTicker(FocusState.Abstinence item, TextView clockView, TextView pctView,
-                         CapsuleBar bar, TextView actionBtn, boolean compact,
+                         CapsuleBar bar, TextView actionBtn, TextView pillView, boolean compact,
                          boolean reached, boolean canClaim, float barProgress) {
             this.item = item;
             this.clockView = clockView;
             this.pctView = pctView;
             this.bar = bar;
             this.actionBtn = actionBtn;
+            this.pillView = pillView;
             this.compact = compact;
             this.lastReached = reached;
             this.lastCanClaim = canClaim;
@@ -175,10 +209,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 liveTimerSheet.refresh();
             }
             if (liveStepsSheet != null && liveStepsSheet.isShowing()) liveStepsSheet.refresh();
+            updateSleepLock(now);
             updateSoberTimer(now);
-            main.postDelayed(this, 500);
+            main.postDelayed(this, 580);
         }
     };
+
+    void applyThemeNow() {
+        applyTheme(this, state.themeMode);
+        render();
+    }
 
     int getTimerTabMode() {
         return timerTabMode;
@@ -195,6 +235,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         state = FocusStore.get(this).state;
+        applyTheme(this, state.themeMode);
         updatePanel = new UpdatePanel(this);
         if (saved != null) {
             tab = saved.getInt("tab", 0);
@@ -205,6 +246,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             insightsMode = saved.getInt("insightsMode");
             setTimerTabMode(saved.getInt("timerTabMode", 0));
             requestedBlockImage = saved.getString("requestedBlockImage");
+            selectedAbstinenceId = saved.getString("selectedAbstinenceId");
+            ArrayList<String> expanded = saved.getStringArrayList("expandedRedeemCards");
+            if (expanded != null) expandedRedeemCards.addAll(expanded);
         }
         topInset = statusBarFallback();
         getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
@@ -217,6 +261,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
         render();
     }
 
+    @Override public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (state != null && state.themeMode == FocusState.THEME_SYSTEM && applyTheme(this, state.themeMode)) {
+            render();
+        }
+    }
+
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putInt("tab", tab);
         out.putInt("rulesParentTab", rulesParentTab);
@@ -226,6 +277,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         out.putInt("insightsMode", insightsMode);
         out.putInt("timerTabMode", timerTabMode);
         out.putString("requestedBlockImage", requestedBlockImage);
+        out.putString("selectedAbstinenceId", selectedAbstinenceId);
+        out.putStringArrayList("expandedRedeemCards", new ArrayList<>(expandedRedeemCards));
         super.onSaveInstanceState(out);
     }
 
@@ -237,6 +290,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
+        applyTheme(this, state.themeMode);
         long now = System.currentTimeMillis();
         TimerReceiver.advance(this, now);
         state.syncResetDay(now, ZoneId.systemDefault());
@@ -255,6 +309,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
             if (resumed && tab <= 1 && snap.accOk() != lastAccessibilityEnabled) redraw();
         });
+        updateSleepLock(now);
         updateSoberTimer(now);
         main.post(clock);
         handleTimerShortcut(getIntent());
@@ -275,7 +330,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             updatePanel.checkAutomatically();
         }
         if (resumed) {
-            updateSoberTimer(System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            updateSleepLock(now);
+            updateSoberTimer(now);
             handleTimerShortcut(intent);
         }
     }
@@ -295,6 +352,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override protected void onDestroy() {
         updatePanel.dismiss();
+        if (sleepLockUi != null) sleepLockUi.dismiss();
         if (soberTimer != null) soberTimer.dismiss();
         super.onDestroy();
     }
@@ -406,7 +464,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override public boolean dispatchTouchEvent(MotionEvent ev) {
         boolean modalOpen = (liveTimerSheet != null && liveTimerSheet.isShowing())
-                || (liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing());
+                || (liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing())
+                || (sleepLockUi != null && sleepLockUi.isShowing());
         if (!modalOpen) {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN -> {
@@ -476,6 +535,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homePiggyBank = null;
         homeVaultBig = null;
         homeCreditBig = null;
+        homeCreditUnit = null;
+        homeCreditEditIcon = null;
         homeLimitedSub = null;
         homeSoberBadge = null;
         homeSoberSub = null;
@@ -483,10 +544,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
         lastSoberBadgeActive = null;
         lastOfflineCanClaim = null;
         lastStopwatchRunning = null;
+        lastTimerBadgeState = null;
         homeTimerHeadIcon = null;
         homeTimerSub = null;
         homeTimerReward = null;
         homeTimerEarnedLabel = null;
+        homeTimerCollapsedSub = null;
+        homeTimerCollapsedBadge = null;
         homeTimerSetup = null;
         homeTimerModeSwitchRow = null;
         homeTimerTabUp = null;
@@ -505,6 +569,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerIdleRow = null;
         homeTimerStopWatchRunRow = null;
         homeTimerCountdownRunRow = null;
+        abstinenceHeroTicker = null;
         liveAbstinenceTickers.clear();
     }
 
@@ -548,9 +613,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         contentStage.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         if (tab != RULES_PAGE) {
             homeScrim = new View(this);
+            int paperBase = PAPER & 0x00ffffff;
             homeScrim.setBackground(new android.graphics.drawable.GradientDrawable(
                     android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
-                    new int[]{0xf2f4f6fa, 0x00f4f6fa}));
+                    new int[]{0xf2000000 | paperBase, paperBase}));
             homeScrim.setAlpha(0f);
             homeScrim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             FrameLayout.LayoutParams scrimLp = new FrameLayout.LayoutParams(-1, topInset + dp(this, 10));
@@ -610,7 +676,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redraw();
         setContentView(root);
         root.requestApplyInsets();
-        updateStatusBar(false);
+        getWindow().setBackgroundDrawable(new ColorDrawable(PAPER));
+        updateStatusBar(isDark());
 
         if (Build.VERSION.SDK_INT >= 33) BackNavigation.update(this);
 
@@ -653,18 +720,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void updateStatusBar(boolean darkBackdrop) {
-        if (Build.VERSION.SDK_INT >= 30) {
-            var controller = getWindow().getInsetsController();
-            if (controller != null) {
-                int flag = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS;
-                controller.setSystemBarsAppearance(darkBackdrop ? 0 : flag, flag);
-            }
-        } else {
-            View decor = getWindow().getDecorView();
-            int current = decor.getSystemUiVisibility();
-            int flag = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            decor.setSystemUiVisibility(darkBackdrop ? current & ~flag : current | flag);
-        }
+        applySystemBars(getWindow(), darkBackdrop);
     }
 
     private void redraw() {
@@ -725,8 +781,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
     // =========================================================================
     private void home() {
         long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
         LocalDate today = FocusState.today();
         FocusState.Day day = state.days.getOrDefault(today.toString(), new FocusState.Day());
+        boolean layFlat = state.isLayFlat();
 
         // 1. Pastel Peach Piggy Bank Hero Stage
         FrameLayout piggyStage = new FrameLayout(this);
@@ -765,20 +823,22 @@ public final class MainActivity extends Activity implements SensorEventListener 
         content.setPadding(dp(this, 16), dp(this, 4), dp(this, 16), 0);
         pages.addView(content, -1, -2);
 
-        // 2. Hero Blue Card: 时间储蓄罐 (Time Vault)
+        // 2. Hero Card: 时间储蓄罐 (Blue normally, Purple when 躺平模式 is active)
         LinearLayout vaultCard = column(this);
-        vaultCard.setBackground(gradientBg(this, 0xff2576ff, BLUE_DARK, 22));
+        vaultCard.setBackground(layFlat
+                ? gradientBg(this, 0xff8b6eff, 0xff5b3fd6, 22)
+                : gradientBg(this, 0xff2576ff, BLUE_DARK, 22));
         vaultCard.setPadding(dp(this, 18), dp(this, 16), dp(this, 18), dp(this, 16));
         elevate(vaultCard, 5);
 
         LinearLayout vaultTop = row(this);
-        homeVaultBig = text(this, shortMinutes(state.vaultMs), 34, CARD, true);
+        homeVaultBig = text(this, shortMinutes(state.vaultMs), 34, ON_ACCENT, true);
         vaultTop.addView(homeVaultBig);
         space(vaultTop, 6);
         TextView vaultUnit = text(this, "分钟已存", 13, PALE, false);
         weight(vaultTop, vaultUnit);
 
-        TextView vaultTag = text(this, "不清零 · 上限 2 小时", 11, CARD, false);
+        TextView vaultTag = text(this, layFlat ? "躺平生效 · 储蓄不变" : "不清零 · 上限 2 小时", 11, ON_ACCENT, false);
         vaultTag.setBackground(shape(this, 0x26ffffff, 10));
         vaultTag.setPadding(dp(this, 10), dp(this, 5), dp(this, 10), dp(this, 5));
         vaultTag.setOnClickListener(v -> {
@@ -790,15 +850,21 @@ public final class MainActivity extends Activity implements SensorEventListener 
         vaultCard.addView(vaultTop);
         gap(vaultCard, 14);
 
+        int withdrawInk = layFlat ? 0xff5b3fd6 : 0xff1a6bff;
         LinearLayout vaultBtns = row(this);
         LinearLayout depositBtn = row(this);
         depositBtn.setGravity(Gravity.CENTER);
         depositBtn.setMinimumHeight(dp(this, 42));
         depositBtn.setBackground(touch(this, 0x28ffffff, 13));
-        depositBtn.addView(iconView(this, R.drawable.ic_deposit, 16, CARD));
+        depositBtn.addView(iconView(this, R.drawable.ic_deposit, 16, ON_ACCENT));
         space(depositBtn, 6);
-        depositBtn.addView(text(this, "存入 " + state.vaultStepMinutes + " 分钟", 13, CARD, true));
+        depositBtn.addView(text(this, "存入 " + state.vaultStepMinutes + " 分钟", 13, ON_ACCENT, true));
         depositBtn.setOnClickListener(v -> {
+            if (state.isLayFlat()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("躺平模式期间储蓄罐时长保持不变，明日 04:00 后恢复");
+                return;
+            }
             long nowClick = System.currentTimeMillis();
             if (state.isVaultFull()) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
@@ -824,11 +890,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout withdrawBtn = row(this);
         withdrawBtn.setGravity(Gravity.CENTER);
         withdrawBtn.setMinimumHeight(dp(this, 42));
-        withdrawBtn.setBackground(touch(this, CARD, 13));
-        withdrawBtn.addView(iconView(this, R.drawable.ic_withdraw, 16, BLUE));
+        withdrawBtn.setBackground(touch(this, ON_ACCENT, 13));
+        withdrawBtn.addView(iconView(this, R.drawable.ic_withdraw, 16, withdrawInk));
         space(withdrawBtn, 6);
-        withdrawBtn.addView(text(this, "提取 " + state.vaultStepMinutes + " 分钟", 13, BLUE, true));
+        withdrawBtn.addView(text(this, "提取 " + state.vaultStepMinutes + " 分钟", 13, withdrawInk, true));
         withdrawBtn.setOnClickListener(v -> {
+            if (state.isLayFlat()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("躺平模式期间储蓄罐时长保持不变，明日 04:00 后恢复");
+                return;
+            }
             long moved = state.withdrawFromVault(state.vaultStepMinutes * FocusState.MINUTE,
                     System.currentTimeMillis(), ZoneId.systemDefault());
             if (moved > 0) {
@@ -850,16 +921,27 @@ public final class MainActivity extends Activity implements SensorEventListener 
         content.addView(vaultCard);
         gap(content, 12);
 
-        // 3. 可用时长 & 限制应用卡
+        // 3. 可用时长 & 限制应用卡 (Becomes countdown to 04:00 reset during 躺平模式)
         LinearLayout budgetCard = surfaceCard();
         LinearLayout budgetTop = row(this);
         LinearLayout creditTap = row(this);
-        homeCreditBig = text(this, shortMinutes(state.creditMs), 28, INK, true);
+        if (layFlat) {
+            long remReset = Math.max(0L, FocusState.nextResetMs(now, zone) - now);
+            homeCreditBig = text(this, formatHmsCountdown(remReset), 23, PURPLE, true);
+            homeCreditBig.setFontFeatureSettings("tnum");
+            homeCreditUnit = text(this, "后重置恢复", 12, INK_SUB, false);
+        } else {
+            homeCreditBig = text(this, shortMinutes(state.creditMs), 28, INK, true);
+            homeCreditBig.setFontFeatureSettings("tnum");
+            homeCreditUnit = text(this, "分钟可用", 13, INK_SUB, false);
+        }
         creditTap.addView(homeCreditBig);
         space(creditTap, 5);
-        creditTap.addView(text(this, "分钟可用", 13, INK_SUB, false));
+        creditTap.addView(homeCreditUnit);
         space(creditTap, 6);
-        creditTap.addView(iconView(this, R.drawable.ic_edit, 14, MUTED));
+        homeCreditEditIcon = iconView(this, R.drawable.ic_edit, 14, MUTED);
+        homeCreditEditIcon.setVisibility(layFlat ? View.GONE : View.VISIBLE);
+        creditTap.addView(homeCreditEditIcon);
         creditTap.setOnClickListener(v -> {
             tapHaptic(v);
             FocusSheets.showBudgetDetailSheet(this, state, this::changed, () -> {
@@ -900,9 +982,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(budgetCard, 8);
 
         LinearLayout budgetSub = row(this);
-        homeLimitedSub = text(this, "今日已使用 " + duration(day.limitedMs), 12, MUTED, false);
+        homeLimitedSub = text(this, layFlat
+                ? "躺平模式全天免限 · 今日暂停兑换时间"
+                : "今日已使用 " + duration(day.limitedMs), 12, MUTED, false);
         weight(budgetSub, homeLimitedSub);
-        budgetSub.addView(text(this, "共限制 " + limitedPkgs.size() + " 个应用", 12, MUTED, false));
+        budgetSub.addView(text(this, layFlat ? "明日 04:00 恢复" : "共限制 " + limitedPkgs.size() + " 个应用",
+                12, layFlat ? PURPLE : MUTED, layFlat));
         budgetCard.addView(budgetSub);
         budgetCard.setOnClickListener(v -> {
             tapHaptic(v);
@@ -952,7 +1037,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         if (!lastAccessibilityEnabled) {
             LinearLayout perm = column(this);
-            perm.setBackground(cardBg(this, AMBER_SOFT, 0xfff5dcb1, 18));
+            perm.setBackground(cardBg(this, AMBER_SOFT, amberStroke(), 18));
             perm.setPadding(dp(this, 15), dp(this, 14), dp(this, 15), dp(this, 14));
             LinearLayout permRow = row(this);
             permRow.addView(iconBadge(this, R.drawable.ic_shield, CARD, AMBER, 40, 20, 12));
@@ -1012,31 +1097,42 @@ public final class MainActivity extends Activity implements SensorEventListener 
         });
         redeemHeader.addView(ratePill);
         pages.addView(redeemHeader);
-        gap(pages, 16);
+        gap(pages, 14);
+
+        if (state.isLayFlat()) {
+            LinearLayout layNotice = row(this);
+            layNotice.setBackground(cardBg(this, PURPLE_SOFT, PURPLE, 14));
+            layNotice.setPadding(dp(this, 14), dp(this, 11), dp(this, 14), dp(this, 11));
+            layNotice.addView(iconView(this, R.drawable.ic_moon, 16, PURPLE));
+            space(layNotice, 8);
+            weight(layNotice, text(this, "躺平模式生效中 · 全天应用免限，今日暂停兑换时间", 12, PURPLE, true));
+            pages.addView(layNotice);
+            gap(pages, 12);
+        }
 
         if (!state.hiddenCards.contains("apps")) {
             pages.addView(homeAppsCard(day));
-            gap(pages, 12);
+            gap(pages, 10);
         }
         if (!state.hiddenCards.contains("timer")) {
             pages.addView(homeTimerCard(now, day));
-            gap(pages, 12);
+            gap(pages, 10);
         }
         if (!state.hiddenCards.contains("sleep")) {
             pages.addView(homeSleepCard(today));
-            gap(pages, 12);
+            gap(pages, 10);
         }
         if (!state.hiddenCards.contains("todos")) {
             pages.addView(homeTodoCard(today, day));
-            gap(pages, 12);
+            gap(pages, 10);
         }
         if (!state.hiddenCards.contains("habits")) {
             pages.addView(homeAbstinenceCard(now));
-            gap(pages, 12);
+            gap(pages, 10);
         }
         if (!state.hiddenCards.contains("steps")) {
             pages.addView(homeStepCard(today, day));
-            gap(pages, 12);
+            gap(pages, 10);
         }
 
         LinearLayout manageBtn = row(this);
@@ -1055,26 +1151,89 @@ public final class MainActivity extends Activity implements SensorEventListener 
         updateHomeLive();
     }
 
-    private LinearLayout homeAppsCard(FocusState.Day day) {
-        LinearLayout card = surfaceCard();
-        List<String> learning = packagesForCategory(FocusState.Category.LEARNING);
+    private LinearLayout wrapCollapsibleCard(String key, int iconRes, int badgeBg, int badgeTint,
+                                             String title, TextView subView, TextView pillView,
+                                             LinearLayout bodyContent, ImageView[] badgeIconOut) {
+        LinearLayout card = column(this);
+        card.setBackground(cardBg(this, CARD, BORDER, 20));
+        card.setPadding(dp(this, 16), dp(this, 13), dp(this, 16), dp(this, 13));
+        elevate(card, 1.5f);
 
-        LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_check_box, GREEN_SOFT, GREEN, 34, 18, 10));
-        space(top, 10);
+        boolean expanded = expandedRedeemCards.contains(key);
+
+        LinearLayout header = row(this);
+        FrameLayout badge = new FrameLayout(this);
+        badge.setBackground(shape(this, badgeBg, 11));
+        ImageView icon = iconView(this, iconRes, 18, badgeTint);
+        if (badgeIconOut != null) badgeIconOut[0] = icon;
+        badge.addView(icon, new FrameLayout.LayoutParams(dp(this, 18), dp(this, 18), Gravity.CENTER));
+        header.addView(badge, dp(this, 36), dp(this, 36));
+        space(header, 10);
+
         LinearLayout titles = column(this);
-        titles.addView(titleWithInfo(this, "应用", 16, INK,
-                "正向学习应用", "使用已设为「正向学习」的应用时，将按当前时间获取模式倍率自动赚取可用时长，且自律模式期间仍可打开。"));
-        titles.addView(text(this, "今日共使用 " + duration(day.learningMs), 12, MUTED, false));
-        weight(top, titles);
+        titles.addView(text(this, title, 16, INK, true));
+        if (subView != null) {
+            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-2, -2);
+            slp.topMargin = dp(this, 2);
+            titles.addView(subView, slp);
+        }
+        weight(header, titles);
 
-        LinearLayout right = column(this);
-        right.setGravity(Gravity.END);
-        right.addView(text(this, state.rateMode.label, 12, INK_SUB, true));
-        right.addView(text(this, "已兑换 " + duration(day.learningEarnedMs), 11, MUTED, false));
-        top.addView(right);
-        card.addView(top);
-        gap(card, 12);
+        if (pillView != null) {
+            space(header, 8);
+            header.addView(pillView);
+        }
+        space(header, 6);
+        ImageView chevron = iconView(this, R.drawable.ic_chevron_right, 16, MUTED);
+        chevron.setRotation(expanded ? 90f : 0f);
+        header.addView(chevron);
+        card.addView(header);
+
+        LinearLayout bodyWrap = column(this);
+        bodyWrap.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        gap(bodyWrap, 11);
+        View divider = new View(this);
+        divider.setBackgroundColor(LINE);
+        bodyWrap.addView(divider, -1, dp(this, 1));
+        gap(bodyWrap, 11);
+        bodyWrap.addView(bodyContent, -1, -2);
+        card.addView(bodyWrap);
+
+        header.setOnClickListener(v -> {
+            tapHaptic(v);
+            boolean nowExpanded = bodyWrap.getVisibility() != View.VISIBLE;
+            if (nowExpanded) expandedRedeemCards.add(key);
+            else expandedRedeemCards.remove(key);
+            bodyWrap.setVisibility(nowExpanded ? View.VISIBLE : View.GONE);
+            chevron.animate().rotation(nowExpanded ? 90f : 0f).setDuration(160).start();
+        });
+        return card;
+    }
+
+    private static TextView compactStatusPill(MainActivity a, String label, int bg, int ink) {
+        TextView tv = text(a, label, 11, ink, true);
+        tv.setBackground(shape(a, bg, 8));
+        tv.setPadding(dp(a, 9), dp(a, 4), dp(a, 9), dp(a, 4));
+        return tv;
+    }
+
+    private LinearLayout homeAppsCard(FocusState.Day day) {
+        List<String> learning = packagesForCategory(FocusState.Category.LEARNING);
+        boolean layFlat = state.isLayFlat();
+        TextView sub = text(this, "学习 " + learning.size() + " 个 · 今日使用 " + duration(day.learningMs), 12, MUTED, false);
+        String earnedMin = shortMinutes(day.learningEarnedMs);
+        TextView headPill = compactStatusPill(this,
+                layFlat ? "今日暂停" : "+" + earnedMin + " 分",
+                layFlat ? PURPLE_SOFT : day.learningEarnedMs > 0L ? GREEN_SOFT : SURFACE_SUBTLE,
+                layFlat ? PURPLE : day.learningEarnedMs > 0L ? GREEN : MUTED);
+
+        LinearLayout body = column(this);
+        LinearLayout topInfo = row(this);
+        weight(topInfo, titleWithInfo(this, "正向学习应用", 14, INK,
+                "正向学习应用", "使用已设为「正向学习」的应用时，将按当前倍率自动赚取可用时长（躺平模式当日暂停兑换）。"));
+        topInfo.addView(text(this, "已兑换 " + duration(day.learningEarnedMs), 12, MUTED, false));
+        body.addView(topInfo);
+        gap(body, 10);
 
         LinearLayout bottom = row(this);
         android.widget.HorizontalScrollView iconsScroll = new android.widget.HorizontalScrollView(this);
@@ -1105,44 +1264,28 @@ public final class MainActivity extends Activity implements SensorEventListener 
         weight(bottom, iconsScroll);
         space(bottom, 8);
 
-        String earnedMin = shortMinutes(day.learningEarnedMs);
-        TextView earnedTag = redeemPill(this, "+" + earnedMin + " 分钟", false);
-        if (day.learningEarnedMs > 0L) {
-            earnedTag.setBackground(shape(this, GREEN_SOFT, 12));
-            earnedTag.setTextColor(GREEN);
-        }
-        earnedTag.setContentDescription("自动兑换 " + duration(day.learningEarnedMs));
-        bottom.addView(earnedTag);
-        card.addView(bottom);
-
-        card.setOnClickListener(v -> {
+        TextView manageApps = pillButton(this, "管理应用", BLUE_SOFT, BLUE, 10, 34);
+        manageApps.setPadding(dp(this, 12), 0, dp(this, 12), 0);
+        manageApps.setOnClickListener(v -> {
             tapHaptic(v);
             ruleCategory = 0;
             openRules(false);
         });
-        return card;
+        bottom.addView(manageApps);
+        body.addView(bottom);
+
+        return wrapCollapsibleCard("apps", R.drawable.ic_check_box, GREEN_SOFT, GREEN,
+                "应用", sub, headPill, body, null);
     }
 
     private LinearLayout homeTimerCard(long now, FocusState.Day day) {
-        LinearLayout card = surfaceCard();
+        homeTimerCollapsedSub = text(this, "", 12, MUTED, false);
+        homeTimerCollapsedBadge = compactStatusPill(this, "", SURFACE_SUBTLE, MUTED);
 
+        LinearLayout body = column(this);
         LinearLayout top = row(this);
-        FrameLayout badge = new FrameLayout(this);
-        badge.setBackground(shape(this, BLUE_SOFT, 10));
-        homeTimerHeadIcon = iconView(this, R.drawable.ic_phone_lock, 18, BLUE);
-        badge.addView(homeTimerHeadIcon, new FrameLayout.LayoutParams(dp(this, 18), dp(this, 18), Gravity.CENTER));
-        top.addView(badge, dp(this, 34), dp(this, 34));
-        space(top, 10);
-
-        LinearLayout titles = column(this);
-        titles.addView(titleWithInfo(this, "自律模式", 16, INK,
+        weight(top, titleWithInfo(this, "模式切换与统计", 14, INK,
                 "自律模式", "期间除正向学习应用外全部锁定。正计时满 5 分钟可兑换，支持随时暂停或停止；倒计时结束后自动结算，期间不可提前停止。"));
-        homeTimerSub = text(this, "", 12, MUTED, false);
-        LinearLayout.LayoutParams timerSubLp = new LinearLayout.LayoutParams(-2, -2);
-        timerSubLp.topMargin = dp(this, 2);
-        titles.addView(homeTimerSub, timerSubLp);
-        weight(top, titles);
-
         LinearLayout right = column(this);
         right.setGravity(Gravity.END);
         homeTimerReward = text(this, "", 12, INK, true);
@@ -1150,13 +1293,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerEarnedLabel = text(this, "", 11, MUTED, false);
         right.addView(homeTimerEarnedLabel);
         top.addView(right);
-        card.addView(top);
-        gap(card, 10);
+        body.addView(top);
+
+        homeTimerSub = text(this, "", 12, MUTED, false);
+        LinearLayout.LayoutParams timerSubLp = new LinearLayout.LayoutParams(-2, -2);
+        timerSubLp.topMargin = dp(this, 3);
+        body.addView(homeTimerSub, timerSubLp);
+        gap(body, 10);
 
         // Idle controls (2 modes: 正计时 | 倒计时, updated in-place with zero redraw/flicker)
         homeTimerIdleRow = column(this);
         homeTimerSetup = column(this);
-        card.addView(homeTimerSetup);
+        body.addView(homeTimerSetup);
 
         homeTimerModeSwitchRow = row(this);
         homeTimerModeSwitchRow.setBackground(cardBg(this, SURFACE_SUBTLE, BORDER, 12));
@@ -1228,9 +1376,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
         startBtn.setMinimumHeight(dp(this, 44));
         startBtn.setPadding(dp(this, 14), 0, dp(this, 14), 0);
         startBtn.setBackground(touch(this, BLUE, 12));
-        startBtn.addView(iconView(this, R.drawable.ic_play, 14, CARD));
+        startBtn.addView(iconView(this, R.drawable.ic_play, 14, ON_ACCENT));
         space(startBtn, 6);
-        homeTimerStartLabel = text(this, "开启自律正计时", 14, CARD, true);
+        homeTimerStartLabel = text(this, "开启自律正计时", 14, ON_ACCENT, true);
         homeTimerStartLabel.setIncludeFontPadding(false);
         startBtn.addView(homeTimerStartLabel);
         startBtn.setOnClickListener(v -> {
@@ -1251,17 +1399,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout controls = column(this);
         homeTimerIdleRow.addView(startBar);
 
-        // Running controls for 正计时 (crisp monochrome vector icons, single-line labels)
+        // Running controls for 正计时
         homeTimerStopWatchRunRow = row(this);
         homeTimerPrimaryBtn = row(this);
         homeTimerPrimaryBtn.setGravity(Gravity.CENTER);
         homeTimerPrimaryBtn.setMinimumHeight(dp(this, 44));
         homeTimerPrimaryBtn.setPadding(dp(this, 12), 0, dp(this, 12), 0);
         homeTimerPrimaryBtn.setBackground(touch(this, BLUE, 12));
-        homeTimerPrimaryIcon = iconView(this, R.drawable.ic_pause, 14, CARD);
+        homeTimerPrimaryIcon = iconView(this, R.drawable.ic_pause, 14, ON_ACCENT);
         homeTimerPrimaryBtn.addView(homeTimerPrimaryIcon);
         space(homeTimerPrimaryBtn, 6);
-        homeTimerPrimaryLabel = text(this, "", 14, CARD, true);
+        homeTimerPrimaryLabel = text(this, "", 14, ON_ACCENT, true);
         homeTimerPrimaryLabel.setIncludeFontPadding(false);
         homeTimerPrimaryLabel.setFontFeatureSettings("tnum");
         homeTimerPrimaryBtn.addView(homeTimerPrimaryLabel);
@@ -1279,9 +1427,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerStopBtn.setMinimumHeight(dp(this, 44));
         homeTimerStopBtn.setPadding(dp(this, 12), 0, dp(this, 12), 0);
         homeTimerStopBtn.setBackground(touch(this, RED, 12));
-        homeTimerStopBtn.addView(iconView(this, R.drawable.ic_stop, 13, CARD));
+        homeTimerStopBtn.addView(iconView(this, R.drawable.ic_stop, 13, ON_ACCENT));
         space(homeTimerStopBtn, 6);
-        TextView stopLabel = text(this, "停止", 14, CARD, true);
+        TextView stopLabel = text(this, "停止", 14, ON_ACCENT, true);
         stopLabel.setIncludeFontPadding(false);
         homeTimerStopBtn.addView(stopLabel);
         homeTimerStopBtn.setOnClickListener(v -> {
@@ -1302,6 +1450,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
         homeOfflineRedeemBtn.setOnClickListener(v -> {
             if (state.active() || (!state.offlineActive() && timerTabMode == 1)) return;
+            if (state.isLayFlat()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+                return;
+            }
             long curNow = System.currentTimeMillis();
             if (!state.canClaimOffline(curNow)) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
@@ -1321,7 +1474,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         // Running controls for 倒计时 (locked: cannot stop early)
         homeTimerCountdownRunRow = row(this);
         homeTimerCountdownBtn = pillButton(this, "", BLUE_SOFT, BLUE, 12, 44);
-        homeTimerCountdownBtn.setBackground(touchCard(this, BLUE_SOFT, 0xffcfe0ff, 12));
+        homeTimerCountdownBtn.setBackground(touchCard(this, BLUE_SOFT, blueStroke(), 12));
         homeTimerCountdownBtn.setOnClickListener(v -> {
             tapHaptic(v);
             liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
@@ -1330,7 +1483,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         controls.addView(homeTimerIdleRow);
         controls.addView(homeTimerStopWatchRunRow);
         controls.addView(homeTimerCountdownRunRow);
-        card.addView(controls);
+        body.addView(controls);
 
         homeTimerRedeemRow = row(this);
         homeTimerRedeemRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1340,12 +1493,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerRedeemRow.addView(homeOfflineRedeemBtn);
         LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, -2);
         redeemLp.topMargin = dp(this, 10);
-        card.addView(homeTimerRedeemRow, redeemLp);
+        body.addView(homeTimerRedeemRow, redeemLp);
 
-        card.setOnClickListener(v -> {
-            tapHaptic(v);
-            liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
-        });
+        ImageView[] iconRef = new ImageView[1];
+        LinearLayout card = wrapCollapsibleCard("timer", R.drawable.ic_phone_lock, BLUE_SOFT, BLUE,
+                "自律模式", homeTimerCollapsedSub, homeTimerCollapsedBadge, body, iconRef);
+        homeTimerHeadIcon = iconRef[0];
         syncHomeTimerMode();
         return card;
     }
@@ -1494,41 +1647,45 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private LinearLayout homeSleepCard(LocalDate today) {
-        LinearLayout card = surfaceCard();
+        long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
+        boolean pendingReward = state.hasPendingEarlySleepReward(now, zone);
         boolean done = state.earlySleepChecked(today);
         boolean failed = state.earlySleepFailedOn(today);
+        boolean layFlat = state.isLayFlat();
         int streak = state.earlySleepStreak(today);
 
-        LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_moon, PURPLE_SOFT, PURPLE, 34, 18, 10));
-        space(top, 10);
-        LinearLayout titles = column(this);
-        LinearLayout titleLine = row(this);
-        titleLine.addView(text(this, "早睡挑战", 16, INK, true));
-        space(titleLine, 2);
-        titleLine.addView(infoIcon(this, "早睡挑战",
-                "开启夜间强制锁定并完整完成整夜锁机，到点后自动完成挑战并发放奖励；中途关闭夜间锁或调整睡眠时间（含 35 分钟消耗）将导致当日挑战失败。"));
-        space(titleLine, 6);
-        TextView tag = text(this, failed ? "今日已失败" : done ? "挑战已完成" : state.bedtime ? "正常锁机中" : "未开夜间锁",
-                11, failed ? RED : done ? GREEN : state.bedtime ? PURPLE : AMBER, true);
-        tag.setBackground(shape(this, failed ? RED_SOFT : done ? GREEN_SOFT : state.bedtime ? PURPLE_SOFT : AMBER_SOFT, 8));
-        tag.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
-        titleLine.addView(tag);
-        titles.addView(titleLine);
-        titles.addView(text(this, "连续早睡 " + streak + " 天", 12, MUTED, false));
-        weight(top, titles);
+        String headTag = failed ? "今日失败"
+                : pendingReward ? (layFlat ? "今日暂停" : "可领 +" + state.earlySleepRewardMinutes + "分")
+                : done ? "今日已领"
+                : state.bedtime ? "锁机中"
+                : "未开启";
+        int headBg = failed ? RED_SOFT
+                : pendingReward ? (layFlat ? PURPLE_SOFT : GREEN_SOFT)
+                : done ? GREEN_SOFT
+                : state.bedtime ? PURPLE_SOFT
+                : AMBER_SOFT;
+        int headInk = failed ? RED
+                : pendingReward ? (layFlat ? PURPLE : GREEN)
+                : done ? GREEN
+                : state.bedtime ? PURPLE
+                : AMBER;
+        TextView sub = text(this, clock(state.sleepStart) + "–" + clock(state.sleepEnd)
+                + " · 连续早睡 " + streak + " 天", 12, MUTED, false);
+        TextView headPill = compactStatusPill(this, headTag, headBg, headInk);
 
-        LinearLayout right = column(this);
-        right.setGravity(Gravity.END);
-        int avail = (done || failed) ? 0 : state.earlySleepRewardMinutes;
-        right.addView(text(this, avail + " 分钟 奖励", 12, (done || failed || !state.bedtime) ? MUTED : INK, true));
-        right.addView(text(this, state.bedtime ? "到点自动发放" : "需开夜间锁", 11, MUTED, false));
-        top.addView(right);
-        card.addView(top);
-        gap(card, 10);
+        LinearLayout body = column(this);
+        LinearLayout topInfo = row(this);
+        weight(topInfo, titleWithInfo(this, "早睡打卡与锁机", 14, INK,
+                "早睡挑战", "开启夜间强制锁定并在锁机时段后完整醒来，次日可手动点击领取奖励；锁机期间消耗 35 分钟退出或修改时间将判定本轮失败且不可领奖。"));
+        topInfo.addView(text(this, pendingReward ? "待主动领取 +" + state.earlySleepRewardMinutes + " 分"
+                : (done ? "已领 +" + state.earlySleepRewardMinutes + " 分" : "完成可领 +" + state.earlySleepRewardMinutes + " 分"),
+                12, pendingReward ? GREEN : MUTED, pendingReward));
+        body.addView(topInfo);
+        gap(body, 10);
 
-        card.addView(FocusSheets.weekSleepStrip(this, state, today));
-        gap(card, 10);
+        body.addView(FocusSheets.weekSleepStrip(this, state, today));
+        gap(body, 10);
 
         LinearLayout bottom = row(this);
         LinearLayout sleepBtn = row(this);
@@ -1546,39 +1703,59 @@ public final class MainActivity extends Activity implements SensorEventListener 
         weight(bottom, sleepBtn);
         space(bottom, 8);
 
-        String statusLabel = failed ? "已失败" : done ? "已自动发" : state.bedtime ? "锁机计次" : "去开启";
-        TextView claim = redeemPill(this, statusLabel, !state.bedtime);
+        String statusLabel = layFlat && pendingReward ? "今日暂停"
+                : pendingReward ? "领取 +" + state.earlySleepRewardMinutes + " 分钟"
+                : failed ? "已失败"
+                : done ? "今日已领"
+                : state.bedtime ? "已开夜间锁"
+                : "去开启";
+        boolean actionReady = (pendingReward && !layFlat) || (!state.bedtime && !failed && !done);
+        TextView claim = redeemPill(this, statusLabel, actionReady);
         claim.setOnClickListener(v -> {
+            if (pendingReward) {
+                if (state.isLayFlat()) {
+                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                    toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+                    return;
+                }
+                long gained = state.claimPendingEarlySleep(System.currentTimeMillis(), ZoneId.systemDefault());
+                if (gained > 0L) {
+                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                    changed();
+                    toast("早睡奖励已领取，+" + duration(gained));
+                }
+                return;
+            }
             tapHaptic(v);
             FocusSheets.showEarlySleep(this, state, this::changed);
         });
         bottom.addView(claim);
-        card.addView(bottom);
-        return card;
+        body.addView(bottom);
+
+        return wrapCollapsibleCard("sleep", R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
+                "早睡挑战", sub, headPill, body, null);
     }
 
     private LinearLayout homeTodoCard(LocalDate today, FocusState.Day day) {
-        LinearLayout card = surfaceCard();
         long now = System.currentTimeMillis();
+        boolean layFlat = state.isLayFlat();
         int pendingCount = state.pendingTodoCount();
         long pendingReward = state.pendingTodoRewardMs(now, today);
 
-        LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_todo, AMBER_SOFT, AMBER, 34, 18, 10));
-        space(top, 10);
-        LinearLayout titles = column(this);
-        titles.addView(titleWithInfo(this, "待办", 16, INK,
-                "待办清单", "新建待办需经过 10 分钟冷静期才可领取奖励，每日待办奖励上限 " + state.todoDailyCapMinutes + " 分钟。"));
-        titles.addView(text(this, pendingCount == 0 ? "暂无待完成" : pendingCount + " 项待完成", 12, MUTED, false));
-        weight(top, titles);
+        TextView sub = text(this, (pendingCount == 0 ? "暂无待完成" : pendingCount + " 项待完成")
+                + " · 已兑 " + shortMinutes(day.todoEarnedMs) + "/" + state.todoDailyCapMinutes + " 分",
+                12, MUTED, false);
+        TextView headPill = compactStatusPill(this,
+                layFlat ? "今日暂停" : pendingReward > 0 ? "可领 +" + shortMinutes(pendingReward) + "分" : "去查看",
+                layFlat ? PURPLE_SOFT : pendingReward > 0 ? BLUE_SOFT : SURFACE_SUBTLE,
+                layFlat ? PURPLE : pendingReward > 0 ? BLUE : MUTED);
 
-        LinearLayout right = column(this);
-        right.setGravity(Gravity.END);
-        right.addView(text(this, shortMinutes(pendingReward) + " 分钟 可兑换", 12,
-                pendingReward > 0 ? BLUE : INK_SUB, true));
-        right.addView(text(this, "已兑 " + duration(day.todoEarnedMs) + " / " + state.todoDailyCapMinutes + " 分", 11, MUTED, false));
-        top.addView(right);
-        card.addView(top);
+        LinearLayout body = column(this);
+        LinearLayout topInfo = row(this);
+        weight(topInfo, titleWithInfo(this, "待办清单", 14, INK,
+                "待办清单", "新建待办需经过 10 分钟冷静期才可领取奖励，每日待办奖励上限 " + state.todoDailyCapMinutes + " 分钟。"));
+        topInfo.addView(text(this, "已兑 " + duration(day.todoEarnedMs), 12, MUTED, false));
+        body.addView(topInfo);
 
         int shown = 0;
         boolean hasWaitingDone = false;
@@ -1586,16 +1763,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
             FocusState.Todo todo = entry.getValue();
             if (todo.done && !todo.claimed && !state.todoMature(todo, now)) hasWaitingDone = true;
             if (shown >= 2 || todo.claimed) continue;
-            if (shown == 0) gap(card, 10);
+            if (shown == 0) gap(body, 10);
             String id = entry.getKey();
             boolean mature = state.todoMature(todo, now);
             LinearLayout tRow = row(this);
             tRow.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 11));
             tRow.setPadding(dp(this, 10), dp(this, 8), dp(this, 10), dp(this, 8));
             FrameLayout box = new FrameLayout(this);
-            box.setBackground(todo.done ? shape(this, GREEN, 9) : cardBg(this, CARD, 0xffc6d2e2, 9));
+            box.setBackground(todo.done ? shape(this, GREEN, 9) : cardBg(this, CARD, mutedCircleBorder(), 9));
             if (todo.done) {
-                box.addView(iconView(this, R.drawable.ic_check, 11, CARD),
+                box.addView(iconView(this, R.drawable.ic_check, 11, ON_ACCENT),
                         new FrameLayout.LayoutParams(dp(this, 11), dp(this, 11), Gravity.CENTER));
             }
             tRow.addView(box, dp(this, 18), dp(this, 18));
@@ -1609,11 +1786,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 state.toggleTodo(id, today);
                 changed();
             });
-            card.addView(tRow);
-            gap(card, 6);
+            body.addView(tRow);
+            gap(body, 6);
             shown++;
         }
-        gap(card, shown == 0 ? 12 : 4);
+        gap(body, shown == 0 ? 12 : 4);
 
         LinearLayout bottom = row(this);
         TextView viewAll = pillButton(this, "查看全部 / 添加", SURFACE_SUBTLE, INK, 12, 38);
@@ -1626,8 +1803,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         space(bottom, 8);
 
         boolean finalWaiting = hasWaitingDone;
-        TextView redeem = redeemPill(this, "+" + shortMinutes(pendingReward) + " 分钟", pendingReward > 0);
+        TextView redeem = redeemPill(this, layFlat ? "今日暂停" : "+" + shortMinutes(pendingReward) + " 分钟",
+                !layFlat && pendingReward > 0);
         redeem.setOnClickListener(v -> {
+            if (state.isLayFlat()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+                return;
+            }
             long curNow = System.currentTimeMillis();
             long gained = state.claimTodos(curNow, ZoneId.systemDefault());
             if (gained > 0) {
@@ -1646,38 +1829,32 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
         });
         bottom.addView(redeem);
-        card.addView(bottom);
-        return card;
+        body.addView(bottom);
+
+        return wrapCollapsibleCard("todos", R.drawable.ic_todo, AMBER_SOFT, AMBER,
+                "待办", sub, headPill, body, null);
     }
 
     private LinearLayout homeAbstinenceCard(long now) {
-        LinearLayout card = surfaceCard();
         int total = state.abstinences.size();
         int reachedCount = 0;
+        boolean anyClaimable = false;
+        boolean layFlat = state.isLayFlat();
         List<FocusState.Abstinence> preview = new ArrayList<>();
         for (FocusState.Abstinence a : state.abstinences.values()) {
             if (state.abstinenceReached(a, now)) reachedCount++;
+            if (state.canClaimAbstinence(a, now)) anyClaimable = true;
             if (preview.size() < 2) preview.add(a);
         }
 
-        LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_nav_abstain, GREEN_SOFT, GREEN, 34, 18, 10));
-        space(top, 10);
-        LinearLayout titles = column(this);
-        titles.addView(text(this, "戒断挑战", 16, INK, true));
-        titles.addView(text(this, total == 0 ? "定制戒断事件与激励"
-                : "进行中 " + total + " 项 · 已达标 " + reachedCount + " 项", 12, MUTED, false));
-        weight(top, titles);
+        TextView sub = text(this, total == 0 ? "定制戒断事件与激励"
+                : "进行中 " + total + " 项 · 已达标 " + reachedCount + " 项", 12, MUTED, false);
+        TextView headPill = compactStatusPill(this,
+                total == 0 ? "去新建" : anyClaimable ? (layFlat ? "今日暂停" : "有奖励可领") : reachedCount + "/" + total + " 达标",
+                anyClaimable ? (layFlat ? PURPLE_SOFT : GREEN_SOFT) : SURFACE_SUBTLE,
+                anyClaimable ? (layFlat ? PURPLE : GREEN) : MUTED);
 
-        TextView allLink = text(this, "全部 >", 13, BLUE, true);
-        allLink.setOnClickListener(v -> {
-            tapHaptic(v);
-            switchTab(ABSTINENCE_PAGE);
-        });
-        top.addView(allLink);
-        card.addView(top);
-        gap(card, 10);
-
+        LinearLayout body = column(this);
         if (total == 0) {
             TextView addAbstain = secondaryButton(this, "+ 创建第一个戒断挑战");
             addAbstain.setMinHeight(dp(this, 38));
@@ -1685,7 +1862,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 tapHaptic(v);
                 FocusSheets.showAbstinenceEditor(this, state, null, null, this::changed);
             });
-            card.addView(addAbstain, -1, -2);
+            body.addView(addAbstain, -1, -2);
         } else {
             for (int i = 0; i < preview.size(); i++) {
                 FocusState.Abstinence a = preview.get(i);
@@ -1694,7 +1871,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 boolean reached = state.abstinenceReached(a, now);
 
                 LinearLayout rowBox = row(this);
-                rowBox.setBackground(shape(this, SURFACE_SUBTLE, 12));
+                rowBox.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
                 rowBox.setPadding(dp(this, 12), dp(this, 9), dp(this, 10), dp(this, 9));
 
                 LinearLayout infoCol = column(this);
@@ -1707,49 +1884,63 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 weight(rowBox, infoCol);
                 space(rowBox, 8);
 
-                String actText = canClaim ? "领 +" + a.rewardMinutes + " 分"
+                String actText = (canClaim && layFlat) ? "今日暂停"
+                        : canClaim ? "领 +" + a.rewardMinutes + " 分"
                         : reached ? "下一轮"
                         : "+" + a.rewardMinutes + " 分";
                 TextView actBtn = pillButton(this, actText,
-                        canClaim ? BLUE : reached ? GREEN_SOFT : CARD,
-                        canClaim ? CARD : reached ? GREEN : INK_SUB,
+                        (canClaim && !layFlat) ? BLUE : (canClaim && layFlat) ? PURPLE_SOFT : reached ? GREEN_SOFT : CARD,
+                        (canClaim && !layFlat) ? ON_ACCENT : (canClaim && layFlat) ? PURPLE : reached ? GREEN : INK_SUB,
                         10, 32);
                 actBtn.setOnClickListener(v -> handleAbstinencePrimaryAction(v, a));
                 rowBox.addView(actBtn);
-                liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv, null, null, actBtn, true,
+                rowBox.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    selectedAbstinenceId = a.id;
+                    AbstinenceUi.showDetail(this, state, a.id, this::changed);
+                });
+                liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv, null, null, actBtn, null, true,
                         reached, canClaim, 0f));
-                card.addView(rowBox);
-                if (i + 1 < preview.size()) gap(card, 8);
+                body.addView(rowBox);
+                if (i + 1 < preview.size()) gap(body, 8);
             }
+            gap(body, 10);
+            TextView openPage = secondaryButton(this, "前往戒断页管理全部");
+            openPage.setMinHeight(dp(this, 36));
+            openPage.setOnClickListener(v -> {
+                tapHaptic(v);
+                switchTab(ABSTINENCE_PAGE);
+            });
+            body.addView(openPage, -1, -2);
         }
-        return card;
+        return wrapCollapsibleCard("habits", R.drawable.ic_nav_abstain, GREEN_SOFT, GREEN,
+                "戒断挑战", sub, headPill, body, null);
     }
 
     private LinearLayout homeStepCard(LocalDate today, FocusState.Day day) {
-        LinearLayout card = surfaceCard();
         int units = state.claimableStepUnits(today);
         int claimableMins = units * state.stepRewardMinutes;
         int rem = state.pendingStepsRemainder(today);
+        boolean layFlat = state.isLayFlat();
         boolean capped = state.remainingStepCapMs(today) < state.stepRewardMinutes * FocusState.MINUTE;
 
-        LinearLayout top = row(this);
-        top.addView(iconBadge(this, R.drawable.ic_steps, CYAN_SOFT, CYAN, 34, 18, 10));
-        space(top, 10);
-        LinearLayout titles = column(this);
-        titles.addView(titleWithInfo(this, "步数", 16, INK,
+        TextView sub = text(this, day.steps + " 步 · 已兑 " + shortMinutes(day.stepsEarnedMs)
+                + "/" + state.stepDailyCapMinutes + " 分", 12, MUTED, false);
+        TextView headPill = compactStatusPill(this,
+                layFlat ? "今日暂停" : capped ? "已上限" : units > 0 ? "可领 +" + claimableMins + "分"
+                        : state.stepsPerReward + "步/" + state.stepRewardMinutes + "分",
+                layFlat ? PURPLE_SOFT : (!capped && units > 0) ? BLUE_SOFT : SURFACE_SUBTLE,
+                layFlat ? PURPLE : (!capped && units > 0) ? BLUE : MUTED);
+
+        LinearLayout body = column(this);
+        LinearLayout topInfo = row(this);
+        weight(topInfo, titleWithInfo(this, "每日计步兑换", 14, INK,
                 "步数兑换", "每 " + state.stepsPerReward + " 步可兑换 " + state.stepRewardMinutes
                         + " 分钟可用时长，每日步数兑换上限 " + state.stepDailyCapMinutes + " 分钟。"));
-        titles.addView(text(this, "每 " + state.stepsPerReward + " 步兑 " + state.stepRewardMinutes + " 分", 12, MUTED, false));
-        weight(top, titles);
-
-        LinearLayout right = column(this);
-        right.setGravity(Gravity.END);
-        right.addView(text(this, capped ? "今日已达上限" : rem + " 步 待兑换", 12,
+        topInfo.addView(text(this, capped ? "今日已达上限" : rem + " 步待兑换", 12,
                 capped ? MUTED : units > 0 ? BLUE : INK_SUB, true));
-        right.addView(text(this, "已兑换 " + duration(day.stepsEarnedMs), 11, MUTED, false));
-        top.addView(right);
-        card.addView(top);
-        gap(card, 12);
+        body.addView(topInfo);
+        gap(body, 12);
 
         LinearLayout bottom = row(this);
         LinearLayout left = column(this);
@@ -1766,8 +1957,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         weight(bottom, left);
         space(bottom, 8);
 
-        TextView redeem = redeemPill(this, capped ? "已达上限" : "+" + claimableMins + " 分钟", !capped && units > 0);
+        TextView redeem = redeemPill(this, layFlat ? "今日暂停" : capped ? "已达上限" : "+" + claimableMins + " 分钟",
+                !layFlat && !capped && units > 0);
         redeem.setOnClickListener(v -> {
+            if (state.isLayFlat()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+                return;
+            }
             if (capped) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
                 toast("今日步数兑换已达 " + state.stepDailyCapMinutes + " 分钟上限");
@@ -1784,16 +1981,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
         });
         bottom.addView(redeem);
-        card.addView(bottom);
-        return card;
+        body.addView(bottom);
+
+        return wrapCollapsibleCard("steps", R.drawable.ic_steps, CYAN_SOFT, CYAN,
+                "步数", sub, headPill, body, null);
     }
 
     private void updateHomeLive() {
         long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
         LocalDate today = FocusState.today();
         boolean activeCountdown = state.active();
         boolean activeStopwatch = state.offlineActive();
         boolean sober = state.soberActive(now);
+        boolean layFlat = state.isLayFlat();
         FocusState.Day day = state.days.get(today.toString());
 
         if (homeVaultBig != null) {
@@ -1805,8 +2006,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
             lastPiggyRatio = vaultRatio;
 
             setTextIfChanged(homeVaultBig, shortMinutes(state.vaultMs));
-            setTextIfChanged(homeCreditBig, shortMinutes(state.creditMs));
-            setTextIfChanged(homeLimitedSub, "今日已使用 " + duration(day == null ? 0 : day.limitedMs));
+            if (layFlat) {
+                long remReset = Math.max(0L, FocusState.nextResetMs(now, zone) - now);
+                setTextIfChanged(homeCreditBig, formatHmsCountdown(remReset));
+                setTextIfChanged(homeLimitedSub, "躺平模式全天免限 · 今日暂停兑换时间");
+            } else {
+                setTextIfChanged(homeCreditBig, shortMinutes(state.creditMs));
+                setTextIfChanged(homeLimitedSub, "今日已使用 " + duration(day == null ? 0 : day.limitedMs));
+            }
         }
 
         if (homeSoberBadge != null) {
@@ -1837,33 +2044,54 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
         }
 
+        if (abstinenceHeroTicker != null) {
+            FocusState.Abstinence heroItem = abstinenceHeroTicker.item;
+            long hElapsed = state.abstinenceElapsedMs(heroItem, now);
+            long hTarget = state.abstinenceTargetMs(heroItem);
+            int hPct = hTarget <= 0L ? 100 : (int) Math.min(100L, hElapsed * 100L / hTarget);
+            float hRatio = hTarget <= 0L ? 1f : Math.min(1f, (float) hElapsed / hTarget);
+            setTextIfChanged(abstinenceHeroTicker.durView, AbstinenceUi.formatHeroDuration(hElapsed));
+            abstinenceHeroTicker.ringView.update(hRatio, hPct);
+            String leftTxt = heroItem.dailySavingYuan > 0.001
+                    ? String.format(Locale.ROOT, "¥%.2f", (hElapsed / 86_400_000.0) * heroItem.dailySavingYuan)
+                    : (state.canClaimAbstinence(heroItem, now)
+                    ? (layFlat ? "今日暂停" : "可领 +" + heroItem.rewardMinutes + " 分")
+                    : "+" + heroItem.rewardMinutes + " 分钟");
+            setTextIfChanged(abstinenceHeroTicker.leftTileVal, leftTxt);
+            setTextIfChanged(abstinenceHeroTicker.rightTileVal,
+                    AbstinenceUi.formatSummaryDuration(Math.max(heroItem.longestMs, hElapsed)));
+        }
+
         for (AbstinenceTicker t : liveAbstinenceTickers) {
             long elapsed = state.abstinenceElapsedMs(t.item, now);
             long target = state.abstinenceTargetMs(t.item);
             boolean reached = state.abstinenceReached(t.item, now);
             boolean canClaim = state.canClaimAbstinence(t.item, now);
+            int pct = target <= 0 ? 100 : (int) Math.min(100L, elapsed * 100L / target);
             boolean stateChanged = reached != t.lastReached || canClaim != t.lastCanClaim;
             if (t.compact) {
                 setTextIfChanged(t.clockView, formatAbstinenceElapsed(elapsed) + " / "
                         + FocusSheets.formatAbstinenceTarget(t.item.targetHours));
-                String lbl = canClaim ? "领 +" + t.item.rewardMinutes + " 分"
+                String lbl = (canClaim && layFlat) ? "今日暂停"
+                        : canClaim ? "领 +" + t.item.rewardMinutes + " 分"
                         : reached ? "下一轮"
                         : "+" + t.item.rewardMinutes + " 分";
                 setTextIfChanged(t.actionBtn, lbl);
-                if (stateChanged) {
-                    t.actionBtn.setTextColor(canClaim ? CARD : reached ? GREEN : INK_SUB);
-                    t.actionBtn.setBackground(touch(this, canClaim ? BLUE : reached ? GREEN_SOFT : CARD, 10));
+                if (stateChanged && t.actionBtn != null) {
+                    t.actionBtn.setTextColor((canClaim && !layFlat) ? ON_ACCENT
+                            : (canClaim && layFlat) ? PURPLE : reached ? GREEN : INK_SUB);
+                    t.actionBtn.setBackground(touch(this,
+                            (canClaim && !layFlat) ? BLUE : (canClaim && layFlat) ? PURPLE_SOFT
+                                    : reached ? GREEN_SOFT : CARD, 10));
                     t.lastReached = reached;
                     t.lastCanClaim = canClaim;
                 }
             } else {
-                setTextIfChanged(t.clockView, formatAbstinenceElapsed(elapsed));
-                int pct = target <= 0 ? 100 : (int) Math.min(100L, elapsed * 100L / target);
-                if (t.pctView != null) {
-                    setTextIfChanged(t.pctView, reached
-                            ? "已达标 · 累计 " + t.item.completedCount + " 轮"
-                            : "已坚持 " + pct + "%");
-                    if (stateChanged) t.pctView.setTextColor(reached ? GREEN : MUTED);
+                setTextIfChanged(t.clockView, "已坚持 " + AbstinenceUi.formatSummaryDuration(elapsed)
+                        + " · 目标 " + FocusSheets.formatAbstinenceTarget(t.item.targetHours));
+                if (t.pillView != null) {
+                    String pillText = canClaim ? (layFlat ? "今日暂停" : "可领 +" + t.item.rewardMinutes + "分") : (pct + "%");
+                    setTextIfChanged(t.pillView, pillText);
                 }
                 if (t.bar != null) {
                     float barProgress = target <= 0 ? 1f : Math.min(1f, (float) elapsed / target);
@@ -1872,17 +2100,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         t.lastBarProgress = barProgress;
                     }
                 }
-                if (stateChanged) {
-                    boolean showAction = canClaim || reached;
-                    t.actionBtn.setVisibility(showAction ? View.VISIBLE : View.GONE);
-                    if (showAction) {
-                        setTextIfChanged(t.actionBtn, canClaim ? "领取 +" + t.item.rewardMinutes + "分" : "新一轮");
-                        t.actionBtn.setTextColor(canClaim ? CARD : GREEN);
-                        t.actionBtn.setBackground(touch(this, canClaim ? BLUE : GREEN_SOFT, 10));
-                    }
-                    t.lastReached = reached;
-                    t.lastCanClaim = canClaim;
-                }
+                t.lastReached = reached;
+                t.lastCanClaim = canClaim;
             }
         }
 
@@ -1899,10 +2118,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (homeTimerStopWatchRunRow.getVisibility() != swVis) homeTimerStopWatchRunRow.setVisibility(swVis);
             if (homeTimerCountdownRunRow.getVisibility() != cdVis) homeTimerCountdownRunRow.setVisibility(cdVis);
 
+            int badgeState;
             if (activeStopwatch) {
                 long elapsed = state.offlineElapsed(now);
                 long claimable = state.claimableOfflineMs(now);
-                setTextIfChanged(homeTimerReward, shortMinutes(claimable) + " 分钟 可兑换");
+                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : shortMinutes(claimable) + " 分钟 可兑换");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
                 boolean running = state.offlineRunning();
                 if (!Boolean.valueOf(running).equals(lastStopwatchRunning)) {
@@ -1916,40 +2136,74 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         : countdown(elapsed) + " 继续自律");
                 setTextIfChanged(homeTimerSub, "今日共自律 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
                 homeTimerSub.setVisibility(View.VISIBLE);
+                setTextIfChanged(homeTimerCollapsedSub, (running ? "正计时进行中 " : "正计时已暂停 ") + countdown(elapsed));
+                setTextIfChanged(homeTimerCollapsedBadge, running ? "进行中" : "已暂停");
+                badgeState = running ? 1 : 2;
             } else if (activeCountdown) {
                 long rem = state.remaining(now);
-                setTextIfChanged(homeTimerReward, shortMinutes(state.convertByMode(state.phaseDuration)) + " 分钟 预计奖励");
+                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
+                        : shortMinutes(state.convertByMode(state.phaseDuration)) + " 分钟 预计奖励");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
                 setTextIfChanged(homeTimerCountdownBtn, "自律倒计时还剩 " + countdown(rem) + " · 进入全屏");
                 setTextIfChanged(homeTimerSub, "倒计时进行中 · 结束后自动结算");
                 homeTimerSub.setVisibility(View.VISIBLE);
+                setTextIfChanged(homeTimerCollapsedSub, "倒计时进行中 · 剩 " + countdown(rem));
+                setTextIfChanged(homeTimerCollapsedBadge, "锁定中");
+                badgeState = 1;
             } else if (timerTabMode == 0) {
                 long claimable = state.claimableOfflineMs(now);
-                setTextIfChanged(homeTimerReward, state.canClaimOffline(now)
-                        ? shortMinutes(claimable) + " 分钟 可兑换"
-                        : "满 5 分钟可兑");
+                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
+                        : state.canClaimOffline(now) ? shortMinutes(claimable) + " 分钟 可兑换" : "满 5 分钟可兑");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
                 homeTimerSub.setVisibility(View.GONE);
+                setTextIfChanged(homeTimerCollapsedSub, "正计时 · 今日自律 "
+                        + duration(day == null ? 0L : (day.offlineMs + day.focusMs)));
+                setTextIfChanged(homeTimerCollapsedBadge, layFlat ? "今日暂停"
+                        : state.canClaimOffline(now) ? "可领 +" + shortMinutes(claimable) + "分" : "去开启");
+                badgeState = layFlat ? 4 : state.canClaimOffline(now) ? 3 : 0;
             } else {
                 long expectedMs = state.convertByMode(state.presetWork * FocusState.MINUTE);
-                setTextIfChanged(homeTimerReward, "+" + shortMinutes(expectedMs) + " 分钟 预计奖励");
+                setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : "+" + shortMinutes(expectedMs) + " 分钟 预计奖励");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
                 homeTimerSub.setVisibility(View.GONE);
+                setTextIfChanged(homeTimerCollapsedSub, "倒计时 " + state.presetWork + " 分钟 · 不可提前停止");
+                setTextIfChanged(homeTimerCollapsedBadge, layFlat ? "今日暂停" : "去开启");
+                badgeState = layFlat ? 4 : 0;
+            }
+            if (homeTimerCollapsedBadge != null && !Integer.valueOf(badgeState).equals(lastTimerBadgeState)) {
+                int bg = switch (badgeState) {
+                    case 1 -> BLUE_SOFT;
+                    case 2 -> AMBER_SOFT;
+                    case 3 -> GREEN_SOFT;
+                    case 4 -> PURPLE_SOFT;
+                    default -> SURFACE_SUBTLE;
+                };
+                int ink = switch (badgeState) {
+                    case 1 -> BLUE;
+                    case 2 -> AMBER;
+                    case 3 -> GREEN;
+                    case 4 -> PURPLE;
+                    default -> MUTED;
+                };
+                homeTimerCollapsedBadge.setBackground(shape(this, bg, 8));
+                homeTimerCollapsedBadge.setTextColor(ink);
+                lastTimerBadgeState = badgeState;
             }
             boolean countdownMode = !activeStopwatch && (activeCountdown || timerTabMode == 1);
-            boolean canClaim = !countdownMode && state.canClaimOffline(now);
+            boolean canClaim = !countdownMode && !layFlat && state.canClaimOffline(now);
             long claimable = canClaim ? state.claimableOfflineMs(now) : 0L;
             if (homeTimerRedeemRow != null) {
                 homeTimerRedeemRow.setVisibility(countdownMode ? View.GONE : View.VISIBLE);
             }
             if (homeTimerRedeemHint != null) {
-                setTextIfChanged(homeTimerRedeemHint, canClaim ? "已满 5 分钟，点击立即领取" : "累计满 5 分钟可随时兑换");
+                setTextIfChanged(homeTimerRedeemHint, layFlat ? "躺平模式今日暂停兑换时间"
+                        : canClaim ? "已满 5 分钟，点击立即领取" : "累计满 5 分钟可随时兑换");
             }
-            setTextIfChanged(homeOfflineRedeemBtn, "+" + shortMinutes(claimable) + " 分钟");
+            setTextIfChanged(homeOfflineRedeemBtn, layFlat ? "今日暂停" : "+" + shortMinutes(claimable) + " 分钟");
             if (!Boolean.valueOf(canClaim).equals(lastOfflineCanClaim)) {
                 homeOfflineRedeemBtn.setBackground(canClaim
                         ? touch(this, BLUE, 12) : shape(this, BLUE_DISABLED_BG, 12));
-                homeOfflineRedeemBtn.setTextColor(canClaim ? CARD : BLUE_DISABLED_TEXT);
+                homeOfflineRedeemBtn.setTextColor(canClaim ? ON_ACCENT : BLUE_DISABLED_TEXT);
                 lastOfflineCanClaim = canClaim;
             }
             homeOfflineRedeemBtn.setEnabled(!countdownMode);
@@ -2074,8 +2328,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             sleepSw.setChecked(true, false);
             int cost = state.earlySleepConfigCostMinutes(true, state.earlySleepRewardMinutes,
                     state.earlySleepRewardMinutes, false);
-            FocusSheets.confirmPaidChange(this, state, "放弃睡眠时段锁定",
-                    "关闭后将解除睡眠时段全应用强制锁定，并判定今日早睡挑战失败", cost, () -> {
+            boolean forcePaid = state.isSleepLocked(tNow, tZone);
+            FocusSheets.confirmPaidChange(this, state, "sleep_config", "放弃睡眠时段锁定",
+                    "关闭后将解除睡眠时段全应用强制锁定，并判定今日早睡挑战失败", cost, forcePaid, () -> {
                         state.failEarlySleepByConfigChange(System.currentTimeMillis(),
                                 ZoneId.systemDefault(), "关闭夜间强制锁定", true);
                         changed();
@@ -2093,11 +2348,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             FocusSheets.pickClock(this, state.sleepStart, state.sleepEnd, val -> {
                 if (val == state.sleepStart) return;
+                long curNow = System.currentTimeMillis();
+                ZoneId curZone = ZoneId.systemDefault();
                 int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
                         state.earlySleepRewardMinutes, true);
-                FocusSheets.confirmPaidChange(this, state, "调整睡眠开始时间",
+                boolean forcePaid = state.isSleepLocked(curNow, curZone);
+                FocusSheets.confirmPaidChange(this, state, "sleep_config", "调整睡眠开始时间",
                         "入睡时间设为 " + clock(val) + (state.bedtime ? "（将使今日早睡挑战失败）" : ""),
-                        cost, () -> {
+                        cost, forcePaid, () -> {
                             state.sleepStart = val;
                             if (state.bedtime) {
                                 state.failEarlySleepByConfigChange(System.currentTimeMillis(),
@@ -2111,11 +2369,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             FocusSheets.pickClock(this, state.sleepEnd, state.sleepStart, val -> {
                 if (val == state.sleepEnd) return;
+                long curNow = System.currentTimeMillis();
+                ZoneId curZone = ZoneId.systemDefault();
                 int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
                         state.earlySleepRewardMinutes, true);
-                FocusSheets.confirmPaidChange(this, state, "调整起床时间",
+                boolean forcePaid = state.isSleepLocked(curNow, curZone);
+                FocusSheets.confirmPaidChange(this, state, "sleep_config", "调整起床时间",
                         "起床时间设为 " + clock(val) + (state.bedtime ? "（将使今日早睡挑战失败）" : ""),
-                        cost, () -> {
+                        cost, forcePaid, () -> {
                             state.sleepEnd = val;
                             if (state.bedtime) {
                                 state.failEarlySleepByConfigChange(System.currentTimeMillis(),
@@ -2212,39 +2473,60 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     // =========================================================================
-    // TAB 2: 戒断 (Minimalist Abstinence Tracker)
+    // TAB 2: 戒断 (续步-style Minimalist Abstinence Tracker)
     // =========================================================================
     private void abstinence() {
         long now = System.currentTimeMillis();
         int total = state.abstinences.size();
-        int completedSum = state.totalAbstinenceCompleted();
+        LocalDate calNow = LocalDate.now();
+        String dateSub = calNow.format(DateTimeFormatter.ofPattern("M月d日 · EEEE", Locale.SIMPLIFIED_CHINESE));
 
         LinearLayout head = row(this);
         head.setPadding(0, 0, dp(this, 48), 0);
+        LinearLayout titleCol = column(this);
         TextView h = text(this, "戒断", 26, INK, true);
         if (Build.VERSION.SDK_INT >= 28) h.setAccessibilityHeading(true);
-        head.addView(h);
-        space(head, 4);
-        head.addView(infoIcon(this, "戒断挑战",
-                "自定义想要戒断的事件、目标时长与完成奖励。点按卡片可编辑详情，达到目标后可领取可用时间并开启新一轮，破戒可一键重新计时。"));
-        pages.addView(head);
+        titleCol.addView(h);
+        gap(titleCol, 2);
+        titleCol.addView(text(this, dateSub, 12, MUTED, false));
+        weight(head, titleCol);
 
-        if (total > 0) {
-            gap(pages, 4);
-            pages.addView(text(this, "进行中 " + total + " 项 · 累计达标 " + completedSum + " 次", 13, MUTED, false));
-        }
+        int pineBg = isDark() ? 0xff16332b : 0xffe4f0ec;
+        int pineStroke = isDark() ? 0xff265446 : 0xffcfe3dc;
+        int pineInk = isDark() ? 0xff6ee7b7 : 0xff164237;
+        TextView newBtn = pillButton(this, "+ 新建戒断", pineBg, pineInk, 18, 36);
+        newBtn.setBackground(touchCard(this, pineBg, pineStroke, 18));
+        newBtn.setPadding(dp(this, 13), 0, dp(this, 13), 0);
+        newBtn.setTextSize(13);
+        newBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            FocusSheets.showAbstinenceEditor(this, state, null, null, this::changed);
+        });
+        head.addView(newBtn, -2, -2);
+        pages.addView(head);
         gap(pages, 16);
 
         if (total == 0) {
+            LinearLayout hero = column(this);
+            hero.setBackground(gradientBg(this, 0xff18473b, 0xff0f2e26, 24));
+            hero.setPadding(dp(this, 20), dp(this, 20), dp(this, 20), dp(this, 20));
+            elevate(hero, 4);
+            hero.addView(text(this, "• 开启清醒戒断", 13, 0xff9ec7b9, true));
+            gap(hero, 8);
+            hero.addView(text(this, "迈出改变的第一步", 24, ON_ACCENT, true));
+            gap(hero, 6);
+            hero.addView(text(this, "记录连续坚持、复发日记与里程碑，完成目标还可兑换可用时长。",
+                    13, 0xd4ffffff, false));
+            pages.addView(hero);
+            gap(pages, 14);
+
             LinearLayout empty = surfaceCard();
-            empty.addView(text(this, "还没有戒断目标", 16, INK, true));
-            gap(empty, 4);
-            empty.addView(text(this, "选一个快速开始，或点击下方按钮自定义", 12, MUTED, false));
+            empty.addView(text(this, "快速开始一个戒断项目", 16, INK, true));
             gap(empty, 12);
             String[][] quickTemplates = {
                     {"戒熬夜刷手机", "24", "20"},
                     {"戒刷短视频", "48", "30"},
-                    {"戒含糖饮料", "72", "35"},
+                    {"戒奶茶甜饮", "72", "35"},
                     {"戒游戏冲动", "24", "25"}
             };
             for (int r = 0; r < 2; r++) {
@@ -2259,8 +2541,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     chip.setTextSize(13);
                     chip.setOnClickListener(v -> {
                         haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                        state.addAbstinence(java.util.UUID.randomUUID().toString(),
-                                tplName, System.currentTimeMillis(), tplHours, tplReward);
+                        String newId = java.util.UUID.randomUUID().toString();
+                        state.addAbstinence(newId, tplName, System.currentTimeMillis(), tplHours, tplReward);
+                        selectedAbstinenceId = newId;
                         changed();
                         toast("已开启戒断「" + tplName + "」");
                     });
@@ -2272,104 +2555,196 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
             pages.addView(empty);
             gap(pages, 14);
+        } else {
+            FocusState.Abstinence primary = selectedAbstinenceId != null
+                    ? state.abstinences.get(selectedAbstinenceId) : null;
+            if (primary == null) primary = state.abstinences.values().iterator().next();
+            selectedAbstinenceId = primary.id;
+
+            long pElapsed = state.abstinenceElapsedMs(primary, now);
+            long pTarget = state.abstinenceTargetMs(primary);
+            float pRatio = pTarget <= 0L ? 1f : Math.min(1f, (float) pElapsed / pTarget);
+            int pPct = pTarget <= 0L ? 100 : (int) Math.min(100L, pElapsed * 100L / pTarget);
+            boolean pCanClaim = state.canClaimAbstinence(primary, now);
+
+            // Deep pine-green Hero Card matching ref image 2
+            LinearLayout hero = column(this);
+            hero.setBackground(gradientBg(this, 0xff18473b, 0xff0f2e26, 24));
+            hero.setPadding(dp(this, 18), dp(this, 18), dp(this, 18), dp(this, 18));
+            elevate(hero, 5);
+
+            LinearLayout heroTop = row(this);
+            View greenDot = new View(this);
+            greenDot.setBackground(shape(this, 0xff4ade80, 4));
+            heroTop.addView(greenDot, dp(this, 7), dp(this, 7));
+            space(heroTop, 8);
+            weight(heroTop, text(this, "正在坚持 · " + primary.name, 14, ON_ACCENT, true));
+            heroTop.addView(text(this, "详情 >", 13, 0xd8ffffff, false));
+            hero.addView(heroTop);
+            gap(hero, 14);
+
+            LinearLayout heroMid = row(this);
+            LinearLayout heroMidLeft = column(this);
+            TextView heroDurTv = text(this, AbstinenceUi.formatHeroDuration(pElapsed), 28, ON_ACCENT, true);
+            heroDurTv.setFontFeatureSettings("tnum");
+            heroMidLeft.addView(heroDurTv);
+            gap(heroMidLeft, 4);
+            heroMidLeft.addView(text(this, "当前目标 " + FocusSheets.formatAbstinenceTarget(primary.targetHours),
+                    12, 0xff9ec7b9, false));
+            weight(heroMid, heroMidLeft);
+            space(heroMid, 12);
+            AbstinenceUi.AbstinenceRingView ringView = new AbstinenceUi.AbstinenceRingView(this, pRatio, pPct);
+            heroMid.addView(ringView, dp(this, 82), dp(this, 82));
+            hero.addView(heroMid);
+            gap(hero, 16);
+
+            LinearLayout tiles = row(this);
+            boolean showSaving = primary.dailySavingYuan > 0.001;
+            LinearLayout leftTile = column(this);
+            leftTile.setBackground(shape(this, 0x1effffff, 14));
+            leftTile.setPadding(dp(this, 14), dp(this, 11), dp(this, 14), dp(this, 11));
+            leftTile.addView(text(this, showSaving ? "预计节省" : "达成奖励", 11, 0xff9ec7b9, false));
+            gap(leftTile, 4);
+            String leftValStr = showSaving
+                    ? String.format(Locale.ROOT, "¥%.2f", (pElapsed / 86_400_000.0) * primary.dailySavingYuan)
+                    : (pCanClaim ? (state.isLayFlat() ? "今日暂停" : "可领 +" + primary.rewardMinutes + " 分")
+                    : "+" + primary.rewardMinutes + " 分钟");
+            TextView leftValTv = text(this, leftValStr, 17, ON_ACCENT, true);
+            leftValTv.setFontFeatureSettings("tnum");
+            leftTile.addView(leftValTv);
+
+            LinearLayout rightTile = column(this);
+            rightTile.setBackground(shape(this, 0x1effffff, 14));
+            rightTile.setPadding(dp(this, 14), dp(this, 11), dp(this, 14), dp(this, 11));
+            rightTile.addView(text(this, "最长坚持", 11, 0xff9ec7b9, false));
+            gap(rightTile, 4);
+            TextView rightValTv = text(this, AbstinenceUi.formatSummaryDuration(Math.max(primary.longestMs, pElapsed)),
+                    17, ON_ACCENT, true);
+            rightValTv.setFontFeatureSettings("tnum");
+            rightTile.addView(rightValTv);
+
+            tiles.addView(leftTile, new LinearLayout.LayoutParams(0, -2, 1f));
+            space(tiles, 10);
+            tiles.addView(rightTile, new LinearLayout.LayoutParams(0, -2, 1f));
+            hero.addView(tiles);
+
+            FocusState.Abstinence heroPrimary = primary;
+            hero.setOnClickListener(v -> {
+                tapHaptic(v);
+                AbstinenceUi.showDetail(this, state, heroPrimary.id, this::changed);
+            });
+            abstinenceHeroTicker = new AbstinenceHeroTicker(primary, heroDurTv, ringView, leftValTv, rightValTv);
+            pages.addView(hero);
+            gap(pages, 18);
+
+            // 我的戒断 section header
+            LinearLayout listHead = row(this);
+            weight(listHead, text(this, "我的戒断", 17, INK, true));
+            TextView countPill = text(this, total + " 项", 12, MUTED, true);
+            countPill.setBackground(shape(this, isDark() ? SURFACE_SUBTLE : 0xffe6ede9, 10));
+            countPill.setPadding(dp(this, 10), dp(this, 4), dp(this, 10), dp(this, 4));
+            listHead.addView(countPill);
+            pages.addView(listHead);
+            gap(pages, 10);
+
+            for (var entry : state.abstinences.entrySet()) {
+                FocusState.Abstinence a = entry.getValue();
+                long elapsed = state.abstinenceElapsedMs(a, now);
+                long target = state.abstinenceTargetMs(a);
+                boolean reached = state.abstinenceReached(a, now);
+                boolean canClaim = state.canClaimAbstinence(a, now);
+                int pct = target <= 0 ? 100 : (int) Math.min(100L, elapsed * 100L / target);
+
+                LinearLayout card = row(this);
+                card.setBackground(touchCard(this, CARD, canClaim ? greenStroke() : BORDER, 18));
+                card.setPadding(dp(this, 14), dp(this, 14), dp(this, 14), dp(this, 14));
+                elevate(card, 1.5f);
+
+                card.addView(iconBadge(this, AbstinenceUi.iconForIndex(a.iconIndex),
+                        isDark() ? 0xff163329 : 0xffdceee6,
+                        isDark() ? 0xff7ce3b4 : 0xff1b5e4b, 44, 22, 12));
+                space(card, 12);
+
+                LinearLayout mid = column(this);
+                LinearLayout topLine = row(this);
+                weight(topLine, text(this, a.name, 16, INK, true));
+                String pillStr = canClaim ? (state.isLayFlat() ? "今日暂停" : "可领 +" + a.rewardMinutes + "分") : (pct + "%");
+                TextView pctPill = text(this, pillStr, 11,
+                        canClaim && state.isLayFlat() ? PURPLE : (isDark() ? GREEN : 0xff1b5e4b), true);
+                pctPill.setFontFeatureSettings("tnum");
+                pctPill.setBackground(shape(this,
+                        canClaim && state.isLayFlat() ? PURPLE_SOFT : (isDark() ? GREEN_SOFT : 0xffdfeee6), 9));
+                pctPill.setPadding(dp(this, 9), dp(this, 3), dp(this, 9), dp(this, 3));
+                topLine.addView(pctPill);
+                mid.addView(topLine);
+                gap(mid, 4);
+
+                TextView subTv = text(this, "已坚持 " + AbstinenceUi.formatSummaryDuration(elapsed)
+                        + " · 目标 " + FocusSheets.formatAbstinenceTarget(a.targetHours), 12, MUTED, false);
+                subTv.setFontFeatureSettings("tnum");
+                mid.addView(subTv);
+                gap(mid, 8);
+
+                CapsuleBar bar = new CapsuleBar(this);
+                bar.setColors(LINE, reached ? GREEN : (isDark() ? 0xff4c9a7c : 0xff9f4b43));
+                float initProg = target <= 0 ? 1f : Math.min(1f, (float) elapsed / target);
+                bar.setProgress(initProg);
+                mid.addView(bar, -1, dp(this, 5));
+                weight(card, mid);
+                space(card, 10);
+
+                card.addView(iconView(this, R.drawable.ic_chevron_right, 16, MUTED));
+                card.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    selectedAbstinenceId = a.id;
+                    AbstinenceUi.showDetail(this, state, a.id, this::changed);
+                });
+
+                liveAbstinenceTickers.add(new AbstinenceTicker(a, subTv, null, bar, null, pctPill, false,
+                        reached, canClaim, initProg));
+                pages.addView(card);
+                gap(pages, 10);
+            }
+            gap(pages, 4);
         }
 
-        for (var entry : state.abstinences.entrySet()) {
-            FocusState.Abstinence a = entry.getValue();
-            long elapsed = state.abstinenceElapsedMs(a, now);
-            long target = state.abstinenceTargetMs(a);
-            boolean reached = state.abstinenceReached(a, now);
-            boolean canClaim = state.canClaimAbstinence(a, now);
-            int pct = target <= 0 ? 100 : (int) Math.min(100L, elapsed * 100L / target);
-
-            LinearLayout card = column(this);
-            card.setBackground(touchCard(this, CARD, canClaim ? 0xffbcecd3 : BORDER, 18));
-            card.setPadding(dp(this, 16), dp(this, 15), dp(this, 16), dp(this, 14));
-            elevate(card, 1.5f);
-            card.setOnClickListener(v -> {
-                tapHaptic(v);
-                FocusSheets.showAbstinenceEditor(this, state, a.id, a, this::changed);
-            });
-
-            LinearLayout top = row(this);
-            weight(top, text(this, a.name, 16, INK, true));
-            TextView rewardPill = text(this, "+" + a.rewardMinutes + " 分钟", 11, BLUE, true);
-            rewardPill.setBackground(shape(this, BLUE_SOFT, 8));
-            rewardPill.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
-            top.addView(rewardPill);
-            card.addView(top);
-            gap(card, 10);
-
-            LinearLayout clockRow = row(this);
-            TextView clockTv = text(this, formatAbstinenceElapsed(elapsed), 26, INK, true);
-            clockTv.setFontFeatureSettings("tnum");
-            weight(clockRow, clockTv);
-            clockRow.addView(text(this, "目标 " + FocusSheets.formatAbstinenceTarget(a.targetHours),
-                    12, MUTED, false));
-            card.addView(clockRow);
-            gap(card, 10);
-
-            CapsuleBar bar = new CapsuleBar(this);
-            bar.setColors(LINE, reached ? GREEN : BLUE);
-            bar.setProgress(target <= 0 ? 1f : Math.min(1f, (float) elapsed / target));
-            card.addView(bar, -1, dp(this, 4));
-            gap(card, 10);
-
-            LinearLayout bottom = row(this);
-            TextView pctTv = text(this, reached
-                    ? "已达标 · 累计 " + a.completedCount + " 轮"
-                    : "已坚持 " + pct + "%",
-                    12, reached ? GREEN : MUTED, false);
-            weight(bottom, pctTv);
-
-            TextView relapseBtn = text(this, "破戒重计", 12, MUTED, false);
-            relapseBtn.setBackground(touch(this, CARD, 8));
-            relapseBtn.setPadding(dp(this, 8), dp(this, 4), dp(this, 8), dp(this, 4));
-            relapseBtn.setOnClickListener(v -> {
-                tapHaptic(v);
-                confirmDialog(this, R.drawable.ic_close, RED_SOFT, RED,
-                        "确认破戒并重新计时？",
-                        "「" + a.name + "」当前已坚持 " + formatAbstinenceCompact(state.abstinenceElapsedMs(a, System.currentTimeMillis()))
-                                + "，确认后将从现在重新开始本轮计时。",
-                        "再忍一下", "重新开始", true, () -> {
-                            state.resetAbstinence(a.id, System.currentTimeMillis(), ZoneId.systemDefault(), true);
-                            changed();
-                            toast("已重置「" + a.name + "」，继续加油");
-                        });
-            });
-            bottom.addView(relapseBtn);
-
-            boolean showAction = canClaim || reached;
-            TextView primaryBtn = pillButton(this, canClaim ? "领取 +" + a.rewardMinutes + "分" : "新一轮",
-                    canClaim ? BLUE : GREEN_SOFT, canClaim ? CARD : GREEN, 10, 30);
-            primaryBtn.setTextSize(12);
-            primaryBtn.setPadding(dp(this, 11), dp(this, 4), dp(this, 11), dp(this, 4));
-            primaryBtn.setVisibility(showAction ? View.VISIBLE : View.GONE);
-            primaryBtn.setOnClickListener(v -> handleAbstinencePrimaryAction(v, a));
-            LinearLayout.LayoutParams actLp = new LinearLayout.LayoutParams(-2, -2);
-            actLp.leftMargin = dp(this, 8);
-            bottom.addView(primaryBtn, actLp);
-            card.addView(bottom);
-
-            float initBarProgress = target <= 0 ? 1f : Math.min(1f, (float) elapsed / target);
-            liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv, pctTv, bar, primaryBtn, false,
-                    reached, canClaim, initBarProgress));
-            pages.addView(card);
-            gap(pages, 12);
-        }
-
-        TextView newAbstain = primaryButton(this, "+ 新建戒断");
-        newAbstain.setOnClickListener(v -> {
+        // 每日一句 card matching ref image 2 bottom
+        LinearLayout quoteCard = row(this);
+        quoteCard.setBackground(touchCard(this, CARD, BORDER, 18));
+        quoteCard.setPadding(dp(this, 16), dp(this, 14), dp(this, 16), dp(this, 14));
+        elevate(quoteCard, 1.5f);
+        View barAccent = new View(this);
+        barAccent.setBackground(shape(this, isDark() ? GREEN : 0xff1b5e4b, 3));
+        quoteCard.addView(barAccent, dp(this, 4), dp(this, 40));
+        space(quoteCard, 12);
+        LinearLayout qCopy = column(this);
+        qCopy.addView(text(this, "每日一句", 12, isDark() ? GREEN : 0xff1b5e4b, true));
+        gap(qCopy, 4);
+        TextView qBody = text(this, "", 14, INK, true);
+        qCopy.addView(qBody);
+        weight(quoteCard, qCopy);
+        Runnable renderAbsQuote = () -> {
+            QuoteBank.Quote q = QuoteBank.quoteForOffset(this, abstinenceQuoteOffset);
+            setTextIfChanged(qBody, q.text());
+        };
+        renderAbsQuote.run();
+        quoteCard.setOnClickListener(v -> {
             tapHaptic(v);
-            FocusSheets.showAbstinenceEditor(this, state, null, null, this::changed);
+            abstinenceQuoteOffset++;
+            renderAbsQuote.run();
         });
-        pages.addView(newAbstain, -1, -2);
+        pages.addView(quoteCard);
     }
 
     private void handleAbstinencePrimaryAction(View v, FocusState.Abstinence a) {
         long curNow = System.currentTimeMillis();
         ZoneId zone = ZoneId.systemDefault();
         if (state.canClaimAbstinence(a, curNow)) {
+            if (state.isLayFlat()) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+                return;
+            }
             long granted = state.claimAbstinence(a.id, curNow, zone);
             if (granted > 0L) {
                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
@@ -2709,8 +3084,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private FrameLayout topBarBtn(int iconRes, int tint, String desc, Runnable action) {
-        FrameLayout btn = iconBadge(this, iconRes, 0xf2ffffff, tint, 38, 19, 12);
-        btn.setBackground(touchCard(this, 0xf2ffffff, BORDER, 12));
+        int bg = isDark() ? 0xe61c2534 : 0xf2ffffff;
+        FrameLayout btn = iconBadge(this, iconRes, bg, tint, 38, 19, 12);
+        btn.setBackground(touchCard(this, bg, BORDER, 12));
         elevate(btn, 4);
         btn.setContentDescription(desc);
         btn.setOnClickListener(v -> {
@@ -2855,7 +3231,37 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private void changed() {
         TimerReceiver.changed(this);
+        FocusService.refreshConnected();
         redraw();
+        updateSleepLock(System.currentTimeMillis());
+    }
+
+    private void updateSleepLock(long now) {
+        if (!resumed) return;
+        boolean locked = state.isSleepLocked(now, ZoneId.systemDefault());
+        if (!locked) {
+            if (sleepLockUi != null) {
+                sleepLockUi.dismiss();
+                sleepLockUi = null;
+            }
+            return;
+        }
+        if (soberTimer != null) {
+            soberTimer.dismiss();
+            soberTimer = null;
+        }
+        if (sleepLockUi != null && !sleepLockUi.isShowing()) {
+            sleepLockUi = null;
+        }
+        if (sleepLockUi == null) {
+            sleepLockUi = new SleepLockUi(this, state, this::changed);
+        }
+        sleepLockUi.update(now);
+    }
+
+    private static String formatHmsCountdown(long ms) {
+        long sec = Math.max(0L, (ms + 999L) / 1000L);
+        return String.format(Locale.ROOT, "%02d:%02d:%02d", sec / 3600L, (sec % 3600L) / 60L, sec % 60L);
     }
 
     private String resolveAppLabel(String pkg) {

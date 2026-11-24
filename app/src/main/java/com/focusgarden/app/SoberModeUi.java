@@ -54,7 +54,7 @@ final class SoberModeUi {
             TextView tip = text(activity,
                     "可用时长与储蓄罐均不足 1 分钟，请先通过自律模式或打卡赚取时长后再开启目的模式",
                     12, AMBER, false);
-            tip.setBackground(cardBg(activity, AMBER_SOFT, 0xfff5dcb1, 12));
+            tip.setBackground(cardBg(activity, AMBER_SOFT, amberStroke(), 12));
             tip.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
             body.addView(tip, -1, -2);
         }
@@ -261,7 +261,7 @@ final class SoberModeUi {
                 weight(row, name);
                 space(row, 10);
                 if (checked) {
-                    row.addView(iconBadge(activity, R.drawable.ic_check, BLUE, CARD, 24, 14, 7));
+                    row.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 24, 14, 7));
                 } else {
                     FrameLayout box = new FrameLayout(activity);
                     box.setBackground(cardBg(activity, CARD, BORDER, 7));
@@ -288,7 +288,7 @@ final class SoberModeUi {
             } else {
                 confirm.setText("确认选择（" + selected.size() + " 个）");
                 confirm.setBackground(touch(activity, BLUE, 14));
-                confirm.setTextColor(CARD);
+                confirm.setTextColor(ON_ACCENT);
             }
         };
         refreshConfirm.run();
@@ -378,7 +378,7 @@ final class SoberModeUi {
                 return insets;
             });
             layout.setPadding(gutter, gutter, gutter, gutter);
-            layout.addView(text(activity, "目的模式", 20, CARD, true));
+            layout.addView(text(activity, "目的模式", 20, ON_ACCENT, true));
 
             ScrollView center = new ScrollView(activity);
             center.setFillViewport(true);
@@ -408,13 +408,13 @@ final class SoberModeUi {
                 badge.setGravity(Gravity.CENTER_HORIZONTAL);
                 badge.addView(appIcon(activity, single.getKey(), 48, 13));
                 gap(badge, 10);
-                TextView purpose = text(activity, single.getValue(), 22, CARD, true);
+                TextView purpose = text(activity, single.getValue(), 22, ON_ACCENT, true);
                 purpose.setGravity(Gravity.CENTER);
                 badge.addView(purpose, -1, -2);
                 dial.addView(badge, -1, -2);
 
                 gap(layout, 12);
-                TextView open = pillButton(activity, "打开 " + single.getValue(), CARD, 0xff143b32, 20, 50);
+                TextView open = pillButton(activity, "打开 " + single.getValue(), ON_ACCENT, 0xff143b32, 20, 50);
                 open.setOnClickListener(v -> launchPurposeApp(activity, single.getKey()));
                 layout.addView(open, -1, -2);
             } else if (!apps.isEmpty()) {
@@ -428,7 +428,7 @@ final class SoberModeUi {
                 int total = apps.size();
                 for (var entry : apps.entrySet()) {
                     LinearLayout item = row(activity);
-                    item.setBackground(touch(activity, 0xf2ffffff, 16));
+                    item.setBackground(touch(activity, isDark() ? 0xe61c2534 : 0xf2ffffff, 16));
                     item.setPadding(dp(activity, 14), dp(activity, 11), dp(activity, 14), dp(activity, 11));
                     item.addView(appIcon(activity, entry.getKey(), 34, 9));
                     space(item, 12);
@@ -445,11 +445,11 @@ final class SoberModeUi {
 
             gap(layout, 8);
             LinearLayout actions = row(activity);
-            TextView pause = pillButton(activity, "暂停", 0xbb173b31, CARD, 16, 48);
+            TextView pause = pillButton(activity, "暂停", 0xbb173b31, ON_ACCENT, 16, 48);
             pause.setOnClickListener(v -> onPause.run());
             weight(actions, pause);
             space(actions, 8);
-            TextView finish = pillButton(activity, "结束", 0xbb173b31, CARD, 16, 48);
+            TextView finish = pillButton(activity, "结束", 0xbb173b31, ON_ACCENT, 16, 48);
             finish.setOnClickListener(v -> onEnd.run());
             weight(actions, finish);
             layout.addView(actions, -1, -2);
@@ -476,7 +476,7 @@ final class SoberModeUi {
         }
 
         private static TextView digit(MainActivity activity) {
-            TextView digit = text(activity, "00", 72, CARD, true);
+            TextView digit = text(activity, "00", 72, ON_ACCENT, true);
             digit.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
             digit.setGravity(Gravity.CENTER);
             digit.setMaxLines(1);
