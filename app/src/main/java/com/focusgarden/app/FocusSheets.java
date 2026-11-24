@@ -2896,7 +2896,7 @@ final class FocusSheets {
         String[][] defs = {
                 {"apps", "应用", "统计正向学习应用时长并自动兑换"},
                 {"timer", "自律模式", "正计时与倒计时自律锁定控制"},
-                {"sleep", "早睡挑战", "睡眠时段强制全锁，正常完赛自动结算"},
+                {"sleep", "早睡挑战", "睡眠时段强制全锁，完整醒来次日手动领奖"},
                 {"todos", "待办", "完成日常任务兑换时间奖励"},
                 {"habits", "戒断挑战", "在兑换页展示戒断快捷卡片"},
                 {"steps", "步数", "同步系统步行数兑换放松时间"}
@@ -3239,6 +3239,17 @@ final class FocusSheets {
             Toast.makeText(activity, "已生成今日早睡待领奖励（可到早睡挑战主动领取）", Toast.LENGTH_SHORT).show();
         });
         body.addView(mockSleepDoneBtn, -1, -2);
+        gap(body, 8);
+
+        TextView seedRedeemBtn = secondaryButton(activity, "模拟 20 分钟多源可兑换奖励（自律+早睡+步数）");
+        seedRedeemBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            state.debugSeedRedeemables(System.currentTimeMillis(), ZoneId.systemDefault());
+            onChanged.run();
+            refreshStatus[0].run();
+            Toast.makeText(activity, "已生成 20 分钟多源待领奖励（共 3 项正向行为）", Toast.LENGTH_SHORT).show();
+        });
+        body.addView(seedRedeemBtn, -1, -2);
 
         refreshStatus[0].run();
         bottomSheet(activity, "调试模式", "开发测试工具 · 请勿用于正式自律", body);

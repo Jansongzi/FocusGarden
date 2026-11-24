@@ -44,7 +44,7 @@ import java.util.function.IntConsumer;
 final class GardenUi {
     static final int ON_ACCENT = 0xffffffff;
 
-    static int PAPER = 0xfff4f6fa;
+    static int PAPER = 0xfff3f5f9;
     static int CARD = 0xffffffff;
     static int SURFACE_SUBTLE = 0xfff7f9fc;
     static int BORDER = 0xffe8eef5;
@@ -127,7 +127,7 @@ final class GardenUi {
             CYAN_SOFT = 0xff112b3c;
             FOREST = 0xff2d6be8;
         } else {
-            PAPER = 0xfff4f6fa;
+            PAPER = 0xfff3f5f9;
             CARD = 0xffffffff;
             SURFACE_SUBTLE = 0xfff7f9fc;
             BORDER = 0xffe8eef5;

@@ -234,6 +234,7 @@ final class FocusState {
     final TreeSet<String> earlySleepFailed = new TreeSet<>();
     final TreeSet<Long> heartbeats = new TreeSet<>();
     final Set<String> hiddenCards = new LinkedHashSet<>();
+    final Set<String> expandedRedeemCards = new LinkedHashSet<>();
 
     long creditMs;
     int creditRemainder;
@@ -1463,6 +1464,68 @@ final class FocusState {
         abstinences.remove(id);
     }
 
+    long pendingAbstinenceRewardMs(long now) {
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
+        long sum = 0L;
+        for (Abstinence a : abstinences.values()) {
+            if (canClaimAbstinence(a, now)) sum += Math.max(0, a.rewardMinutes) * MINUTE;
+        }
+        return sum;
+    }
+
+    long claimAllAbstinences(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) return 0L;
+        long total = 0L;
+        for (Abstinence a : abstinences.values()) {
+            total += claimAbstinence(a.id, now, zone);
+        }
+        return total;
+    }
+
+    record RedeemSummary(long totalMs, long timerMs, long sleepMs, long todoMs,
+                         long abstinenceMs, long stepMs, int readySourceCount) {}
+
+    record ClaimAllResult(long totalMs, long timerMs, long sleepMs, long todoMs,
+                          long abstinenceMs, long stepMs, int claimedSources) {}
+
+    RedeemSummary redeemSummary(long now, ZoneId zone) {
+        if (rateMode == RateMode.LAY_FLAT) {
+            return new RedeemSummary(0L, 0L, 0L, 0L, 0L, 0L, 0);
+        }
+        LocalDate today = logicDate(now, zone);
+        long timerMs = (!hiddenCards.contains("timer") && canClaimOffline(now))
+                ? (claimableOfflineMs(now) / MINUTE) * MINUTE : 0L;
+        long sleepMs = (!hiddenCards.contains("sleep") && hasPendingEarlySleepReward(now, zone))
+                ? Math.max(0, earlySleepRewardMinutes) * MINUTE : 0L;
+        long todoMs = !hiddenCards.contains("todos") ? pendingTodoRewardMs(now, today) : 0L;
+        long abstinenceMs = !hiddenCards.contains("habits") ? pendingAbstinenceRewardMs(now) : 0L;
+        int units = !hiddenCards.contains("steps") ? claimableStepUnits(today) : 0;
+        long stepMs = units > 0
+                ? Math.min((long) units * Math.max(0, stepRewardMinutes) * MINUTE, remainingStepCapMs(today))
+                : 0L;
+        long total = timerMs + sleepMs + todoMs + abstinenceMs + stepMs;
+        int ready = (timerMs > 0L ? 1 : 0) + (sleepMs > 0L ? 1 : 0) + (todoMs > 0L ? 1 : 0)
+                + (abstinenceMs > 0L ? 1 : 0) + (stepMs > 0L ? 1 : 0);
+        return new RedeemSummary(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, ready);
+    }
+
+    ClaimAllResult claimAllRedeemable(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        if (rateMode == RateMode.LAY_FLAT) {
+            return new ClaimAllResult(0L, 0L, 0L, 0L, 0L, 0L, 0);
+        }
+        long timerMs = !hiddenCards.contains("timer") ? claimOffline(now, zone) : 0L;
+        long sleepMs = !hiddenCards.contains("sleep") ? claimPendingEarlySleep(now, zone) : 0L;
+        long todoMs = !hiddenCards.contains("todos") ? claimTodos(now, zone) : 0L;
+        long abstinenceMs = !hiddenCards.contains("habits") ? claimAllAbstinences(now, zone) : 0L;
+        long stepMs = !hiddenCards.contains("steps") ? claimSteps(now, zone) : 0L;
+        long total = timerMs + sleepMs + todoMs + abstinenceMs + stepMs;
+        int claimed = (timerMs > 0L ? 1 : 0) + (sleepMs > 0L ? 1 : 0) + (todoMs > 0L ? 1 : 0)
+                + (abstinenceMs > 0L ? 1 : 0) + (stepMs > 0L ? 1 : 0);
+        return new ClaimAllResult(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, claimed);
+    }
+
     long claimAbstinence(String id, long now, ZoneId zone) {
         Abstinence a = abstinences.get(id);
         syncResetDay(now, zone);
@@ -1895,5 +1958,18 @@ final class FocusState {
         sleepLockBypassEndMs = 0L;
         stopSober(now, zone);
         logEvent(date(now, zone), now, "DEBUG", "调试一键解锁", "已解除全部自律、睡眠与目的模式锁定", 0L);
+    }
+
+    void debugSeedRedeemables(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        String d = date(now, zone);
+        offlineUnredeemedMs += 15 * MINUTE;
+        Day today = day(d);
+        int targetStepAdd = Math.max(2225, Math.max(1, stepsPerReward) + 225);
+        today.steps += targetStepAdd;
+        earlySleepDays.remove(d);
+        earlySleepFailed.remove(d);
+        earlySleepPendingClaimDate = d;
+        logEvent(d, now, "DEBUG", "模拟多源可兑换奖励", "注入自律、早睡与步数待领奖励", 0L);
     }
 }

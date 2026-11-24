@@ -184,6 +184,15 @@ final class FocusStore {
             }
         }
 
+        JSONArray expandedRedeem = root.optJSONArray("expandedRedeemCards");
+        state.expandedRedeemCards.clear();
+        if (expandedRedeem != null) {
+            for (int i = 0; i < expandedRedeem.length(); i++) {
+                String key = expandedRedeem.optString(i);
+                if (!key.isEmpty()) state.expandedRedeemCards.add(key);
+            }
+        }
+
         JSONObject rules = root.optJSONObject("rules");
         for (Iterator<String> i = keys(rules); i.hasNext();) {
             String pkg = i.next();
@@ -460,7 +469,8 @@ final class FocusStore {
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
                     .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
                     .put("heartbeats", new JSONArray(state.heartbeats))
-                    .put("hiddenCards", new JSONArray(state.hiddenCards));
+                    .put("hiddenCards", new JSONArray(state.hiddenCards))
+                    .put("expandedRedeemCards", new JSONArray(state.expandedRedeemCards));
 
             JSONObject rules = new JSONObject();
             for (var entry : state.rules.entrySet()) {

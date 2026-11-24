@@ -1,6 +1,7 @@
 package com.focusgarden.app;
 
 import android.Manifest;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.Dialog;
 import android.appwidget.AppWidgetManager;
@@ -38,9 +39,11 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static com.focusgarden.app.GardenUi.*;
@@ -106,7 +109,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private TextView homeTimerReward;
     private TextView homeTimerEarnedLabel;
     private TextView homeTimerCollapsedSub;
-    private TextView homeTimerCollapsedBadge;
     private LinearLayout homeTimerSetup;
     private LinearLayout homeTimerModeSwitchRow;
     private TextView homeTimerTabUp;
@@ -125,7 +127,22 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private LinearLayout homeTimerIdleRow;
     private LinearLayout homeTimerStopWatchRunRow;
     private LinearLayout homeTimerCountdownRunRow;
-    private final Set<String> expandedRedeemCards = new LinkedHashSet<>();
+    private RedeemUi.RedeemAnimOverlay redeemAnimOverlay;
+    private TextView redeemHeaderTimerPill;
+    private TextView redeemVoucherAmountTv;
+    private TextView redeemVoucherEarnedTv;
+    private TextView redeemVoucherCaptionTv;
+    private RedeemUi.RedeemCoinView redeemVoucherCoin;
+    private RedeemUi.Pressable3DButton redeemOneClickBtn;
+    private TextView redeemToggleAllBtn;
+    private final List<RedeemUi.AccordionHandle> redeemAccordions = new ArrayList<>();
+    private final Map<String, RedeemUi.Pressable3DButton> redeemCardBtns = new LinkedHashMap<>();
+    private final Map<String, TextView> redeemCardSubs = new LinkedHashMap<>();
+    private boolean redeemClaimInFlight;
+    private Runnable redeemSettleRunnable;
+    private ValueAnimator redeemNumberAnim;
+    private long displayedVoucherClaimableMin = -1L;
+    private long displayedVoucherEarnedMin = -1L;
     private String selectedAbstinenceId;
     private int abstinenceQuoteOffset;
     private AbstinenceHeroTicker abstinenceHeroTicker;
@@ -138,7 +155,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Boolean lastSoberBadgeActive;
     private Boolean lastOfflineCanClaim;
     private Boolean lastStopwatchRunning;
-    private Integer lastTimerBadgeState;
     private FocusSheets.LiveRefresh liveTimerSheet;
     private FocusSheets.LiveRefresh liveStepsSheet;
     private SoberModeUi.Timer soberTimer;
@@ -248,7 +264,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             requestedBlockImage = saved.getString("requestedBlockImage");
             selectedAbstinenceId = saved.getString("selectedAbstinenceId");
             ArrayList<String> expanded = saved.getStringArrayList("expandedRedeemCards");
-            if (expanded != null) expandedRedeemCards.addAll(expanded);
+            if (expanded != null) state.expandedRedeemCards.addAll(expanded);
         }
         topInset = statusBarFallback();
         getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
@@ -278,7 +294,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         out.putInt("timerTabMode", timerTabMode);
         out.putString("requestedBlockImage", requestedBlockImage);
         out.putString("selectedAbstinenceId", selectedAbstinenceId);
-        out.putStringArrayList("expandedRedeemCards", new ArrayList<>(expandedRedeemCards));
+        out.putStringArrayList("expandedRedeemCards", new ArrayList<>(state.expandedRedeemCards));
         super.onSaveInstanceState(out);
     }
 
@@ -319,6 +335,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onPause() {
         resumed = false;
         main.removeCallbacks(clock);
+        cancelRedeemAnimations();
         unregisterStepListener();
         super.onPause();
     }
@@ -544,13 +561,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         lastSoberBadgeActive = null;
         lastOfflineCanClaim = null;
         lastStopwatchRunning = null;
-        lastTimerBadgeState = null;
         homeTimerHeadIcon = null;
         homeTimerSub = null;
         homeTimerReward = null;
         homeTimerEarnedLabel = null;
         homeTimerCollapsedSub = null;
-        homeTimerCollapsedBadge = null;
         homeTimerSetup = null;
         homeTimerModeSwitchRow = null;
         homeTimerTabUp = null;
@@ -569,8 +584,36 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerIdleRow = null;
         homeTimerStopWatchRunRow = null;
         homeTimerCountdownRunRow = null;
+        cancelRedeemAnimations();
+        redeemHeaderTimerPill = null;
+        redeemVoucherAmountTv = null;
+        redeemVoucherEarnedTv = null;
+        redeemVoucherCaptionTv = null;
+        redeemVoucherCoin = null;
+        redeemOneClickBtn = null;
+        redeemToggleAllBtn = null;
+        redeemAccordions.clear();
+        redeemCardBtns.clear();
+        redeemCardSubs.clear();
+        displayedVoucherClaimableMin = -1L;
+        displayedVoucherEarnedMin = -1L;
         abstinenceHeroTicker = null;
         liveAbstinenceTickers.clear();
+    }
+
+    private void cancelRedeemAnimations() {
+        if (redeemSettleRunnable != null) {
+            main.removeCallbacks(redeemSettleRunnable);
+            redeemSettleRunnable = null;
+        }
+        if (redeemNumberAnim != null) {
+            redeemNumberAnim.cancel();
+            redeemNumberAnim = null;
+        }
+        if (redeemAnimOverlay != null) {
+            redeemAnimOverlay.cancel();
+        }
+        redeemClaimInFlight = false;
     }
 
     private void render() {
@@ -636,6 +679,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 }
             });
         }
+        redeemAnimOverlay = new RedeemUi.RedeemAnimOverlay(this);
+        contentStage.addView(redeemAnimOverlay, new FrameLayout.LayoutParams(-1, -1));
         root.addView(contentStage, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         View separator = new View(this);
@@ -1068,16 +1113,32 @@ public final class MainActivity extends Activity implements SensorEventListener 
     // =========================================================================
     // TAB: 兑换 (Redeem & Time Earning)
     // =========================================================================
+    // TAB 4: 兑换 (Time Voucher, 3D Pressable Buttons & Compact Accordions)
+    // =========================================================================
     private void redeem() {
         long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
         LocalDate today = FocusState.today();
         FocusState.Day day = state.days.getOrDefault(today.toString(), new FocusState.Day());
+        FocusState.RedeemSummary summary = state.redeemSummary(now, zone);
 
         LinearLayout redeemHeader = row(this);
         redeemHeader.setPadding(0, 0, dp(this, 48), 0);
         TextView h = text(this, "兑换", 26, INK, true);
         if (Build.VERSION.SDK_INT >= 28) h.setAccessibilityHeading(true);
         weight(redeemHeader, h);
+
+        redeemHeaderTimerPill = text(this, "00:00", 12, INK_SUB, true);
+        redeemHeaderTimerPill.setFontFeatureSettings("tnum");
+        redeemHeaderTimerPill.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 11));
+        redeemHeaderTimerPill.setPadding(dp(this, 10), dp(this, 6), dp(this, 10), dp(this, 6));
+        redeemHeaderTimerPill.setVisibility(View.GONE);
+        redeemHeaderTimerPill.setOnClickListener(v -> {
+            tapHaptic(v);
+            liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
+        });
+        redeemHeader.addView(redeemHeaderTimerPill);
+        space(redeemHeader, 8);
 
         boolean layFlat = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgent = state.rateMode == FocusState.RateMode.INDULGENT;
@@ -1097,18 +1158,73 @@ public final class MainActivity extends Activity implements SensorEventListener 
         });
         redeemHeader.addView(ratePill);
         pages.addView(redeemHeader);
-        gap(pages, 14);
+        gap(pages, 10);
 
-        if (state.isLayFlat()) {
-            LinearLayout layNotice = row(this);
-            layNotice.setBackground(cardBg(this, PURPLE_SOFT, PURPLE, 14));
-            layNotice.setPadding(dp(this, 14), dp(this, 11), dp(this, 14), dp(this, 11));
-            layNotice.addView(iconView(this, R.drawable.ic_moon, 16, PURPLE));
-            space(layNotice, 8);
-            weight(layNotice, text(this, "躺平模式生效中 · 全天应用免限，今日暂停兑换时间", 12, PURPLE, true));
-            pages.addView(layNotice);
-            gap(pages, 12);
-        }
+        // Top Time Voucher card (#E6EEFC in light mode, ticket cutouts + dashed line + gold 3D button)
+        RedeemUi.TicketCardLayout voucher = new RedeemUi.TicketCardLayout(this);
+        voucher.setPadding(dp(this, 20), dp(this, 15), dp(this, 20), dp(this, 13));
+
+        LinearLayout voucherTop = row(this);
+        LinearLayout voucherLeft = column(this);
+        voucherLeft.addView(text(this, "当前可兑换时间", 13, RedeemUi.voucherTitleInk(), true));
+        gap(voucherLeft, 3);
+
+        LinearLayout numRow = row(this);
+        numRow.setGravity(Gravity.BOTTOM);
+        long claimableMin = summary.totalMs() / FocusState.MINUTE;
+        long earnedMin = day.earnedMs / FocusState.MINUTE;
+        displayedVoucherClaimableMin = claimableMin;
+        displayedVoucherEarnedMin = earnedMin;
+
+        redeemVoucherAmountTv = text(this, String.valueOf(claimableMin), 36, RedeemUi.voucherBigInk(), true);
+        redeemVoucherAmountTv.setFontFeatureSettings("tnum");
+        redeemVoucherAmountTv.setIncludeFontPadding(false);
+        numRow.addView(redeemVoucherAmountTv);
+        space(numRow, 6);
+        TextView unitTv = text(this, "分钟", 14, RedeemUi.voucherTitleInk(), true);
+        unitTv.setPadding(0, 0, 0, dp(this, 4));
+        numRow.addView(unitTv);
+        voucherLeft.addView(numRow);
+        gap(voucherLeft, 4);
+
+        redeemVoucherEarnedTv = text(this, "今日已兑换 " + earnedMin + " 分钟", 12, RedeemUi.voucherSubInk(), false);
+        redeemVoucherEarnedTv.setFontFeatureSettings("tnum");
+        voucherLeft.addView(redeemVoucherEarnedTv);
+        weight(voucherTop, voucherLeft);
+        space(voucherTop, 12);
+
+        redeemVoucherCoin = new RedeemUi.RedeemCoinView(this);
+        voucherTop.addView(redeemVoucherCoin, dp(this, 74), dp(this, 74));
+        voucher.addView(voucherTop);
+
+        View perfSpacer = new View(this);
+        perfSpacer.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        voucher.addView(perfSpacer, -1, dp(this, 20));
+        voucher.setPerforationView(perfSpacer);
+
+        redeemOneClickBtn = new RedeemUi.Pressable3DButton(this, 44, 14, 15, 16, true);
+        redeemOneClickBtn.setActionListener(this::handleOneClickRedeem);
+        voucher.addView(redeemOneClickBtn, -1, -2);
+        gap(voucher, 8);
+
+        redeemVoucherCaptionTv = text(this, "", 12, RedeemUi.voucherSubInk(), false);
+        redeemVoucherCaptionTv.setGravity(Gravity.CENTER);
+        voucher.addView(redeemVoucherCaptionTv, -1, -2);
+        pages.addView(voucher);
+        gap(pages, 13);
+
+        LinearLayout sectionHead = row(this);
+        weight(sectionHead, text(this, "时间获取", 17, INK, true));
+        redeemToggleAllBtn = text(this, "全部展开", 13, MUTED, true);
+        redeemToggleAllBtn.setPadding(dp(this, 8), dp(this, 4), dp(this, 4), dp(this, 4));
+        redeemToggleAllBtn.setOnClickListener(v -> toggleAllRedeemAccordions(v));
+        sectionHead.addView(redeemToggleAllBtn);
+        pages.addView(sectionHead);
+        gap(pages, 8);
+
+        redeemAccordions.clear();
+        redeemCardBtns.clear();
+        redeemCardSubs.clear();
 
         if (!state.hiddenCards.contains("apps")) {
             pages.addView(homeAppsCard(day));
@@ -1134,6 +1250,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             pages.addView(homeStepCard(today, day));
             gap(pages, 10);
         }
+        syncToggleAllLabel();
 
         LinearLayout manageBtn = row(this);
         manageBtn.setGravity(Gravity.CENTER);
@@ -1151,46 +1268,227 @@ public final class MainActivity extends Activity implements SensorEventListener 
         updateHomeLive();
     }
 
-    private LinearLayout wrapCollapsibleCard(String key, int iconRes, int badgeBg, int badgeTint,
-                                             String title, TextView subView, TextView pillView,
-                                             LinearLayout bodyContent, ImageView[] badgeIconOut) {
+    private void toggleAllRedeemAccordions(View v) {
+        if (redeemAccordions.isEmpty()) return;
+        tapHaptic(v);
+        boolean allExpanded = true;
+        for (RedeemUi.AccordionHandle h : redeemAccordions) {
+            if (!h.expanded) {
+                allExpanded = false;
+                break;
+            }
+        }
+        boolean target = !allExpanded;
+        for (RedeemUi.AccordionHandle h : redeemAccordions) {
+            h.setExpanded(target, true);
+            if (target) state.expandedRedeemCards.add(h.key);
+            else state.expandedRedeemCards.remove(h.key);
+        }
+        FocusStore.get(this).save();
+        syncToggleAllLabel();
+    }
+
+    private void syncToggleAllLabel() {
+        if (redeemToggleAllBtn == null) return;
+        if (redeemAccordions.isEmpty()) {
+            redeemToggleAllBtn.setVisibility(View.GONE);
+            return;
+        }
+        redeemToggleAllBtn.setVisibility(View.VISIBLE);
+        boolean allExpanded = true;
+        for (RedeemUi.AccordionHandle h : redeemAccordions) {
+            if (!h.expanded) {
+                allExpanded = false;
+                break;
+            }
+        }
+        setTextIfChanged(redeemToggleAllBtn, allExpanded ? "全部收起" : "全部展开");
+    }
+
+    private RedeemUi.Pressable3DButton buildRedeemActionBtn(String key, Runnable action) {
+        RedeemUi.Pressable3DButton btn = new RedeemUi.Pressable3DButton(this, 36, 11, 13, 8, false);
+        btn.setActionListener(action);
+        redeemCardBtns.put(key, btn);
+        return btn;
+    }
+
+    private void handleOneClickRedeem() {
+        if (redeemClaimInFlight) return;
+        if (state.isLayFlat()) {
+            haptic(redeemOneClickBtn, state.hapticFeedback, HapticKind.REJECT);
+            toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
+        FocusState.RedeemSummary before = state.redeemSummary(now, zone);
+        long beforeClaimableMin = before.totalMs() / FocusState.MINUTE;
+        long beforeEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).earnedMs / FocusState.MINUTE;
+
+        FocusState.ClaimAllResult result = state.claimAllRedeemable(now, zone);
+        if (result.totalMs() <= 0L) {
+            haptic(redeemOneClickBtn, state.hapticFeedback, HapticKind.REJECT);
+            toast("暂无可兑换时间，先完成正向行为吧");
+            updateHomeLive();
+            return;
+        }
+        List<RedeemUi.Pressable3DButton> hitBtns = new ArrayList<>();
+        if (result.timerMs() > 0L && redeemCardBtns.containsKey("timer")) hitBtns.add(redeemCardBtns.get("timer"));
+        if (result.sleepMs() > 0L && redeemCardBtns.containsKey("sleep")) hitBtns.add(redeemCardBtns.get("sleep"));
+        if (result.todoMs() > 0L && redeemCardBtns.containsKey("todos")) hitBtns.add(redeemCardBtns.get("todos"));
+        if (result.abstinenceMs() > 0L && redeemCardBtns.containsKey("habits")) hitBtns.add(redeemCardBtns.get("habits"));
+        if (result.stepMs() > 0L && redeemCardBtns.containsKey("steps")) hitBtns.add(redeemCardBtns.get("steps"));
+        if (redeemOneClickBtn != null) hitBtns.add(redeemOneClickBtn);
+
+        playRedeemCelebration(redeemOneClickBtn, hitBtns, result.totalMs(),
+                beforeClaimableMin, beforeEarnedMin, RedeemUi.goldBase(),
+                "已一键兑换 +" + duration(result.totalMs()));
+    }
+
+    private void handleSingleRedeemClaim(String key, RedeemUi.Pressable3DButton btn,
+                                          java.util.function.BiFunction<Long, ZoneId, Long> claimer,
+                                          Runnable onEmptyOrBlocked) {
+        if (redeemClaimInFlight) return;
+        if (state.isLayFlat()) {
+            haptic(btn, state.hapticFeedback, HapticKind.REJECT);
+            toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
+        FocusState.RedeemSummary before = state.redeemSummary(now, zone);
+        long beforeClaimableMin = before.totalMs() / FocusState.MINUTE;
+        long beforeEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).earnedMs / FocusState.MINUTE;
+
+        long gained = claimer.apply(now, zone);
+        if (gained <= 0L) {
+            if (onEmptyOrBlocked != null) onEmptyOrBlocked.run();
+            updateHomeLive();
+            return;
+        }
+        List<RedeemUi.Pressable3DButton> hitBtns = new ArrayList<>();
+        if (btn != null) hitBtns.add(btn);
+        playRedeemCelebration(btn, hitBtns, gained, beforeClaimableMin, beforeEarnedMin,
+                RedeemUi.blueFace(), "已兑换 +" + duration(gained));
+    }
+
+    private void playRedeemCelebration(View sourceView, List<RedeemUi.Pressable3DButton> hitBtns,
+                                       long gainedMs, long beforeClaimableMin, long beforeEarnedMin,
+                                       int burstColor, String fallbackToast) {
+        TimerReceiver.changed(this);
+        FocusService.syncNow();
+        FocusWidget.refresh(this);
+        haptic(sourceView, state.hapticFeedback, HapticKind.CONFIRM);
+
+        long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
+        FocusState.RedeemSummary after = state.redeemSummary(now, zone);
+        long afterClaimableMin = after.totalMs() / FocusState.MINUTE;
+        long afterEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).earnedMs / FocusState.MINUTE;
+        long gainedMin = Math.max(1L, gainedMs / FocusState.MINUTE);
+
+        redeemClaimInFlight = true;
+        for (RedeemUi.Pressable3DButton b : hitBtns) {
+            if (b != null) b.applyState(RedeemUi.Pressable3DButton.Mode.SUCCESS, "✓ 已兑换");
+        }
+        if (redeemVoucherCaptionTv != null) {
+            setTextIfChanged(redeemVoucherCaptionTv, after.readySourceCount() > 0
+                    ? after.readySourceCount() + " 项正向行为已产生奖励"
+                    : "奖励已存入今日可用时间 ✓");
+        }
+
+        boolean reduced = RedeemUi.reducedMotion(this);
+        if (reduced) {
+            displayedVoucherClaimableMin = afterClaimableMin;
+            displayedVoucherEarnedMin = afterEarnedMin;
+            setTextIfChanged(redeemVoucherAmountTv, String.valueOf(afterClaimableMin));
+            setTextIfChanged(redeemVoucherEarnedTv, "今日已兑换 " + afterEarnedMin + " 分钟");
+        } else {
+            if (redeemAnimOverlay != null && sourceView != null && redeemVoucherCoin != null) {
+                redeemAnimOverlay.playBurst(sourceView, redeemVoucherCoin, "+" + gainedMin + " 分钟", burstColor);
+            }
+            if (redeemNumberAnim != null) redeemNumberAnim.cancel();
+            redeemNumberAnim = ValueAnimator.ofFloat(0f, 1f);
+            redeemNumberAnim.setStartDelay(180);
+            redeemNumberAnim.setDuration(420);
+            redeemNumberAnim.setInterpolator(new DecelerateInterpolator());
+            final boolean[] coinPopped = {false};
+            redeemNumberAnim.addUpdateListener(anim -> {
+                if (!coinPopped[0]) {
+                    coinPopped[0] = true;
+                    if (redeemVoucherCoin != null) redeemVoucherCoin.playPop();
+                }
+                float f = (float) anim.getAnimatedValue();
+                long curClaimable = Math.round(beforeClaimableMin + (afterClaimableMin - beforeClaimableMin) * f);
+                long curEarned = Math.round(beforeEarnedMin + (afterEarnedMin - beforeEarnedMin) * f);
+                displayedVoucherClaimableMin = curClaimable;
+                displayedVoucherEarnedMin = curEarned;
+                setTextIfChanged(redeemVoucherAmountTv, String.valueOf(curClaimable));
+                setTextIfChanged(redeemVoucherEarnedTv, "今日已兑换 " + curEarned + " 分钟");
+            });
+            redeemNumberAnim.start();
+        }
+
+        toast(fallbackToast);
+        if (redeemSettleRunnable != null) main.removeCallbacks(redeemSettleRunnable);
+        redeemSettleRunnable = () -> {
+            redeemSettleRunnable = null;
+            redeemClaimInFlight = false;
+            if (!isDestroyed() && tab == REDEEM_PAGE) {
+                redraw();
+            }
+        };
+        main.postDelayed(redeemSettleRunnable, reduced ? 420L : 1100L);
+    }
+
+    private LinearLayout wrapRedeemAccordionCard(String key, int iconRes, int badgeBg, int badgeTint,
+                                                 String title, TextView subView,
+                                                 RedeemUi.Pressable3DButton actionBtn,
+                                                 LinearLayout bodyContent, ImageView[] badgeIconOut) {
         LinearLayout card = column(this);
-        card.setBackground(cardBg(this, CARD, BORDER, 20));
-        card.setPadding(dp(this, 16), dp(this, 13), dp(this, 16), dp(this, 13));
+        card.setBackground(cardBg(this, CARD, BORDER, 16));
+        card.setPadding(dp(this, 16), dp(this, 10), dp(this, 14), dp(this, 10));
         elevate(card, 1.5f);
 
-        boolean expanded = expandedRedeemCards.contains(key);
+        boolean expanded = state.expandedRedeemCards.contains(key);
 
         LinearLayout header = row(this);
+        LinearLayout leftHit = row(this);
         FrameLayout badge = new FrameLayout(this);
         badge.setBackground(shape(this, badgeBg, 11));
         ImageView icon = iconView(this, iconRes, 18, badgeTint);
         if (badgeIconOut != null) badgeIconOut[0] = icon;
         badge.addView(icon, new FrameLayout.LayoutParams(dp(this, 18), dp(this, 18), Gravity.CENTER));
-        header.addView(badge, dp(this, 36), dp(this, 36));
-        space(header, 10);
+        leftHit.addView(badge, dp(this, 38), dp(this, 38));
+        space(leftHit, 12);
 
         LinearLayout titles = column(this);
-        titles.addView(text(this, title, 16, INK, true));
+        LinearLayout titleLine = row(this);
+        TextView titleTv = text(this, title, 16, INK, true);
+        titleLine.addView(titleTv);
+        space(titleLine, 5);
+        ImageView chevron = iconView(this, R.drawable.ic_chevron_right, 15, MUTED);
+        chevron.setRotation(expanded ? 270f : 90f);
+        titleLine.addView(chevron);
+        titles.addView(titleLine);
+
         if (subView != null) {
+            subView.setMaxLines(1);
+            redeemCardSubs.put(key, subView);
             LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-2, -2);
-            slp.topMargin = dp(this, 2);
+            slp.topMargin = dp(this, 3);
             titles.addView(subView, slp);
         }
-        weight(header, titles);
+        weight(leftHit, titles);
+        weight(header, leftHit);
 
-        if (pillView != null) {
-            space(header, 8);
-            header.addView(pillView);
-        }
-        space(header, 6);
-        ImageView chevron = iconView(this, R.drawable.ic_chevron_right, 16, MUTED);
-        chevron.setRotation(expanded ? 90f : 0f);
-        header.addView(chevron);
+        space(header, 10);
+        header.addView(actionBtn, dp(this, 90), -2);
         card.addView(header);
 
         LinearLayout bodyWrap = column(this);
         bodyWrap.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        bodyWrap.setAlpha(expanded ? 1f : 0f);
         gap(bodyWrap, 11);
         View divider = new View(this);
         divider.setBackgroundColor(LINE);
@@ -1199,39 +1497,33 @@ public final class MainActivity extends Activity implements SensorEventListener 
         bodyWrap.addView(bodyContent, -1, -2);
         card.addView(bodyWrap);
 
-        header.setOnClickListener(v -> {
+        RedeemUi.AccordionHandle handle = new RedeemUi.AccordionHandle(key, bodyWrap, chevron, expanded);
+        redeemAccordions.add(handle);
+
+        leftHit.setOnClickListener(v -> {
             tapHaptic(v);
-            boolean nowExpanded = bodyWrap.getVisibility() != View.VISIBLE;
-            if (nowExpanded) expandedRedeemCards.add(key);
-            else expandedRedeemCards.remove(key);
-            bodyWrap.setVisibility(nowExpanded ? View.VISIBLE : View.GONE);
-            chevron.animate().rotation(nowExpanded ? 90f : 0f).setDuration(160).start();
+            boolean next = !handle.expanded;
+            handle.setExpanded(next, true);
+            if (next) state.expandedRedeemCards.add(key);
+            else state.expandedRedeemCards.remove(key);
+            FocusStore.get(this).save();
+            syncToggleAllLabel();
         });
         return card;
     }
 
-    private static TextView compactStatusPill(MainActivity a, String label, int bg, int ink) {
-        TextView tv = text(a, label, 11, ink, true);
-        tv.setBackground(shape(a, bg, 8));
-        tv.setPadding(dp(a, 9), dp(a, 4), dp(a, 9), dp(a, 4));
-        return tv;
-    }
-
     private LinearLayout homeAppsCard(FocusState.Day day) {
         List<String> learning = packagesForCategory(FocusState.Category.LEARNING);
-        boolean layFlat = state.isLayFlat();
-        TextView sub = text(this, "学习 " + learning.size() + " 个 · 今日使用 " + duration(day.learningMs), 12, MUTED, false);
-        String earnedMin = shortMinutes(day.learningEarnedMs);
-        TextView headPill = compactStatusPill(this,
-                layFlat ? "今日暂停" : "+" + earnedMin + " 分",
-                layFlat ? PURPLE_SOFT : day.learningEarnedMs > 0L ? GREEN_SOFT : SURFACE_SUBTLE,
-                layFlat ? PURPLE : day.learningEarnedMs > 0L ? GREEN : MUTED);
+        String earnedTxt = day.learningEarnedMs > 0L
+                ? " · 已自动兑 " + shortMinutes(day.learningEarnedMs) + " 分" : "";
+        TextView sub = text(this, "今日学习 " + duration(day.learningMs) + earnedTxt, 12, MUTED, false);
+        RedeemUi.Pressable3DButton btn = buildRedeemActionBtn("apps", () -> {});
 
         LinearLayout body = column(this);
         LinearLayout topInfo = row(this);
         weight(topInfo, titleWithInfo(this, "正向学习应用", 14, INK,
-                "正向学习应用", "使用已设为「正向学习」的应用时，将按当前倍率自动赚取可用时长（躺平模式当日暂停兑换）。"));
-        topInfo.addView(text(this, "已兑换 " + duration(day.learningEarnedMs), 12, MUTED, false));
+                "正向学习应用", "使用已设为「正向学习」的应用时，将按当前倍率实时自动赚取可用时长（无需手动重复领取，躺平模式当日暂停兑换）。"));
+        topInfo.addView(text(this, "已自动兑换 " + duration(day.learningEarnedMs), 12, MUTED, false));
         body.addView(topInfo);
         gap(body, 10);
 
@@ -1274,13 +1566,19 @@ public final class MainActivity extends Activity implements SensorEventListener 
         bottom.addView(manageApps);
         body.addView(bottom);
 
-        return wrapCollapsibleCard("apps", R.drawable.ic_check_box, GREEN_SOFT, GREEN,
-                "应用", sub, headPill, body, null);
+        return wrapRedeemAccordionCard("apps", R.drawable.ic_nav_rules, GREEN_SOFT, GREEN,
+                "应用", sub, btn, body, null);
     }
 
     private LinearLayout homeTimerCard(long now, FocusState.Day day) {
         homeTimerCollapsedSub = text(this, "", 12, MUTED, false);
-        homeTimerCollapsedBadge = compactStatusPill(this, "", SURFACE_SUBTLE, MUTED);
+        final RedeemUi.Pressable3DButton[] timerBtnRef = new RedeemUi.Pressable3DButton[1];
+        timerBtnRef[0] = buildRedeemActionBtn("timer", () -> handleSingleRedeemClaim("timer", timerBtnRef[0],
+                (curNow, zone) -> state.claimOffline(curNow, zone),
+                () -> {
+                    haptic(timerBtnRef[0], state.hapticFeedback, HapticKind.REJECT);
+                    toast("累计自律需满 5 分钟且可兑换满 1 分钟才可领取");
+                }));
 
         LinearLayout body = column(this);
         LinearLayout top = row(this);
@@ -1496,8 +1794,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         body.addView(homeTimerRedeemRow, redeemLp);
 
         ImageView[] iconRef = new ImageView[1];
-        LinearLayout card = wrapCollapsibleCard("timer", R.drawable.ic_phone_lock, BLUE_SOFT, BLUE,
-                "自律模式", homeTimerCollapsedSub, homeTimerCollapsedBadge, body, iconRef);
+        LinearLayout card = wrapRedeemAccordionCard("timer", R.drawable.ic_timer, BLUE_SOFT, BLUE,
+                "自律模式", homeTimerCollapsedSub, redeemCardBtns.get("timer"), body, iconRef);
         homeTimerHeadIcon = iconRef[0];
         syncHomeTimerMode();
         return card;
@@ -1652,27 +1950,15 @@ public final class MainActivity extends Activity implements SensorEventListener 
         boolean pendingReward = state.hasPendingEarlySleepReward(now, zone);
         boolean done = state.earlySleepChecked(today);
         boolean failed = state.earlySleepFailedOn(today);
-        boolean layFlat = state.isLayFlat();
         int streak = state.earlySleepStreak(today);
 
-        String headTag = failed ? "今日失败"
-                : pendingReward ? (layFlat ? "今日暂停" : "可领 +" + state.earlySleepRewardMinutes + "分")
-                : done ? "今日已领"
-                : state.bedtime ? "锁机中"
-                : "未开启";
-        int headBg = failed ? RED_SOFT
-                : pendingReward ? (layFlat ? PURPLE_SOFT : GREEN_SOFT)
-                : done ? GREEN_SOFT
-                : state.bedtime ? PURPLE_SOFT
-                : AMBER_SOFT;
-        int headInk = failed ? RED
-                : pendingReward ? (layFlat ? PURPLE : GREEN)
-                : done ? GREEN
-                : state.bedtime ? PURPLE
-                : AMBER;
-        TextView sub = text(this, clock(state.sleepStart) + "–" + clock(state.sleepEnd)
-                + " · 连续早睡 " + streak + " 天", 12, MUTED, false);
-        TextView headPill = compactStatusPill(this, headTag, headBg, headInk);
+        String subTxt = failed ? "今日早睡挑战失败 · 连续 " + streak + " 天"
+                : pendingReward ? "昨晚锁机完成 · 待领取 +" + state.earlySleepRewardMinutes + " 分钟"
+                : "连续早睡 " + streak + " 天";
+        TextView sub = text(this, subTxt, 12, MUTED, false);
+        final RedeemUi.Pressable3DButton[] btnRef = new RedeemUi.Pressable3DButton[1];
+        btnRef[0] = buildRedeemActionBtn("sleep", () -> handleSingleRedeemClaim("sleep", btnRef[0],
+                (curNow, z) -> state.claimPendingEarlySleep(curNow, z), null));
 
         LinearLayout body = column(this);
         LinearLayout topInfo = row(this);
@@ -1703,6 +1989,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         weight(bottom, sleepBtn);
         space(bottom, 8);
 
+        boolean layFlat = state.isLayFlat();
         String statusLabel = layFlat && pendingReward ? "今日暂停"
                 : pendingReward ? "领取 +" + state.earlySleepRewardMinutes + " 分钟"
                 : failed ? "已失败"
@@ -1732,8 +2019,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         bottom.addView(claim);
         body.addView(bottom);
 
-        return wrapCollapsibleCard("sleep", R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
-                "早睡挑战", sub, headPill, body, null);
+        return wrapRedeemAccordionCard("sleep", R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
+                "早睡挑战", sub, btnRef[0], body, null);
     }
 
     private LinearLayout homeTodoCard(LocalDate today, FocusState.Day day) {
@@ -1742,13 +2029,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         int pendingCount = state.pendingTodoCount();
         long pendingReward = state.pendingTodoRewardMs(now, today);
 
-        TextView sub = text(this, (pendingCount == 0 ? "暂无待完成" : pendingCount + " 项待完成")
-                + " · 已兑 " + shortMinutes(day.todoEarnedMs) + "/" + state.todoDailyCapMinutes + " 分",
+        TextView sub = text(this, pendingCount == 0 ? "暂无待完成任务" : pendingCount + " 项待完成任务",
                 12, MUTED, false);
-        TextView headPill = compactStatusPill(this,
-                layFlat ? "今日暂停" : pendingReward > 0 ? "可领 +" + shortMinutes(pendingReward) + "分" : "去查看",
-                layFlat ? PURPLE_SOFT : pendingReward > 0 ? BLUE_SOFT : SURFACE_SUBTLE,
-                layFlat ? PURPLE : pendingReward > 0 ? BLUE : MUTED);
+        final RedeemUi.Pressable3DButton[] btnRef = new RedeemUi.Pressable3DButton[1];
+        btnRef[0] = buildRedeemActionBtn("todos", () -> handleSingleRedeemClaim("todos", btnRef[0],
+                (curNow, z) -> state.claimTodos(curNow, z), null));
 
         LinearLayout body = column(this);
         LinearLayout topInfo = row(this);
@@ -1831,28 +2116,29 @@ public final class MainActivity extends Activity implements SensorEventListener 
         bottom.addView(redeem);
         body.addView(bottom);
 
-        return wrapCollapsibleCard("todos", R.drawable.ic_todo, AMBER_SOFT, AMBER,
-                "待办", sub, headPill, body, null);
+        return wrapRedeemAccordionCard("todos", R.drawable.ic_todo, AMBER_SOFT, AMBER,
+                "待办", sub, btnRef[0], body, null);
     }
 
     private LinearLayout homeAbstinenceCard(long now) {
         int total = state.abstinences.size();
-        int reachedCount = 0;
-        boolean anyClaimable = false;
         boolean layFlat = state.isLayFlat();
+        FocusState.Abstinence primaryAbs = null;
         List<FocusState.Abstinence> preview = new ArrayList<>();
         for (FocusState.Abstinence a : state.abstinences.values()) {
-            if (state.abstinenceReached(a, now)) reachedCount++;
-            if (state.canClaimAbstinence(a, now)) anyClaimable = true;
+            if (primaryAbs == null || (state.canClaimAbstinence(a, now) && !state.canClaimAbstinence(primaryAbs, now))) {
+                primaryAbs = a;
+            }
             if (preview.size() < 2) preview.add(a);
         }
 
-        TextView sub = text(this, total == 0 ? "定制戒断事件与激励"
-                : "进行中 " + total + " 项 · 已达标 " + reachedCount + " 项", 12, MUTED, false);
-        TextView headPill = compactStatusPill(this,
-                total == 0 ? "去新建" : anyClaimable ? (layFlat ? "今日暂停" : "有奖励可领") : reachedCount + "/" + total + " 达标",
-                anyClaimable ? (layFlat ? PURPLE_SOFT : GREEN_SOFT) : SURFACE_SUBTLE,
-                anyClaimable ? (layFlat ? PURPLE : GREEN) : MUTED);
+        String absSub = primaryAbs == null ? "暂无进行中的戒断挑战"
+                : primaryAbs.name + " · 已坚持 "
+                + AbstinenceUi.formatSummaryDuration(state.abstinenceElapsedMs(primaryAbs, now));
+        TextView sub = text(this, absSub, 12, MUTED, false);
+        final RedeemUi.Pressable3DButton[] btnRef = new RedeemUi.Pressable3DButton[1];
+        btnRef[0] = buildRedeemActionBtn("habits", () -> handleSingleRedeemClaim("habits", btnRef[0],
+                (curNow, z) -> state.claimAllAbstinences(curNow, z), null));
 
         LinearLayout body = column(this);
         if (total == 0) {
@@ -1913,8 +2199,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             });
             body.addView(openPage, -1, -2);
         }
-        return wrapCollapsibleCard("habits", R.drawable.ic_nav_abstain, GREEN_SOFT, GREEN,
-                "戒断挑战", sub, headPill, body, null);
+        return wrapRedeemAccordionCard("habits", R.drawable.ic_nav_abstain, GREEN_SOFT, GREEN,
+                "戒断挑战", sub, btnRef[0], body, null);
     }
 
     private LinearLayout homeStepCard(LocalDate today, FocusState.Day day) {
@@ -1924,13 +2210,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         boolean layFlat = state.isLayFlat();
         boolean capped = state.remainingStepCapMs(today) < state.stepRewardMinutes * FocusState.MINUTE;
 
-        TextView sub = text(this, day.steps + " 步 · 已兑 " + shortMinutes(day.stepsEarnedMs)
-                + "/" + state.stepDailyCapMinutes + " 分", 12, MUTED, false);
-        TextView headPill = compactStatusPill(this,
-                layFlat ? "今日暂停" : capped ? "已上限" : units > 0 ? "可领 +" + claimableMins + "分"
-                        : state.stepsPerReward + "步/" + state.stepRewardMinutes + "分",
-                layFlat ? PURPLE_SOFT : (!capped && units > 0) ? BLUE_SOFT : SURFACE_SUBTLE,
-                layFlat ? PURPLE : (!capped && units > 0) ? BLUE : MUTED);
+        TextView sub = text(this, "今日步行 " + String.format(Locale.US, "%,d", day.steps) + " 步",
+                12, MUTED, false);
+        final RedeemUi.Pressable3DButton[] btnRef = new RedeemUi.Pressable3DButton[1];
+        btnRef[0] = buildRedeemActionBtn("steps", () -> handleSingleRedeemClaim("steps", btnRef[0],
+                (curNow, z) -> state.claimSteps(curNow, z), null));
 
         LinearLayout body = column(this);
         LinearLayout topInfo = row(this);
@@ -1983,8 +2267,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         bottom.addView(redeem);
         body.addView(bottom);
 
-        return wrapCollapsibleCard("steps", R.drawable.ic_steps, CYAN_SOFT, CYAN,
-                "步数", sub, headPill, body, null);
+        return wrapRedeemAccordionCard("steps", R.drawable.ic_steps, CYAN_SOFT, CYAN,
+                "步数", sub, btnRef[0], body, null);
     }
 
     private void updateHomeLive() {
@@ -2118,7 +2402,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (homeTimerStopWatchRunRow.getVisibility() != swVis) homeTimerStopWatchRunRow.setVisibility(swVis);
             if (homeTimerCountdownRunRow.getVisibility() != cdVis) homeTimerCountdownRunRow.setVisibility(cdVis);
 
-            int badgeState;
             if (activeStopwatch) {
                 long elapsed = state.offlineElapsed(now);
                 long claimable = state.claimableOfflineMs(now);
@@ -2136,9 +2419,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         : countdown(elapsed) + " 继续自律");
                 setTextIfChanged(homeTimerSub, "今日共自律 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
                 homeTimerSub.setVisibility(View.VISIBLE);
-                setTextIfChanged(homeTimerCollapsedSub, (running ? "正计时进行中 " : "正计时已暂停 ") + countdown(elapsed));
-                setTextIfChanged(homeTimerCollapsedBadge, running ? "进行中" : "已暂停");
-                badgeState = running ? 1 : 2;
+                setTextIfChanged(homeTimerCollapsedSub, (running ? "正计时进行中 · " : "正计时已暂停 · ") + countdown(elapsed));
             } else if (activeCountdown) {
                 long rem = state.remaining(now);
                 setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
@@ -2148,46 +2429,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 setTextIfChanged(homeTimerSub, "倒计时进行中 · 结束后自动结算");
                 homeTimerSub.setVisibility(View.VISIBLE);
                 setTextIfChanged(homeTimerCollapsedSub, "倒计时进行中 · 剩 " + countdown(rem));
-                setTextIfChanged(homeTimerCollapsedBadge, "锁定中");
-                badgeState = 1;
             } else if (timerTabMode == 0) {
                 long claimable = state.claimableOfflineMs(now);
                 setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
                         : state.canClaimOffline(now) ? shortMinutes(claimable) + " 分钟 可兑换" : "满 5 分钟可兑");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.offlineEarnedMs));
                 homeTimerSub.setVisibility(View.GONE);
-                setTextIfChanged(homeTimerCollapsedSub, "正计时 · 今日自律 "
-                        + duration(day == null ? 0L : (day.offlineMs + day.focusMs)));
-                setTextIfChanged(homeTimerCollapsedBadge, layFlat ? "今日暂停"
-                        : state.canClaimOffline(now) ? "可领 +" + shortMinutes(claimable) + "分" : "去开启");
-                badgeState = layFlat ? 4 : state.canClaimOffline(now) ? 3 : 0;
+                long totalDiscMs = (day == null ? 0L : (day.offlineMs + day.focusMs)) + state.offlineUnredeemedMs;
+                setTextIfChanged(homeTimerCollapsedSub, "累计自律 " + duration(totalDiscMs));
             } else {
                 long expectedMs = state.convertByMode(state.presetWork * FocusState.MINUTE);
                 setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换" : "+" + shortMinutes(expectedMs) + " 分钟 预计奖励");
                 setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
                 homeTimerSub.setVisibility(View.GONE);
                 setTextIfChanged(homeTimerCollapsedSub, "倒计时 " + state.presetWork + " 分钟 · 不可提前停止");
-                setTextIfChanged(homeTimerCollapsedBadge, layFlat ? "今日暂停" : "去开启");
-                badgeState = layFlat ? 4 : 0;
-            }
-            if (homeTimerCollapsedBadge != null && !Integer.valueOf(badgeState).equals(lastTimerBadgeState)) {
-                int bg = switch (badgeState) {
-                    case 1 -> BLUE_SOFT;
-                    case 2 -> AMBER_SOFT;
-                    case 3 -> GREEN_SOFT;
-                    case 4 -> PURPLE_SOFT;
-                    default -> SURFACE_SUBTLE;
-                };
-                int ink = switch (badgeState) {
-                    case 1 -> BLUE;
-                    case 2 -> AMBER;
-                    case 3 -> GREEN;
-                    case 4 -> PURPLE;
-                    default -> MUTED;
-                };
-                homeTimerCollapsedBadge.setBackground(shape(this, bg, 8));
-                homeTimerCollapsedBadge.setTextColor(ink);
-                lastTimerBadgeState = badgeState;
             }
             boolean countdownMode = !activeStopwatch && (activeCountdown || timerTabMode == 1);
             boolean canClaim = !countdownMode && !layFlat && state.canClaimOffline(now);
@@ -2207,6 +2462,91 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 lastOfflineCanClaim = canClaim;
             }
             homeOfflineRedeemBtn.setEnabled(!countdownMode);
+        }
+
+        if (redeemHeaderTimerPill != null) {
+            if (activeCountdown) {
+                setTextIfChanged(redeemHeaderTimerPill, countdown(state.remaining(now)));
+                redeemHeaderTimerPill.setVisibility(View.VISIBLE);
+            } else if (activeStopwatch) {
+                setTextIfChanged(redeemHeaderTimerPill, countdown(state.offlineElapsed(now)));
+                redeemHeaderTimerPill.setVisibility(View.VISIBLE);
+            } else {
+                redeemHeaderTimerPill.setVisibility(View.GONE);
+            }
+        }
+
+        if (redeemVoucherAmountTv != null && !redeemClaimInFlight) {
+            FocusState.RedeemSummary s = state.redeemSummary(now, zone);
+            long claimableMin = s.totalMs() / FocusState.MINUTE;
+            long earnedMin = (day == null ? 0L : day.earnedMs) / FocusState.MINUTE;
+            if (claimableMin != displayedVoucherClaimableMin) {
+                displayedVoucherClaimableMin = claimableMin;
+                setTextIfChanged(redeemVoucherAmountTv, String.valueOf(claimableMin));
+            }
+            if (earnedMin != displayedVoucherEarnedMin) {
+                displayedVoucherEarnedMin = earnedMin;
+                setTextIfChanged(redeemVoucherEarnedTv, "今日已兑换 " + earnedMin + " 分钟");
+            }
+            if (redeemOneClickBtn != null) {
+                if (layFlat) {
+                    redeemOneClickBtn.applyState(RedeemUi.Pressable3DButton.Mode.GOLD_DISABLED, "躺平模式今日暂停兑换");
+                } else if (claimableMin > 0L) {
+                    redeemOneClickBtn.applyState(RedeemUi.Pressable3DButton.Mode.GOLD_ENABLED, "一键兑换 " + claimableMin + " 分钟");
+                } else {
+                    redeemOneClickBtn.applyState(RedeemUi.Pressable3DButton.Mode.GOLD_DISABLED, "暂无可兑换时间");
+                }
+            }
+            if (redeemVoucherCaptionTv != null) {
+                String cap = layFlat ? "躺平模式生效中 · 全天应用免限，今日暂停兑换"
+                        : s.readySourceCount() > 0 ? s.readySourceCount() + " 项正向行为已产生奖励"
+                        : "完成正向行为后可在此一键领取";
+                setTextIfChanged(redeemVoucherCaptionTv, cap);
+            }
+            syncRedeemCardButton("apps", 0L, false);
+            syncRedeemCardButton("timer", s.timerMs(), layFlat && state.offlineUnredeemedMs >= FocusState.MIN_OFFLINE_CLAIM_MS);
+            syncRedeemCardButton("sleep", s.sleepMs(), layFlat && state.hasPendingEarlySleepReward(now, zone));
+            syncRedeemCardButton("todos", s.todoMs(), layFlat && state.pendingTodoRewardMs(now, today) > 0L);
+            syncRedeemCardButton("habits", s.abstinenceMs(), layFlat);
+            syncRedeemCardButton("steps", s.stepMs(), layFlat && state.claimableStepUnits(today) > 0);
+
+            TextView habSub = redeemCardSubs.get("habits");
+            if (habSub != null && !state.abstinences.isEmpty()) {
+                FocusState.Abstinence primaryAbs = null;
+                for (FocusState.Abstinence a : state.abstinences.values()) {
+                    if (primaryAbs == null || (state.canClaimAbstinence(a, now) && !state.canClaimAbstinence(primaryAbs, now))) {
+                        primaryAbs = a;
+                    }
+                }
+                if (primaryAbs != null) {
+                    setTextIfChanged(habSub, primaryAbs.name + " · 已坚持 "
+                            + AbstinenceUi.formatSummaryDuration(state.abstinenceElapsedMs(primaryAbs, now)));
+                }
+            }
+        }
+    }
+
+    private void syncRedeemCardButton(String key, long rewardMs, boolean pausedByLayFlat) {
+        RedeemUi.Pressable3DButton btn = redeemCardBtns.get(key);
+        if (btn == null) return;
+        long mins = rewardMs / FocusState.MINUTE;
+        if (pausedByLayFlat && "habits".equals(key)) {
+            boolean anyReached = false;
+            long now = System.currentTimeMillis();
+            for (FocusState.Abstinence a : state.abstinences.values()) {
+                if (state.canClaimAbstinence(a, now)) {
+                    anyReached = true;
+                    break;
+                }
+            }
+            if (!anyReached) pausedByLayFlat = false;
+        }
+        if (pausedByLayFlat) {
+            btn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED, "今日暂停");
+        } else if (mins > 0L) {
+            btn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "+" + mins + " 分钟");
+        } else {
+            btn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED, "+0 分钟");
         }
     }
 

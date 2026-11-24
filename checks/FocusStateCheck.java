@@ -816,6 +816,56 @@ final class FocusStateCheck {
         equal(2, perm.lifetimeDisciplinedDaysCount());
         equal(2, perm.currentDisciplinedStreak(LocalDate.parse("2026-11-22")));
         equal(2, perm.bestDisciplinedStreak());
+
+        // 5. v1.6.3 Redeem Voucher aggregation, atomic/idempotent one-click claim, LAY_FLAT & hiddenCards
+        var rv = new FocusState();
+        long rvNow = at("2026-11-24T10:36:00Z");
+        rv.creditMs = 0L;
+        rv.debugSeedRedeemables(rvNow, UTC);
+        // Seeded: offline 15m (3:1 -> 5m) + sleep 10m + steps >= 2225 (5m) = 20m across 3 sources
+        FocusState.RedeemSummary s1 = rv.redeemSummary(rvNow, UTC);
+        equal(20 * MINUTE, s1.totalMs());
+        equal(5 * MINUTE, s1.timerMs());
+        equal(10 * MINUTE, s1.sleepMs());
+        equal(5 * MINUTE, s1.stepMs());
+        equal(3, s1.readySourceCount());
+        equal(0L, rv.creditMs);
+
+        // Add mature todo (+8m) and reached abstinence (+12m) -> 40m across 5 sources
+        LocalDate rvDay = LocalDate.parse("2026-11-24");
+        rv.addTodo("t_rv", "背单词", 8, rvDay, rvNow - 20 * MINUTE);
+        rv.toggleTodo("t_rv", rvDay);
+        rv.addAbstinence("a_rv", "戒夜宵", rvNow - 25L * 60 * MINUTE, 24, 12);
+        FocusState.RedeemSummary s2 = rv.redeemSummary(rvNow, UTC);
+        equal(40 * MINUTE, s2.totalMs());
+        equal(5, s2.readySourceCount());
+
+        // Hiding a card excludes it from summary and claimAllRedeemable
+        rv.hiddenCards.add("todos");
+        FocusState.RedeemSummary sHidden = rv.redeemSummary(rvNow, UTC);
+        equal(32 * MINUTE, sHidden.totalMs());
+        equal(4, sHidden.readySourceCount());
+
+        // Atomic one-click claim & strict idempotency
+        FocusState.ClaimAllResult c1 = rv.claimAllRedeemable(rvNow, UTC);
+        equal(32 * MINUTE, c1.totalMs());
+        equal(4, c1.claimedSources());
+        equal(32 * MINUTE, rv.creditMs);
+        equal(32 * MINUTE, rv.day("2026-11-24").earnedMs);
+        equal(false, rv.todos.get("t_rv").claimed);
+        FocusState.ClaimAllResult c2 = rv.claimAllRedeemable(rvNow, UTC);
+        equal(0L, c2.totalMs());
+        equal(0, c2.claimedSources());
+        equal(32 * MINUTE, rv.creditMs);
+
+        // Unhiding todos reveals remaining 8m; LAY_FLAT blocks one-click claim cleanly
+        rv.hiddenCards.remove("todos");
+        equal(8 * MINUTE, rv.redeemSummary(rvNow, UTC).totalMs());
+        rv.layFlatCards = 1;
+        equal(true, rv.activateLayFlatMode(rvNow, UTC));
+        equal(0L, rv.redeemSummary(rvNow, UTC).totalMs());
+        equal(0L, rv.claimAllRedeemable(rvNow, UTC).totalMs());
+        equal(false, rv.todos.get("t_rv").claimed);
     }
 
     private static long at(String instant) {
