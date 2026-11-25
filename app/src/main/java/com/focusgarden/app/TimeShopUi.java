@@ -56,6 +56,9 @@ final class TimeShopUi {
     private static final int TAB_PROP = 1;
     private static final int TAB_APPEARANCE = 2;
     private static final int TAB_WISH = 3;
+    private static final int FOCUS_NONE = 0;
+    private static final int FOCUS_INDULGENT_SHELF = 1;
+    private static final int FOCUS_CRAFT_MODULE = 2;
 
     private static final int BAG_ALL = 0;
     private static final int BAG_PROP = 1;
@@ -1347,15 +1350,23 @@ final class TimeShopUi {
 
     static Dialog showTimeShopSheet(MainActivity activity, FocusState state,
                                     Runnable onChanged, Runnable onDismissBack) {
-        return showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_ALL);
+        return showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_ALL, FOCUS_NONE);
     }
 
     static void showAppearanceShop(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
-        showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_APPEARANCE);
+        showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_APPEARANCE, FOCUS_NONE);
+    }
+
+    static void showIndulgentShop(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
+        showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_PROP, FOCUS_INDULGENT_SHELF);
+    }
+
+    static void showLayFlatCraftShop(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
+        showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_PROP, FOCUS_CRAFT_MODULE);
     }
 
     private static Dialog showTimeShopSheet(MainActivity activity, FocusState state,
-                                            Runnable onChanged, Runnable onDismissBack, int initialTab) {
+                                            Runnable onChanged, Runnable onDismissBack, int initialTab, int focusTarget) {
         state.seedDefaultRewardsIfNeeded();
 
         Dialog dialog = new Dialog(activity);
@@ -1622,7 +1633,7 @@ pill.setSingleLine(true);
             if (state.effectiveColorTheme() != openedPalette) {
                 suppressDismissBack[0] = true;
                 dialog.dismiss();
-                showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0]);
+                showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0], FOCUS_NONE);
                 return;
             }
             rebuild[0].run();
@@ -1640,7 +1651,7 @@ pill.setSingleLine(true);
                 if (state.effectiveColorTheme() != openedPalette) {
                     suppressDismissBack[0] = true;
                     dialog.dismiss();
-                    showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0]);
+                    showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0], FOCUS_NONE);
                 } else {
                     rebuild[0].run();
                 }
@@ -1653,6 +1664,8 @@ pill.setSingleLine(true);
 
         Runnable openAddWish = () -> showWishEditorSheet(activity, state, null, null, refreshAfterPurchase);
 
+        View[] indulgentAnchorRef = {null};
+        View[] craftAnchorRef = {null};
         rebuild[0] = () -> {
             updateTopBars.run();
             for (int i = 0; i < navPills.length; i++) {
@@ -1662,6 +1675,8 @@ pill.setSingleLine(true);
             }
 
             shelfContentWrap.removeAllViews();
+            indulgentAnchorRef[0] = null;
+            craftAnchorRef[0] = null;
             int tab = activeTab[0];
 
             // Shelf 1: 自律好物
@@ -1673,6 +1688,7 @@ pill.setSingleLine(true);
 
             // Shelf 2: 特别奖励
             if (tab == TAB_ALL || tab == TAB_PROP) {
+                int beforeSpecial = shelfContentWrap.getChildCount();
                 ShelfItem left = buildIndulgentInstallmentShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
                 ShelfItem right = tab == TAB_ALL
                         ? buildPermanentShelfItem(activity, state,
@@ -1681,11 +1697,18 @@ pill.setSingleLine(true);
                                 actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase)
                         : buildLayFlatShelfEntry(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
                 addShelfSection(activity, shelfContentWrap, tab == TAB_ALL ? "特别奖励" : "特殊卡券", left, right);
+                if (shelfContentWrap.getChildCount() > beforeSpecial) {
+                    indulgentAnchorRef[0] = shelfContentWrap.getChildAt(beforeSpecial);
+                }
             }
 
             // Cozy Card Achievement & Synthesis Shelf Module (migrated from Rate Settings)
             if (tab == TAB_ALL || tab == TAB_PROP) {
+                int beforeCraft = shelfContentWrap.getChildCount();
                 addCardCraftShelfModule(activity, shelfContentWrap, state, actionBusy, bagBtnWrap, refreshAfterPurchase);
+                if (shelfContentWrap.getChildCount() > beforeCraft) {
+                    craftAnchorRef[0] = shelfContentWrap.getChildAt(beforeCraft);
+                }
             }
 
             if (tab == TAB_ALL || tab == TAB_APPEARANCE) {
@@ -1821,6 +1844,24 @@ pill.setSingleLine(true);
             }
         });
         dialog.show();
+        if (focusTarget != FOCUS_NONE) {
+            scroller.post(() -> {
+                View target = focusTarget == FOCUS_CRAFT_MODULE
+                        ? craftAnchorRef[0]
+                        : indulgentAnchorRef[0];
+                if (target == null) return;
+                int y = 0;
+                View cur = target;
+                while (cur != null && cur != scrollBody) {
+                    y += cur.getTop();
+                    android.view.ViewParent p = cur.getParent();
+                    cur = p instanceof View ? (View) p : null;
+                }
+                if (cur == scrollBody) {
+                    scroller.smoothScrollTo(0, Math.max(0, y - dp(activity, 8)));
+                }
+            });
+        }
         if (!state.isGuideCompleted(FocusState.GUIDE_SHOP)) {
             overlayHost.post(() -> {
                 if (!dialog.isShowing() || state.isGuideCompleted(FocusState.GUIDE_SHOP)) return;

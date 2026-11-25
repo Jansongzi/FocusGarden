@@ -105,12 +105,7 @@ final class OnboardingUi {
         scroller.addView(content, -1, -2);
         scrollBox.addView(scroller, new FrameLayout.LayoutParams(-1, viewH));
         card.addView(scrollBox, -1, -2);
-        gap(card, 10);
-
-        TextView scrollHintTv = text(activity, "请向下滑动阅读全部内容 ↓", 12, MUTED, false);
-        scrollHintTv.setGravity(Gravity.CENTER);
-        card.addView(scrollHintTv, -1, -2);
-        gap(card, 10);
+        gap(card, 12);
 
         TextView nextBtn = pillButton(activity, "请先阅读至底部", BLUE_DISABLED_BG, BLUE_DISABLED_TEXT, 14, 46);
         card.addView(nextBtn, -1, -2);
@@ -138,8 +133,6 @@ final class OnboardingUi {
                     || (scroller.getScrollY() + scroller.getHeight() >= child.getHeight() - dp(activity, 8));
             if (atBottom) {
                 reachedBottom[0] = true;
-                scrollHintTv.setText("已阅读至底部 ✓");
-                scrollHintTv.setTextColor(GREEN);
                 nextBtn.setText("我已阅读，进入下一步");
                 nextBtn.setTextColor(ON_ACCENT);
                 nextBtn.setBackground(touch(activity, BLUE, 14));

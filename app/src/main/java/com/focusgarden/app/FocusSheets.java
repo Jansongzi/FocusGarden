@@ -1201,17 +1201,10 @@ final class FocusSheets {
         LinearLayout body = column(activity);
         TextView start = secondaryButton(activity, "");
         TextView end = secondaryButton(activity, "");
-        TextView summary = text(activity, "", 13, INK_SUB, false);
         TextView save = primaryButton(activity, "保存作息");
         Runnable refresh = () -> {
             start.setText("早睡 " + clock(times[0]));
             end.setText("早起 " + clock(times[1]));
-            int minutes = FocusState.sleepDurationMinutes(times[0], times[1]);
-            boolean tooLong = minutes > FocusState.MAX_SLEEP_DURATION_MINUTES;
-            summary.setText(sleepScheduleLabel(times[0], times[1]) + " · 睡眠 "
-                    + duration(minutes * FocusState.MINUTE)
-                    + (tooLong ? "（超过 10 小时上限）" : ""));
-            summary.setTextColor(tooLong ? RED : INK_SUB);
             save.setEnabled(true);
             save.setAlpha(1f);
         };
@@ -1235,12 +1228,10 @@ final class FocusSheets {
         space(timeRow, 10);
         weight(timeRow, end);
         body.addView(timeRow);
-        gap(body, 12);
-        body.addView(summary);
         gap(body, 16);
         body.addView(save, -1, -2);
         refresh.run();
-        Dialog sheet = bottomSheet(activity, "编辑作息", "早睡 21:00–23:30 · 早起 05:00–08:30 · 区间不超过 10 小时", body);
+        Dialog sheet = bottomSheet(activity, "编辑作息", null, body);
         save.setOnClickListener(v -> {
             if (!FocusState.isValidSleepDuration(times[0], times[1])) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
@@ -2167,10 +2158,16 @@ final class FocusSheets {
             onChanged.run();
             activity.returnToHome();
         };
-        Runnable openShopFromRates = () -> {
+        Runnable openIndulgentShopFromRates = () -> {
             suppressReturn[0] = true;
             if (sheetRef[0] != null) sheetRef[0].dismiss();
-            TimeShopUi.showTimeShopSheet(activity, state, onChanged,
+            TimeShopUi.showIndulgentShop(activity, state, onChanged,
+                    () -> showRateSettings(activity, state, onChanged, onDismissBack));
+        };
+        Runnable openLayFlatShopFromRates = () -> {
+            suppressReturn[0] = true;
+            if (sheetRef[0] != null) sheetRef[0].dismiss();
+            TimeShopUi.showLayFlatCraftShop(activity, state, onChanged,
                     () -> showRateSettings(activity, state, onChanged, onDismissBack));
         };
         rebuild[0] = () -> {
@@ -2364,7 +2361,7 @@ final class FocusSheets {
                             });
                     return;
                 }
-                openShopFromRates.run();
+                openIndulgentShopFromRates.run();
             });
             indCard.addView(indActionBtn, -1, -2);
             modesWrap.addView(indCard);
@@ -2456,7 +2453,7 @@ final class FocusSheets {
                             });
                     return;
                 }
-                openShopFromRates.run();
+                openLayFlatShopFromRates.run();
             });
             layCard.addView(layActionBtn, -1, -2);
             modesWrap.addView(layCard);
