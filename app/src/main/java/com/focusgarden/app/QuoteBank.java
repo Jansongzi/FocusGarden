@@ -38,8 +38,8 @@ final class QuoteBank {
             }
         } catch (Exception ignored) {}
         if (list.isEmpty()) {
-            list.add(new Quote("给眼前这件事留一小段时间。", "留白专注"));
-            list.add(new Quote("完成一个小目标，就记下这次进展。", "留白专注"));
+            list.add(new Quote("给眼前这件事留一小段时间。", "简松时"));
+            list.add(new Quote("完成一个小目标，就记下这次进展。", "简松时"));
         }
         cachedQuotes = list;
         return cachedQuotes;

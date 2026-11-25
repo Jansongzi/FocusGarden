@@ -125,10 +125,6 @@ final class TimeShopUi {
         return ShopColors.ink();
     }
 
-    static int storeMutedColor() {
-        return ShopColors.muted();
-    }
-
     private static String shortDuration(int minutes) {
         if (minutes <= 0) return "0 分钟";
         if (minutes >= 60 && minutes % 60 == 0) return (minutes / 60) + " 小时";

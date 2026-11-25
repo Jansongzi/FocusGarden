@@ -100,7 +100,7 @@ final class DisciplineInsights {
                 dot.setBackground(shape(context, tint(entry.getKey()), 5));
                 item.addView(dot, dp(context, 8), dp(context, 8));
                 space(item, 6);
-                weight(item, text(context, entry.getKey().label, 12, INK, false));
+                weight(item, text(context, entry.getKey().label(), 12, INK, false));
                 TextView value = text(context, duration(entry.getValue()) + " · "
                         + String.format(Locale.ROOT, "%.1f%%", 100d * entry.getValue() / report.totalMs()), 11, INK_SUB, false);
                 value.setGravity(Gravity.END);
@@ -154,15 +154,18 @@ final class DisciplineInsights {
     }
 
     private static int tint(FocusState.DisciplineCategory category) {
-        return switch (category) {
-            case STUDY -> BLUE;
-            case WORK -> PURPLE;
-            case EXERCISE -> GREEN;
-            case FITNESS -> AMBER;
-            case VOCABULARY -> CYAN;
-            case UNCLASSIFIED -> MUTED;
+        return switch (category.id()) {
+            case "STUDY" -> BLUE;
+            case "WORK" -> PURPLE;
+            case "EXERCISE" -> GREEN;
+            case "FITNESS" -> AMBER;
+            case "VOCABULARY" -> CYAN;
+            case "UNCLASSIFIED" -> MUTED;
+            default -> CUSTOM_COLORS[Math.floorMod(category.id().hashCode(), CUSTOM_COLORS.length)];
         };
     }
+
+    private static final int[] CUSTOM_COLORS = {0xffdd6d68, 0xff3a9a96, 0xffb673ae, 0xff7d9647, 0xffbc825d};
 
     private static final class Pie extends View {
         private final FocusState.DisciplineReport report;

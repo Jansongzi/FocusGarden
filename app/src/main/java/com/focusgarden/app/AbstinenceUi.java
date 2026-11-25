@@ -142,12 +142,17 @@ final class AbstinenceUi {
             this.item = item;
             setOrientation(VERTICAL);
 
+            LinearLayout header = row(activity);
+            LinearLayout title = column(activity);
             TextView name = text(activity, item.name, 30, INK, true);
             if (Build.VERSION.SDK_INT >= 28) name.setAccessibilityHeading(true);
-            name.setPadding(0, 0, dp(activity, 48), 0);
-            addView(name, -1, -2);
-            gap(this, 4);
-            addView(text(activity, "始于 " + formatStartedAt(item.startedMs), 12, MUTED, false));
+            title.addView(name, -1, -2);
+            gap(title, 4);
+            title.addView(text(activity, "始于 " + formatStartedAt(item.startedMs), 12, MUTED, false));
+            weight(header, title);
+            space(header, 8);
+            header.addView(activity.pageSettingsButton(), dp(activity, 38), dp(activity, 38));
+            addView(header);
             gap(this, 19);
 
             String target = "目标 " + FocusSheets.formatAbstinenceTarget(item.targetHours);

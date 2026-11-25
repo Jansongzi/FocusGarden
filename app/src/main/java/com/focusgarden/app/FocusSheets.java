@@ -251,7 +251,7 @@ final class FocusSheets {
                 FocusState.Day day = state.days.get(FocusState.today().toString());
                 long today = (day == null ? 0 : day.offlineMs) + elapsed;
                 String category = activeOffline && state.stopwatchCategory != FocusState.DisciplineCategory.UNCLASSIFIED
-                        ? " · " + state.stopwatchCategory.label : "";
+                        ? " · " + state.stopwatchCategory.label() : "";
                 MainActivity.setTextIfChanged(phase, "自律正计时" + category + (paused ? " · 已暂停" : ""));
                 MainActivity.setTextIfChanged(clock, countdown(elapsed));
                 MainActivity.setTextIfChanged(reward, canClaim ? "可兑换 +" + duration(claimable) : "累计满 5 分钟后可兑换");
@@ -263,7 +263,7 @@ final class FocusSheets {
             } else {
                 long remaining = activeCountdown ? state.remaining(now) : state.presetWork * FocusState.MINUTE;
                 String category = activeCountdown && state.countdownCategory != FocusState.DisciplineCategory.UNCLASSIFIED
-                        ? " · " + state.countdownCategory.label : "";
+                        ? " · " + state.countdownCategory.label() : "";
                 MainActivity.setTextIfChanged(phase, (activeCountdown && state.inBreak ? "自律休息计时" : "自律倒计时")
                         + category);
                 MainActivity.setTextIfChanged(clock, countdown(remaining));
@@ -542,7 +542,7 @@ final class FocusSheets {
             LinearLayout pinTipRow = row(activity);
             pinTipRow.setPadding(0, dp(activity, 12), 0, dp(activity, 6));
             weight(pinTipRow, titleWithInfo(activity, "后台锁定指引", 15, INK,
-                    "后台锁定", "在系统多任务列表中长按留白专注卡片并选择「锁定」。"));
+                    "后台锁定", "在系统多任务列表中长按简松时卡片并选择「锁定」。"));
             guardList.addView(pinTipRow);
         };
 

@@ -15,7 +15,7 @@ final class CheckInUi {
     static void show(MainActivity activity, FocusState state) {
         LinearLayout body = column(activity);
         render(activity, state, body, YearMonth.from(FocusState.today()));
-        bottomSheet(activity, "签到日历", "每天签到可领取 10 分钟可用时长，凌晨 04:00 换日", body);
+        bottomSheet(activity, "签到日历", "每天签到可领取 10 分钟可用时长，凌晨 04:00 重置", body);
     }
 
     private static void render(MainActivity activity, FocusState state, LinearLayout body, YearMonth month) {

@@ -118,10 +118,10 @@ public final class KeepAliveService extends Service implements SensorEventListen
         }
         String title = state.offlineRunning() ? "自律模式 · 正计时进行中"
                 : state.active() ? "自律模式 · 倒计时进行中"
-                : "留白专注后台守护中";
+                : "简松时后台守护中";
         String body = state.offlineRunning()
                 ? "已持续自律 " + GardenUi.duration(state.offlineElapsed(System.currentTimeMillis()))
-                : "轻触返回留白专注";
+                : "轻触返回简松时";
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(title)
@@ -220,7 +220,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
         container.setBackgroundColor(0x01000000);
         container.setClickable(true);
         container.setFocusable(false);
-        container.setContentDescription("留白专注悬浮球，可拖动或轻触返回应用");
+        container.setContentDescription("简松时悬浮球，可拖动或轻触返回应用");
 
         FrameLayout orb = new FrameLayout(this);
         orb.setClickable(false);

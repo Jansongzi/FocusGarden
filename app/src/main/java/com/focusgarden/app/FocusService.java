@@ -949,7 +949,7 @@ public final class FocusService extends AccessibilityService {
                 params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             }
         }
-        params.setTitle("留白专注提醒");
+        params.setTitle("简松时提醒");
         try {
             windows.addView(rootView, params);
             overlay = rootView;

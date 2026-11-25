@@ -34,11 +34,29 @@ import static com.focusgarden.app.GardenUi.*;
 final class BlockAppearanceSettings {
     private static final Executor IMAGE_IO = Executors.newSingleThreadExecutor();
 
+    private enum Filter {
+        ALL, FULL, SQUARE, CUSTOM, ENABLED;
+
+        boolean matches(FocusState state, FocusState.BlockAppearance item) {
+            return switch (this) {
+                case ALL -> true;
+                case FULL -> item.fullImage();
+                case SQUARE -> !item.fullImage();
+                case CUSTOM -> !item.builtIn();
+                case ENABLED -> state.enabledBlockAppearances.contains(item.id());
+            };
+        }
+    }
+
     private BlockAppearanceSettings() {}
 
     static void show(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
         var preferences = activity.getPreferences(Context.MODE_PRIVATE);
+        int[] filter = {0};
+        LinearLayout filterPicker = column(activity);
+        body.addView(filterPicker);
+        gap(body, 8);
         LinearLayout layoutPicker = column(activity);
         body.addView(layoutPicker);
         gap(body, 14);
@@ -46,6 +64,19 @@ final class BlockAppearanceSettings {
         body.addView(list);
         Runnable[] refreshRef = new Runnable[1];
         refreshRef[0] = () -> {
+            filterPicker.removeAllViews();
+            LinearLayout filters = chipRow(activity, new String[]{"全部", "全屏", "方图", "自定义", "已启用"},
+                    filter[0], choice -> {
+                        if (choice == filter[0]) return;
+                        filter[0] = choice;
+                        refreshRef[0].run();
+                    });
+            for (int i = 0; i < filters.getChildCount(); i += 2) {
+                filters.getChildAt(i).setPadding(dp(activity, 2), dp(activity, 6), dp(activity, 2), dp(activity, 6));
+                filters.getChildAt(i).setSelected(i == filter[0] * 2);
+            }
+            filterPicker.addView(filters);
+            Filter selected = Filter.values()[filter[0]];
             boolean grid = !preferences.getBoolean("blockLibraryListLayout", false);
             int selectedLayout = grid ? 0 : 1;
             layoutPicker.removeAllViews();
@@ -61,6 +92,7 @@ final class BlockAppearanceSettings {
             List<FocusState.BlockAppearance> squareBuiltIns = new ArrayList<>();
             List<FocusState.BlockAppearance> customItems = new ArrayList<>();
             for (var appearance : state.blockAppearances.values()) {
+                if (!selected.matches(state, appearance)) continue;
                 if (appearance.builtIn()) {
                     if (appearance.fullImage()) fullBuiltIns.add(appearance);
                     else squareBuiltIns.add(appearance);
@@ -69,16 +101,25 @@ final class BlockAppearanceSettings {
                 }
             }
 
-            appendSection(activity, state, list, "全屏素材（系统自带）",
-                    "兼用于专注/自律计时背景及晚睡拦截", fullBuiltIns, grid, onChanged, refreshRef[0]);
-            gap(list, 10);
-            appendSection(activity, state, list, "正方形素材（系统自带）",
-                    "方图宽度 55% · 30sp 提示文字", squareBuiltIns, grid, onChanged, refreshRef[0]);
+            if (!fullBuiltIns.isEmpty()) {
+                appendSection(activity, state, list, "全屏素材（系统自带）",
+                        "兼用于专注/自律计时背景及晚睡拦截", fullBuiltIns, grid, selected,
+                        onChanged, refreshRef[0]);
+            }
+            if (!squareBuiltIns.isEmpty()) {
+                if (list.getChildCount() != 0) gap(list, 10);
+                appendSection(activity, state, list, "正方形素材（系统自带）",
+                        "方图宽度 55% · 30sp 提示文字", squareBuiltIns, grid, selected,
+                        onChanged, refreshRef[0]);
+            }
 
             if (!customItems.isEmpty()) {
-                gap(list, 10);
+                if (list.getChildCount() != 0) gap(list, 10);
                 appendSection(activity, state, list, "我的自定义素材",
-                        "点击可编辑或删除", customItems, grid, onChanged, refreshRef[0]);
+                        "点击可编辑或删除", customItems, grid, selected, onChanged, refreshRef[0]);
+            }
+            if (list.getChildCount() == 0) {
+                list.addView(text(activity, "没有符合条件的素材", 13, MUTED, false));
             }
         };
         refreshRef[0].run();
@@ -92,7 +133,7 @@ final class BlockAppearanceSettings {
             state.putCustomBlockAppearance(appearance);
             onChanged.run();
             refreshRef[0].run();
-            edit(activity, state, appearance, "自定义界面 " + countCustom(state), () -> {
+            edit(activity, state, appearance, "自定义界面 " + customNumber(state, id), () -> {
                 onChanged.run();
                 refreshRef[0].run();
             });
@@ -101,17 +142,18 @@ final class BlockAppearanceSettings {
         bottomSheet(activity, "拦截素材库", "勾选即启用轮换 · 系统自带素材点击可预览，不可编辑", body);
     }
 
-    private static int countCustom(FocusState state) {
+    private static int customNumber(FocusState state, String id) {
         int count = 0;
         for (var a : state.blockAppearances.values()) {
             if (!a.builtIn()) count++;
+            if (a.id().equals(id)) break;
         }
         return count;
     }
 
     private static void appendSection(MainActivity activity, FocusState state, LinearLayout list,
                                       String heading, String subHeading,
-                                      List<FocusState.BlockAppearance> items, boolean grid,
+                                      List<FocusState.BlockAppearance> items, boolean grid, Filter filter,
                                       Runnable onChanged, Runnable refreshList) {
         LinearLayout head = row(activity);
         weight(head, text(activity, heading, 14, INK, true));
@@ -121,13 +163,12 @@ final class BlockAppearanceSettings {
         list.addView(text(activity, subHeading, 11, MUTED, false));
         gap(list, 8);
 
-        int customNo = 0;
         LinearLayout cards = null;
         for (var appearance : items) {
             String id = appearance.id();
             String title = appearance.builtIn()
                     ? appearance.text()
-                    : ("自定义界面 " + ++customNo);
+                    : ("自定义界面 " + customNumber(state, id));
             LinearLayout entry = grid ? column(activity) : row(activity);
             int padding = dp(activity, grid ? 8 : 12);
             entry.setPadding(padding, dp(activity, 10), padding, dp(activity, 10));
@@ -185,8 +226,15 @@ final class BlockAppearanceSettings {
             };
             choose.setOnClickListener(v -> {
                 tapHaptic(v);
-                if (state.setBlockAppearanceEnabled(id, choose.isChecked())) onChanged.run();
-                else Toast.makeText(activity, "至少保留一个界面", Toast.LENGTH_SHORT).show();
+                if (state.setBlockAppearanceEnabled(id, choose.isChecked())) {
+                    onChanged.run();
+                    if (filter == Filter.ENABLED) {
+                        refreshList.run();
+                        return;
+                    }
+                } else {
+                    Toast.makeText(activity, "至少保留一个界面", Toast.LENGTH_SHORT).show();
+                }
                 applySelection.run();
             });
             applySelection.run();

@@ -7,7 +7,6 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -15,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 final class FocusState {
     static final long MINUTE = 60_000L;
@@ -273,25 +273,14 @@ final class FocusState {
         }
     }
 
-    enum DisciplineCategory {
-        STUDY("学习", "🎓"), WORK("工作", "💻"), EXERCISE("运动", "🏃"),
-        FITNESS("健身", "🏋️"), VOCABULARY("记单词", "📖"), UNCLASSIFIED("未分类", "");
-
-        final String label;
-        final String icon;
-
-        DisciplineCategory(String label, String icon) {
-            this.label = label;
-            this.icon = icon;
-        }
-
-        static DisciplineCategory stored(String key) {
-            try {
-                return valueOf(key);
-            } catch (IllegalArgumentException e) {
-                return UNCLASSIFIED;
-            }
-        }
+    record DisciplineCategory(String id, String label, String icon) {
+        static final DisciplineCategory STUDY = new DisciplineCategory("STUDY", "学习", "🎓");
+        static final DisciplineCategory WORK = new DisciplineCategory("WORK", "工作", "💻");
+        static final DisciplineCategory EXERCISE = new DisciplineCategory("EXERCISE", "运动", "🏃");
+        static final DisciplineCategory FITNESS = new DisciplineCategory("FITNESS", "健身", "🏋️");
+        static final DisciplineCategory VOCABULARY = new DisciplineCategory("VOCABULARY", "记单词", "📖");
+        static final DisciplineCategory UNCLASSIFIED = new DisciplineCategory("UNCLASSIFIED", "未分类", "");
+        static final List<DisciplineCategory> PRESETS = List.of(STUDY, WORK, EXERCISE, FITNESS, VOCABULARY);
     }
 
     record DisciplineReport(long totalMs, long learningMs, long earnedMs, int activeDays,
@@ -299,7 +288,7 @@ final class FocusState {
 
     static final class Day {
         final Map<String, Long> usage = new LinkedHashMap<>();
-        final Map<DisciplineCategory, Long> disciplineCategoryMs = new EnumMap<>(DisciplineCategory.class);
+        final Map<String, Long> disciplineCategoryMs = new LinkedHashMap<>();
         boolean signedIn;
         long learningMs;
         long limitedMs;
@@ -340,6 +329,8 @@ final class FocusState {
     long creditMs;
     DisciplineCategory stopwatchCategory = DisciplineCategory.UNCLASSIFIED;
     DisciplineCategory countdownCategory = DisciplineCategory.UNCLASSIFIED;
+    final Map<String, String> customDisciplineCategories = new LinkedHashMap<>();
+    final Set<String> archivedDisciplineCategories = new LinkedHashSet<>();
     int creditRemainder;
     long vaultMs;
     int vaultStepMinutes = 10;
@@ -2421,8 +2412,45 @@ final class FocusState {
         return total;
     }
 
+    DisciplineCategory disciplineCategory(String id) {
+        for (var preset : DisciplineCategory.PRESETS) {
+            if (preset.id().equals(id)) return preset;
+        }
+        String name = customDisciplineCategories.get(id);
+        return name == null ? DisciplineCategory.UNCLASSIFIED : new DisciplineCategory(id, name, "");
+    }
+
+    List<DisciplineCategory> disciplineCategories() {
+        List<DisciplineCategory> categories = new ArrayList<>(DisciplineCategory.PRESETS);
+        for (var entry : customDisciplineCategories.entrySet()) {
+            if (!archivedDisciplineCategories.contains(entry.getKey())) {
+                categories.add(new DisciplineCategory(entry.getKey(), entry.getValue(), ""));
+            }
+        }
+        return categories;
+    }
+
+    DisciplineCategory saveDisciplineCategory(String id, String rawName) {
+        String name = rawName.trim();
+        if (name.isEmpty() || name.equalsIgnoreCase(DisciplineCategory.UNCLASSIFIED.label())) return null;
+        if (id != null && !customDisciplineCategories.containsKey(id)) return null;
+        for (var preset : DisciplineCategory.PRESETS) {
+            if (preset.label().equalsIgnoreCase(name)) return null;
+        }
+        for (var entry : customDisciplineCategories.entrySet()) {
+            if (!entry.getKey().equals(id) && entry.getValue().equalsIgnoreCase(name)) {
+                if (id != null || !archivedDisciplineCategories.remove(entry.getKey())) return null;
+                id = entry.getKey();
+                break;
+            }
+        }
+        if (id == null) id = "custom-" + UUID.randomUUID();
+        customDisciplineCategories.put(id, name);
+        return disciplineCategory(id);
+    }
+
     private static void recordDisciplineCategory(Day stats, DisciplineCategory category, long elapsed) {
-        if (category != DisciplineCategory.UNCLASSIFIED) stats.disciplineCategoryMs.merge(category, elapsed, Long::sum);
+        if (category != DisciplineCategory.UNCLASSIFIED) stats.disciplineCategoryMs.merge(category.id(), elapsed, Long::sum);
     }
 
     DisciplineReport disciplineReport(LocalDate start, LocalDate end, long now, ZoneId zone) {
@@ -2433,7 +2461,7 @@ final class FocusState {
         long learning = 0L;
         long earned = 0L;
         int activeDays = 0;
-        Map<DisciplineCategory, Long> categories = new EnumMap<>(DisciplineCategory.class);
+        Map<DisciplineCategory, Long> categories = new LinkedHashMap<>();
         for (var entry : days.entrySet()) {
             if (entry.getKey().compareTo(first) < 0 || entry.getKey().compareTo(last) > 0) continue;
             Day stats = entry.getValue();
@@ -2441,18 +2469,20 @@ final class FocusState {
             learning += stats.learningMs;
             earned += stats.earnedMs;
             if (stats.focusMs + stats.offlineMs + stats.learningMs > 0) activeDays++;
-            stats.disciplineCategoryMs.forEach((category, time) -> categories.merge(category, time, Long::sum));
+            stats.disciplineCategoryMs.forEach((id, time) -> categories.merge(disciplineCategory(id), time, Long::sum));
         }
         long live = offlineElapsed(now);
         if (live > 0 && !today.isBefore(start) && !today.isAfter(end)) {
             total += live;
-            if (stopwatchCategory != DisciplineCategory.UNCLASSIFIED) categories.merge(stopwatchCategory, live, Long::sum);
+            if (stopwatchCategory != DisciplineCategory.UNCLASSIFIED) {
+                categories.merge(disciplineCategory(stopwatchCategory.id()), live, Long::sum);
+            }
             Day stats = days.get(today.toString());
             if (stats == null || stats.focusMs + stats.offlineMs + stats.learningMs == 0) activeDays++;
         }
         long classified = 0;
         for (long time : categories.values()) classified += time;
-        if (total > classified) categories.put(DisciplineCategory.UNCLASSIFIED, total - classified);
+        if (total > classified) categories.merge(DisciplineCategory.UNCLASSIFIED, total - classified, Long::sum);
         return new DisciplineReport(total, learning, earned, activeDays, categories);
     }
 

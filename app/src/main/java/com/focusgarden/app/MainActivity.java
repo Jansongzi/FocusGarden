@@ -666,6 +666,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void render() {
         homeScrim = null;
         homeFloatingSettings = null;
+        homeFloatingActions = null;
+        homeSignIn = null;
         LinearLayout root = column(this);
         root.setBackgroundColor(PAPER);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -704,7 +706,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         FrameLayout contentStage = new FrameLayout(this);
         contentStage.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
-        if (tab != RULES_PAGE) {
+        if (tab == 0) {
             homeScrim = new View(this);
             int paperBase = PAPER & 0x00ffffff;
             homeScrim.setBackground(new android.graphics.drawable.GradientDrawable(
@@ -723,26 +725,21 @@ public final class MainActivity extends Activity implements SensorEventListener 
             settingsLp.rightMargin = dp(this, 16);
             contentStage.addView(homeFloatingSettings, settingsLp);
 
-            if (tab == 0) {
-                homeFloatingActions = row(this);
-                homeSignIn = pillButton(this, "", BLUE, ON_ACCENT, 12, 38);
-                homeSignIn.setTextSize(12);
-                homeSignIn.setSingleLine(true);
-                homeSignIn.setPadding(dp(this, 10), 0, dp(this, 10), 0);
-                homeSignIn.setOnClickListener(this::handleDailySignIn);
-                elevate(homeSignIn, 4);
-                homeFloatingActions.addView(homeSignIn, -2, dp(this, 38));
-                space(homeFloatingActions, 8);
-                homeFloatingActions.addView(topBarBtn(R.drawable.ic_shop, INK, "时间商店",
-                        () -> TimeShopUi.showTimeShopSheet(this, state, this::changed)), dp(this, 38), dp(this, 38));
-                FrameLayout.LayoutParams actionsLp = new FrameLayout.LayoutParams(-2, dp(this, 38), Gravity.TOP | Gravity.END);
-                actionsLp.topMargin = topInset + dp(this, 14);
-                actionsLp.rightMargin = dp(this, 62);
-                contentStage.addView(homeFloatingActions, actionsLp);
-            } else {
-                homeFloatingActions = null;
-                homeSignIn = null;
-            }
+            homeFloatingActions = row(this);
+            homeSignIn = pillButton(this, "", BLUE, ON_ACCENT, 12, 38);
+            homeSignIn.setTextSize(12);
+            homeSignIn.setSingleLine(true);
+            homeSignIn.setPadding(dp(this, 10), 0, dp(this, 10), 0);
+            homeSignIn.setOnClickListener(this::handleDailySignIn);
+            elevate(homeSignIn, 4);
+            homeFloatingActions.addView(homeSignIn, -2, dp(this, 38));
+            space(homeFloatingActions, 8);
+            homeFloatingActions.addView(topBarBtn(R.drawable.ic_shop, INK, "时间商店",
+                    () -> TimeShopUi.showTimeShopSheet(this, state, this::changed)), dp(this, 38), dp(this, 38));
+            FrameLayout.LayoutParams actionsLp = new FrameLayout.LayoutParams(-2, dp(this, 38), Gravity.TOP | Gravity.END);
+            actionsLp.topMargin = topInset + dp(this, 14);
+            actionsLp.rightMargin = dp(this, 62);
+            contentStage.addView(homeFloatingActions, actionsLp);
 
             scroll.setOnScrollChangeListener((v, sx, sy, osx, osy) -> {
                 if (homeScrim != null) {
@@ -879,7 +876,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         int side = tab == 0 ? 0 : dp(this, 16);
         int top = tab == 0 ? 0 : topInset + dp(this, 14);
         pages.setPadding(side, top, side, dp(this, 24));
-        if (tab != RULES_PAGE) {
+        if (tab == 0) {
             if (homeScrim != null && homeScrim.getLayoutParams() instanceof FrameLayout.LayoutParams lp) {
                 int h = topInset + dp(this, 10);
                 if (lp.height != h) {
@@ -961,7 +958,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         FrameLayout piggyStage = new FrameLayout(this);
         piggyStage.setClipChildren(false);
         piggyStage.setClipToPadding(false);
-        piggyStage.setPadding(dp(this, 16), topInset + dp(this, 14), dp(this, 16), dp(this, 6));
+        piggyStage.setPadding(dp(this, 16), topInset + dp(this, 52), dp(this, 16), dp(this, 6));
         homePiggyBank = new PiggyBankView(this);
         homePiggyBank.setAppearance(state.equippedPiggySkin, state.equippedLiquidTheme);
         homePiggyBank.setVaultCapacityMinutes(state.vaultCapacityMinutes());
@@ -1023,31 +1020,25 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         int withdrawInk = layFlat ? 0xff5b3fd6 : 0xff1a6bff;
         LinearLayout vaultBtns = row(this);
-        LinearLayout depositBtn = row(this);
-        depositBtn.setGravity(Gravity.CENTER);
-        depositBtn.setMinimumHeight(dp(this, 42));
-        depositBtn.setBackground(touch(this, 0x28ffffff, 13));
-        depositBtn.addView(iconView(this, R.drawable.ic_deposit, 16, ON_ACCENT));
-        space(depositBtn, 6);
-        TextView depTv = text(this, "存入 " + state.vaultStepMinutes + " 分", 13, ON_ACCENT, true);
-        depTv.setSingleLine(true);
-        depositBtn.addView(depTv);
-        depositBtn.setOnClickListener(v -> {
+        RedeemUi.Pressable3DButton depositBtn = new RedeemUi.Pressable3DButton(this, 38, 13, 13, 8, R.drawable.ic_deposit);
+        depositBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "存入 " + state.vaultStepMinutes + " 分");
+        depositBtn.setEnabledColors(layFlat ? 0xff7659ea : 0xff397ce8, layFlat ? 0xff4832ae : 0xff0948a8, ON_ACCENT);
+        depositBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                haptic(depositBtn, state.hapticFeedback, HapticKind.REJECT);
                 toast("躺平模式期间储蓄罐时长保持不变，明日 04:00 后恢复");
                 return;
             }
             long nowClick = System.currentTimeMillis();
             if (state.isVaultFull()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                haptic(depositBtn, state.hapticFeedback, HapticKind.REJECT);
                 toast("时间储蓄罐已达 " + state.vaultCapacityMinutes() + " 分钟上限，可在时间商店扩容");
                 return;
             }
             long moved = state.depositToVault(state.vaultStepMinutes * FocusState.MINUTE,
                     nowClick, ZoneId.systemDefault());
             if (moved > 0) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                haptic(depositBtn, state.hapticFeedback, HapticKind.CONFIRM);
                 TimerReceiver.changed(this);
                 updateHomeLive();
                 if (homePiggyBank != null) homePiggyBank.playDepositBurst();
@@ -1055,36 +1046,30 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         ? "已存入 " + duration(moved) + "，储蓄罐已满 " + state.vaultCapacityMinutes() + " 分钟"
                         : "已存入 " + duration(moved) + " 到时间储蓄罐");
             } else {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                haptic(depositBtn, state.hapticFeedback, HapticKind.REJECT);
                 toast("当前可用时长不足，先开启自律模式或打卡赚取时间吧");
             }
         });
 
-        LinearLayout withdrawBtn = row(this);
-        withdrawBtn.setGravity(Gravity.CENTER);
-        withdrawBtn.setMinimumHeight(dp(this, 42));
-        withdrawBtn.setBackground(touch(this, ON_ACCENT, 13));
-        withdrawBtn.addView(iconView(this, R.drawable.ic_withdraw, 16, withdrawInk));
-        space(withdrawBtn, 6);
-        TextView wdTv = text(this, "提取 " + state.vaultStepMinutes + " 分", 13, withdrawInk, true);
-        wdTv.setSingleLine(true);
-        withdrawBtn.addView(wdTv);
-        withdrawBtn.setOnClickListener(v -> {
+        RedeemUi.Pressable3DButton withdrawBtn = new RedeemUi.Pressable3DButton(this, 38, 13, 13, 8, R.drawable.ic_withdraw);
+        withdrawBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "提取 " + state.vaultStepMinutes + " 分");
+        withdrawBtn.setEnabledColors(ON_ACCENT, layFlat ? 0xffb6a7f2 : 0xff9cb9eb, withdrawInk);
+        withdrawBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                haptic(withdrawBtn, state.hapticFeedback, HapticKind.REJECT);
                 toast("躺平模式期间储蓄罐时长保持不变，明日 04:00 后恢复");
                 return;
             }
             long moved = state.withdrawFromVault(state.vaultStepMinutes * FocusState.MINUTE,
                     System.currentTimeMillis(), ZoneId.systemDefault());
             if (moved > 0) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                haptic(withdrawBtn, state.hapticFeedback, HapticKind.CONFIRM);
                 TimerReceiver.changed(this);
                 updateHomeLive();
                 if (homePiggyBank != null) homePiggyBank.playWithdrawRipple();
                 toast("已提取 " + duration(moved) + " 到今日可用时长");
             } else {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                haptic(withdrawBtn, state.hapticFeedback, HapticKind.REJECT);
                 toast("时间储蓄罐为空，先存入一些储备时长吧");
             }
         });
@@ -1246,8 +1231,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
             gap(content, 12);
         }
 
-        content.addView(homeRewardCard());
-
         updateHomeLive();
     }
 
@@ -1396,7 +1379,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         FocusState.RedeemSummary summary = state.redeemSummary(now, zone);
 
         LinearLayout redeemHeader = row(this);
-        redeemHeader.setPadding(0, 0, dp(this, 48), 0);
         TextView h = text(this, "兑换", 26, INK, true);
         if (Build.VERSION.SDK_INT >= 28) h.setAccessibilityHeading(true);
         weight(redeemHeader, h);
@@ -1433,6 +1415,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             FocusSheets.showRateSettings(this, state, this::changed);
         });
         redeemHeader.addView(ratePill);
+        space(redeemHeader, 8);
+        redeemHeader.addView(pageSettingsButton(), dp(this, 38), dp(this, 38));
         pages.addView(redeemHeader);
         LinearLayout.LayoutParams timerPillParams = new LinearLayout.LayoutParams(-2, -2);
         timerPillParams.gravity = Gravity.END;
@@ -1491,6 +1475,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemVoucherCaptionTv.setGravity(Gravity.CENTER);
         voucher.addView(redeemVoucherCaptionTv, -1, -2);
         pages.addView(voucher);
+        gap(pages, 13);
+        pages.addView(redeemStoreCard());
         gap(pages, 13);
 
         LinearLayout sectionHead = row(this);
@@ -2080,49 +2066,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         int minutes = state.presetWork;
         String action = mode == 0 ? "开启自律正计时" : "开启 " + minutes + " 分钟自律倒计时";
         LinearLayout sheetBody = column(this);
-        ScrollView scroller = new ScrollView(this);
-        scroller.setVerticalScrollBarEnabled(false);
-        LinearLayout options = column(this);
-        scroller.addView(options, -1, -2);
-        sheetBody.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1f));
-
-        FocusState.DisciplineCategory[] categories = FocusState.DisciplineCategory.values();
-        FocusState.DisciplineCategory[] chosen = {FocusState.DisciplineCategory.STUDY};
-        Map<FocusState.DisciplineCategory, TextView> chips = new LinkedHashMap<>();
-        Runnable updateSelection = () -> chips.forEach((category, chip) -> {
-            boolean selected = category == chosen[0];
-            chip.setSelected(selected);
-            chip.setTextColor(selected ? BLUE : INK);
-            chip.setBackground(touchCard(this, selected ? BLUE_SOFT : SURFACE_SUBTLE,
-                    selected ? BLUE : BORDER, 13));
-        });
-        LinearLayout chipRow = null;
-        int index = 0;
-        for (var category : categories) {
-            if (category == FocusState.DisciplineCategory.UNCLASSIFIED) continue;
-            if (index % 2 == 0) {
-                if (index > 0) gap(options, 8);
-                chipRow = row(this);
-                options.addView(chipRow, -1, -2);
-            } else {
-                space(chipRow, 8);
-            }
-            index++;
-            TextView chip = pillButton(this, category.icon + " " + category.label, SURFACE_SUBTLE, INK, 13, 49);
-            chip.setContentDescription(category.label);
-            chip.setOnClickListener(v -> {
-                tapHaptic(v);
-                chosen[0] = category;
-                updateSelection.run();
-            });
-            chips.put(category, chip);
-            weight(chipRow, chip);
-        }
-        if (index % 2 != 0) {
-            space(chipRow, 8);
-            weight(chipRow, new View(this));
-        }
-        updateSelection.run();
+        DisciplineCategoryPicker categories = new DisciplineCategoryPicker(this, state);
+        sheetBody.addView(categories, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         TextView start = primaryButton(this, "确认开始");
         gap(sheetBody, 10);
@@ -2137,8 +2082,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
             timerConfirmation.dismiss();
             setTimerTabMode(mode);
-            if (mode == 0) state.startOffline(now, chosen[0]);
-            else state.start(minutes, 0, 1, now, chosen[0]);
+            if (mode == 0) state.startOffline(now, categories.selected());
+            else state.start(minutes, 0, 1, now, categories.selected());
             changed();
             onStarted.run();
         });
@@ -2201,11 +2146,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
     }
 
-    private LinearLayout homeRewardCard() {
-        state.seedDefaultRewardsIfNeeded();
-        boolean layFlat = state.isLayFlat();
-        long spendableMs = state.rewardSpendableMs();
-        int bagCount = state.warehouseBadgeCount();
+    private LinearLayout redeemStoreCard() {
         boolean hasChest = state.canClaimIndulgentReward();
 
         LinearLayout card = column(this);
@@ -2219,23 +2160,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         content.addView(TimeShopUi.createCoinBadge(this), dp(this, 38), dp(this, 38));
         space(content, 11);
 
-        LinearLayout titles = column(this);
-        titles.addView(text(this, "时间商店", 16, TimeShopUi.storeInkColor(), true));
-        gap(titles, 2);
-
-        String subText = hasChest
-                ? "时光杂货铺 · 宝箱待开启"
-                : layFlat
-                ? "时光杂货铺 · 储蓄 " + duration(spendableMs)
-                : bagCount > 0
-                ? "时光杂货铺 · 可支配 " + duration(spendableMs) + " · 背包 " + bagCount
-                : "时光杂货铺 · 可支配 " + duration(spendableMs);
-        int subColor = hasChest ? AMBER : layFlat ? PURPLE : TimeShopUi.storeMutedColor();
-        TextView subTv = text(this, subText, 12, subColor, hasChest);
-        subTv.setMaxLines(2);
-        subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        titles.addView(subTv);
-        weight(content, titles);
+        weight(content, text(this, "时间商店", 16, TimeShopUi.storeInkColor(), true));
         space(content, 8);
 
         RedeemUi.Pressable3DButton enterBtn = new RedeemUi.Pressable3DButton(this, 31, 11, 13, 10, false);
@@ -3021,7 +2946,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         String dateSub = calNow.format(DateTimeFormatter.ofPattern("M月d日 · EEEE", Locale.SIMPLIFIED_CHINESE));
 
         LinearLayout head = row(this);
-        head.setPadding(0, 0, dp(this, 48), 0);
         LinearLayout titleCol = column(this);
         TextView h = text(this, "戒断", 26, INK, true);
         if (Build.VERSION.SDK_INT >= 28) h.setAccessibilityHeading(true);
@@ -3039,6 +2963,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             FocusSheets.showAbstinenceEditor(this, state, null, null, this::changed);
         });
         head.addView(newBtn, -2, -2);
+        space(head, 8);
+        head.addView(pageSettingsButton(), dp(this, 38), dp(this, 38));
         pages.addView(head);
         gap(pages, 16);
 
@@ -3182,12 +3108,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
     // =========================================================================
     private void insights() {
         LinearLayout head = row(this);
-        head.setPadding(0, 0, dp(this, 48), 0);
         LinearLayout titleBox = row(this);
         TextView h = text(this, "使用洞察", 26, INK, true);
         if (Build.VERSION.SDK_INT >= 28) h.setAccessibilityHeading(true);
         titleBox.addView(h);
         weight(head, titleBox);
+        space(head, 8);
+        head.addView(pageSettingsButton(), dp(this, 38), dp(this, 38));
         pages.addView(head);
         gap(pages, 14);
 
@@ -3447,6 +3374,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         return card;
     }
 
+    View pageSettingsButton() {
+        View button = topBarBtn(R.drawable.ic_settings, INK, "设置", this::openPageSettings);
+        elevate(button, 0);
+        return button;
+    }
+
     private FrameLayout topBarBtn(int iconRes, int tint, String desc, Runnable action) {
         int bg = isDark() ? 0xe61c2534 : 0xf2ffffff;
         FrameLayout btn = iconBadge(this, iconRes, bg, tint, 38, 19, 12);
@@ -3594,10 +3527,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     new ComponentName(this, FocusTile.class), getString(R.string.focus_tile),
                     Icon.createWithResource(this, R.drawable.ic_tile), getMainExecutor(),
                     result -> {
-                        if (result >= 1000) toast("请在快捷设置编辑页查找「留白专注」");
+                        if (result >= 1000) toast("请在快捷设置编辑页查找「简松时」");
                     });
         } else {
-            toast("请在快捷设置编辑页添加「留白专注」");
+            toast("请在快捷设置编辑页添加「简松时」");
         }
     }
 

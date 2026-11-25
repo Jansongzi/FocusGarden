@@ -560,6 +560,23 @@ final class FocusStateCheck {
         var custom = durations.disciplineReport(day.minusDays(1), day, noon + 18 * MINUTE, UTC);
         equal(18 * MINUTE, custom.totalMs());
         equal(4 * MINUTE, custom.categoryMs().get(FocusState.DisciplineCategory.UNCLASSIFIED));
+
+        var focusCategory = durations.saveDisciplineCategory(null, " 写作 ");
+        equal("写作", focusCategory.label());
+        equal(true, durations.saveDisciplineCategory(null, "学习") == null);
+        equal(true, durations.saveDisciplineCategory(null, "写作") == null);
+        durations.startOffline(noon + 19 * MINUTE, focusCategory);
+        equal(MINUTE, durations.stopOffline(noon + 20 * MINUTE, UTC));
+        var renamed = durations.saveDisciplineCategory(focusCategory.id(), "写论文");
+        equal(focusCategory.id(), renamed.id());
+        durations.archivedDisciplineCategories.add(renamed.id());
+        equal(false, durations.disciplineCategories().contains(renamed));
+        equal(MINUTE, durations.disciplineReport(day, day, noon + 20 * MINUTE, UTC).categoryMs().get(renamed));
+        equal(renamed, durations.saveDisciplineCategory(null, "写论文"));
+        equal(true, durations.disciplineCategories().contains(renamed));
+        durations.start(1, 0, 1, noon + 21 * MINUTE, renamed);
+        equal(FocusState.Transition.FINISHED, durations.advance(noon + 22 * MINUTE, UTC));
+        equal(2 * MINUTE, durations.disciplineReport(day, day, noon + 22 * MINUTE, UTC).categoryMs().get(renamed));
     }
 
     private static void checkBlockAppearances() {

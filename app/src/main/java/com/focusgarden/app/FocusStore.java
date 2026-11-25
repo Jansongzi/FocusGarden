@@ -125,6 +125,19 @@ final class FocusStore {
         state.pomodoroWork = root.optInt("pomodoroWork", 25);
         state.pomodoroRest = root.optInt("pomodoroRest", 5);
         state.pomodoroRounds = root.optInt("pomodoroRounds", 4);
+        JSONObject customCategories = root.optJSONObject("customDisciplineCategories");
+        for (Iterator<String> c = keys(customCategories); c.hasNext();) {
+            String id = c.next();
+            String name = customCategories.optString(id).trim();
+            if (id.startsWith("custom-") && !name.isEmpty()) state.customDisciplineCategories.put(id, name);
+        }
+        JSONArray archivedCategories = root.optJSONArray("archivedDisciplineCategories");
+        if (archivedCategories != null) {
+            for (int i = 0; i < archivedCategories.length(); i++) {
+                String id = archivedCategories.optString(i);
+                if (state.customDisciplineCategories.containsKey(id)) state.archivedDisciplineCategories.add(id);
+            }
+        }
         state.phaseEnd = root.optLong("phaseEnd");
         state.phaseDuration = root.optLong("phaseDuration");
         state.pausedRemaining = root.optLong("pausedRemaining");
@@ -132,12 +145,12 @@ final class FocusStore {
         state.restMinutes = root.optInt("restMinutes");
         state.roundsLeft = root.optInt("roundsLeft");
         state.inBreak = root.optBoolean("inBreak");
-        state.countdownCategory = FocusState.DisciplineCategory.stored(root.optString("countdownCategory"));
+        state.countdownCategory = state.disciplineCategory(root.optString("countdownCategory"));
 
         state.offlineStartMs = root.optLong("offlineStartMs");
         state.offlineAccumulatedMs = root.optLong("offlineAccumulatedMs");
         state.offlineUnredeemedMs = root.optLong("offlineUnredeemedMs");
-        state.stopwatchCategory = FocusState.DisciplineCategory.stored(root.optString("stopwatchCategory"));
+        state.stopwatchCategory = state.disciplineCategory(root.optString("stopwatchCategory"));
 
         state.soberUntil = root.optLong("soberUntil");
         state.soberPausedMs = Math.max(0L, root.optLong("soberPausedMs"));
@@ -424,10 +437,9 @@ final class FocusStore {
             JSONObject categoryMs = row.optJSONObject("disciplineCategoryMs");
             for (Iterator<String> c = keys(categoryMs); c.hasNext();) {
                 String key = c.next();
-                FocusState.DisciplineCategory category = FocusState.DisciplineCategory.stored(key);
                 long duration = categoryMs.optLong(key);
-                if (category != FocusState.DisciplineCategory.UNCLASSIFIED && duration > 0) {
-                    day.disciplineCategoryMs.put(category, duration);
+                if (duration > 0 && state.disciplineCategory(key) != FocusState.DisciplineCategory.UNCLASSIFIED) {
+                    day.disciplineCategoryMs.put(key, duration);
                 }
             }
             day.earnedMs = row.optLong("earned");
@@ -604,11 +616,13 @@ final class FocusStore {
                     .put("restMinutes", state.restMinutes)
                     .put("roundsLeft", state.roundsLeft)
                     .put("inBreak", state.inBreak)
-                    .put("countdownCategory", state.countdownCategory.name())
+                    .put("countdownCategory", state.countdownCategory.id())
                     .put("offlineStartMs", state.offlineStartMs)
                     .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
                     .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
-                    .put("stopwatchCategory", state.stopwatchCategory.name())
+                    .put("stopwatchCategory", state.stopwatchCategory.id())
+                    .put("customDisciplineCategories", new JSONObject(state.customDisciplineCategories))
+                    .put("archivedDisciplineCategories", new JSONArray(state.archivedDisciplineCategories))
                     .put("soberUntil", state.soberUntil)
                     .put("soberPausedMs", state.soberPausedMs)
                     .put("soberVaultPaid", state.soberVaultPaid)
@@ -756,7 +770,7 @@ final class FocusStore {
                 }
                 JSONObject categoryMs = new JSONObject();
                 for (var category : day.disciplineCategoryMs.entrySet()) {
-                    categoryMs.put(category.getKey().name(), category.getValue());
+                    categoryMs.put(category.getKey(), category.getValue());
                 }
                 days.put(entry.getKey(), new JSONObject()
                         .put("learning", day.learningMs)

@@ -171,7 +171,7 @@ final class UpdatePanel {
             return;
         }
         String notes = release.notes().trim().isEmpty()
-                ? "已检测到新版留白专注，可点击下方按钮下载安装。" : release.notes();
+                ? "已检测到新版简松时，可点击下方按钮下载安装。" : release.notes();
         if (release.assets().size() == 1) {
             GitHubUpdates.Asset asset = release.assets().get(0);
             panel = GardenUi.confirmDialog(activity, R.drawable.ic_info, GardenUi.BLUE_SOFT, GardenUi.BLUE,
@@ -239,7 +239,7 @@ final class UpdatePanel {
                 () -> GitHubUpdates.validate(activity.getApplicationContext(), GitHubUpdates.pending(activity)), archive -> {
             if (!activity.getPackageManager().canRequestPackageInstalls()) {
                 panel = GardenUi.confirmDialog(activity, R.drawable.ic_shield, GardenUi.AMBER_SOFT, GardenUi.AMBER,
-                        "需要安装授权", "允许留白专注请求安装后，返回「检查更新」并点击「立即安装」。",
+                        "需要安装授权", "允许简松时请求安装后，返回「检查更新」并点击「立即安装」。",
                         "稍后", "前往设置", false, () -> activity.startActivity(
                                 new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                         Uri.parse("package:" + activity.getPackageName()))));
@@ -249,7 +249,7 @@ final class UpdatePanel {
             Uri uri = GitHubUpdates.installUri(activity);
             Intent intent = new Intent(Intent.ACTION_INSTALL_PACKAGE, uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.setClipData(ClipData.newRawUri("留白专注更新", uri));
+            intent.setClipData(ClipData.newRawUri("简松时更新", uri));
             try {
                 activity.startActivity(intent);
             } catch (android.content.ActivityNotFoundException e) {
