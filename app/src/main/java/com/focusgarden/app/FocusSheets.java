@@ -26,7 +26,6 @@ import android.view.WindowManager;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -78,370 +77,226 @@ final class FocusSheets {
     }
 
     static LiveRefresh showFocusTimer(MainActivity activity, FocusState state, Runnable onChanged) {
-        Dialog dialog = new Dialog(activity, isDark()
-                ? android.R.style.Theme_Material_NoActionBar
-                : android.R.style.Theme_Material_Light_NoActionBar);
+        Dialog dialog = new Dialog(activity, R.style.Theme_FocusGarden_Timer);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-
-        LinearLayout root = column(activity);
-        root.setBackground(gradientBg(activity, isDark() ? 0xff0d182b : 0xffeaf2ff, PAPER, 0));
-        root.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (Build.VERSION.SDK_INT >= 30) {
-                var e = insets.getInsets(android.view.WindowInsets.Type.systemBars()
-                        | android.view.WindowInsets.Type.displayCutout());
-                view.setPadding(e.left + dp(activity, 20), e.top + dp(activity, 10),
-                        e.right + dp(activity, 20), e.bottom + dp(activity, 16));
-            } else {
-                view.setPadding(insets.getSystemWindowInsetLeft() + dp(activity, 20),
-                        insets.getSystemWindowInsetTop() + dp(activity, 10),
-                        insets.getSystemWindowInsetRight() + dp(activity, 20),
-                        insets.getSystemWindowInsetBottom() + dp(activity, 16));
-            }
-            return insets;
-        });
+        TimerScene scene = new TimerScene(activity, TimerAppearance.Mode.FOCUS);
+        LinearLayout root = scene.layout;
 
         LinearLayout top = row(activity);
-        TextView title = text(activity, "自律模式", 20, INK, true);
-        weight(top, title);
-        FrameLayout close = iconBadge(activity, R.drawable.ic_close, CARD, INK_SUB, 36, 18, 18);
-        close.setContentDescription("关闭自律模式页面");
-        elevate(close, 2);
+        weight(top, text(activity, "自律模式", 24, TimerScene.TITLE, true));
+        LinearLayout lockStatus = TimerScene.lockStatus(activity, "锁机中");
+        top.addView(lockStatus);
+        LinearLayout idleTools = row(activity);
+        FrameLayout appearance = iconBadge(activity, R.drawable.ic_wallpaper, TimerScene.CONTROL,
+                TimerScene.TITLE, 36, 18, 11);
+        TimerScene.markButton(appearance, "计时背景");
+        appearance.setOnClickListener(v -> {
+            tapHaptic(v);
+            TimerAppearance.showSettings(activity, scene::reloadBackground);
+        });
+        idleTools.addView(appearance);
+        space(idleTools, 8);
+        FrameLayout close = iconBadge(activity, R.drawable.ic_close, TimerScene.CONTROL, TimerScene.TITLE, 36, 18, 11);
+        TimerScene.markButton(close, "关闭自律模式页面");
         close.setOnClickListener(v -> dialog.dismiss());
-        top.addView(close);
+        idleTools.addView(close);
+        top.addView(idleTools);
         root.addView(top);
-        gap(root, 10);
 
-        final int[] mode = {state.offlineActive() ? 0 : state.active() ? 1 : activity.getTimerTabMode()};
-        final int[] quoteOffset = {0};
-
-        // 2-mode switcher: 正计时 | 倒计时
+        int[] mode = {state.offlineActive() ? 0 : state.active() ? 1 : activity.getTimerTabMode()};
         LinearLayout modeRow = row(activity);
-        modeRow.setBackground(cardBg(activity, CARD, BORDER, 16));
+        modeRow.setBackground(cardBg(activity, TimerScene.CONTROL, TimerScene.STROKE, 14));
         modeRow.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-        TextView tabStopwatch = text(activity, "正计时", 13, INK, true);
-        TextView tabCount = text(activity, "倒计时", 13, INK, true);
-        for (TextView t : new TextView[]{tabStopwatch, tabCount}) {
-            t.setGravity(Gravity.CENTER);
-            t.setMinHeight(dp(activity, 36));
-        }
+        TextView tabStopwatch = TimerScene.caption(activity, "正计时", 13);
+        TextView tabCount = TimerScene.caption(activity, "倒计时", 13);
+        for (TextView tab : new TextView[]{tabStopwatch, tabCount}) tab.setMinHeight(dp(activity, 34));
         weight(modeRow, tabStopwatch);
         space(modeRow, 4);
         weight(modeRow, tabCount);
-        root.addView(modeRow);
+        LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(-1, -2);
+        modeParams.topMargin = dp(activity, 12);
+        root.addView(modeRow, modeParams);
 
-        ScrollView scroll = new ScrollView(activity);
-        scroll.setVerticalScrollBarEnabled(false);
-        LinearLayout body = column(activity);
-        body.setGravity(Gravity.CENTER_HORIZONTAL);
-        scroll.addView(body, -1, -2);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        LinearLayout body = scene.centerBody();
+        TextView phase = TimerScene.caption(activity, "", 16);
+        body.addView(phase, -1, -2);
+        TextView clock = TimerScene.clock(activity, false);
+        body.addView(clock, -1, dp(activity, 112));
 
-        gap(body, 12);
-        ImageView mascot = new ImageView(activity);
-        mascot.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        body.addView(mascot, dp(activity, 78), dp(activity, 78));
-
-        gap(body, 6);
-        TextView phaseLabel = text(activity, "", 16, BLUE, true);
-        phaseLabel.setGravity(Gravity.CENTER);
-        body.addView(phaseLabel, -1, -2);
-
-        TimerDial dial = new TimerDial(activity);
-        body.addView(dial, dp(activity, 196), dp(activity, 196));
-
-        TextView detailLabel = text(activity, "", 13, INK_SUB, false);
-        detailLabel.setGravity(Gravity.CENTER);
-        body.addView(detailLabel, -1, -2);
-        gap(body, 12);
+        TextView reward = TimerScene.caption(activity, "", 15);
+        TextView detail = TimerScene.caption(activity, "", 13);
+        gap(body, 3);
+        body.addView(reward, -1, -2);
+        gap(body, 8);
+        body.addView(detail, -1, -2);
 
         LinearLayout setupArea = column(activity);
         body.addView(setupArea, -1, -2);
-
         LinearLayout learningArea = column(activity);
-        learningArea.setBackground(cardBg(activity, CARD, BORDER, 16));
-        learningArea.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
         body.addView(learningArea, -1, -2);
-        View learningGap = new View(activity);
-        body.addView(learningGap, -1, dp(activity, 10));
 
-        LinearLayout quoteCard = column(activity);
-        quoteCard.setBackground(cardBg(activity, CARD, BORDER, 16));
-        quoteCard.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
-        TextView quoteText = text(activity, "", 13, INK_SUB, false);
-        quoteText.setGravity(Gravity.CENTER);
-        TextView quoteAuthor = text(activity, "", 11, MUTED, false);
-        quoteAuthor.setGravity(Gravity.CENTER);
-        quoteCard.addView(quoteText);
-        gap(quoteCard, 4);
-        quoteCard.addView(quoteAuthor);
-        body.addView(quoteCard, -1, -2);
-        gap(body, 12);
+        int[] quoteOffset = {0};
+        TextView quote = TimerScene.caption(activity, "", 13);
+        quote.setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8));
+        quote.setMinHeight(dp(activity, 40));
+        quote.setMaxLines(3);
+        quote.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        Runnable renderQuote = () -> {
+            QuoteBank.Quote entry = QuoteBank.quoteForOffset(activity, quoteOffset[0]);
+            quote.setText(entry.author().isEmpty() ? entry.text() : entry.text() + "  — " + entry.author());
+        };
+        renderQuote.run();
+        quote.setOnClickListener(v -> {
+            tapHaptic(v);
+            quoteOffset[0]++;
+            renderQuote.run();
+        });
+        root.addView(quote, -1, -2);
+        gap(root, 9);
 
-        // Controls
         LinearLayout idleBtns = column(activity);
-        TextView startBtn = primaryButton(activity, "开启自律模式");
+        TextView startBtn = pillButton(activity, "", 0xffe6f1e8, 0xff14332a, 16, 46);
         idleBtns.addView(startBtn, -1, -2);
-        gap(idleBtns, 4);
-        TextView startHint = text(activity, "", 12, INK_SUB, false);
-        startHint.setGravity(Gravity.CENTER);
+        gap(idleBtns, 7);
+        TextView startHint = TimerScene.caption(activity, "", 12);
         idleBtns.addView(startHint, -1, -2);
         root.addView(idleBtns);
 
         LinearLayout runningCol = column(activity);
+        TextView claimOfflineBtn = pillButton(activity, "", TimerScene.CONTROL, TimerScene.TITLE, 13, 40);
+        claimOfflineBtn.setBackground(touchCard(activity, TimerScene.CONTROL, TimerScene.STROKE, 13));
+        runningCol.addView(claimOfflineBtn, -1, -2);
+
         LinearLayout runningBtns = row(activity);
-        TextView endBtn = dangerButton(activity, "停止并结算");
-        TextView pauseBtn = primaryButton(activity, "暂停计时");
-        runningBtns.addView(endBtn, new LinearLayout.LayoutParams(0, -2, 1f));
-        space(runningBtns, 10);
-        runningBtns.addView(pauseBtn, new LinearLayout.LayoutParams(0, -2, 1.45f));
-        runningCol.addView(runningBtns);
-        TextView claimOfflineBtn = pillButton(activity, "", GREEN_SOFT, GREEN, 13, 42);
-        LinearLayout.LayoutParams claimLp = new LinearLayout.LayoutParams(-1, -2);
-        claimLp.topMargin = dp(activity, 8);
-        runningCol.addView(claimOfflineBtn, claimLp);
-        LinearLayout countdownLockBar = row(activity);
-        countdownLockBar.setBackground(cardBg(activity, BLUE_SOFT, blueStroke(), 14));
-        countdownLockBar.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 14), dp(activity, 12));
-        countdownLockBar.setGravity(Gravity.CENTER);
-        countdownLockBar.addView(iconView(activity, R.drawable.ic_shield, 18, BLUE));
-        space(countdownLockBar, 8);
-        TextView countdownLockTv = text(activity, "自律倒计时中 · 结束前不可解锁", 13, BLUE, true);
-        countdownLockTv.setSingleLine(true);
-        countdownLockBar.addView(countdownLockTv);
-        runningCol.addView(countdownLockBar, -1, -2);
+        runningBtns.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+        TimerScene.Action pauseBtn = new TimerScene.Action(activity, R.drawable.ic_pause, "暂停", false);
+        TimerScene.Action endBtn = new TimerScene.Action(activity, R.drawable.ic_stop, "停止并结算", true);
+        runningBtns.addView(pauseBtn, dp(activity, 101), -2);
+        space(runningBtns, 24);
+        runningBtns.addView(endBtn, dp(activity, 101), -2);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, -2);
+        actionParams.topMargin = dp(activity, 8);
+        runningCol.addView(runningBtns, actionParams);
+        TextView countdownLock = TimerScene.caption(activity, "倒计时结束前不可停止", 13);
+        countdownLock.setPadding(0, dp(activity, 9), 0, dp(activity, 9));
+        runningCol.addView(countdownLock, -1, -2);
         root.addView(runningCol);
 
-        Runnable renderQuote = () -> {
-            QuoteBank.Quote q = QuoteBank.quoteForOffset(activity, quoteOffset[0]);
-            quoteText.setText("“" + q.text() + "”");
-            quoteAuthor.setText(q.author().isEmpty() ? "" : "—— " + q.author());
-        };
-        renderQuote.run();
-        quoteCard.setOnClickListener(v -> {
-            quoteOffset[0]++;
-            renderQuote.run();
-        });
-
-        Runnable[] rebuildSetup = new Runnable[1];
-        final int[] lastModeTab = {-1};
-        final int[] lastMascot = {0};
-        final int[] lastPhaseColor = {0};
-        final int[] lastClaimVis = {-1};
-        final int[] lastLearningVis = {-1};
-        final String[] lastLearningKey = {null};
-
+        Map<String, String> displayedApps = new LinkedHashMap<>();
+        String[] lastLearningLabel = {null};
+        int[] lastModeTab = {-1};
         Runnable refresh = () -> {
             long now = System.currentTimeMillis();
             boolean activeCountdown = state.active();
             boolean activeOffline = state.offlineActive();
-            boolean anyActive = activeCountdown || activeOffline;
+            boolean active = activeCountdown || activeOffline;
+            boolean locked = state.isDisciplineLocked(now);
             int effectiveMode = activeOffline ? 0 : activeCountdown ? 1 : mode[0];
 
-            int modeVis = anyActive ? View.GONE : View.VISIBLE;
-            int runVis = anyActive ? View.VISIBLE : View.GONE;
-            if (modeRow.getVisibility() != modeVis) modeRow.setVisibility(modeVis);
-            if (idleBtns.getVisibility() != modeVis) idleBtns.setVisibility(modeVis);
-            if (runningCol.getVisibility() != runVis) runningCol.setVisibility(runVis);
+            modeRow.setVisibility(active ? View.GONE : View.VISIBLE);
+            idleTools.setVisibility(active ? View.GONE : View.VISIBLE);
+            idleBtns.setVisibility(active ? View.GONE : View.VISIBLE);
+            lockStatus.setVisibility(locked ? View.VISIBLE : View.GONE);
+            runningCol.setVisibility(active ? View.VISIBLE : View.GONE);
+            runningBtns.setVisibility(activeOffline ? View.VISIBLE : View.GONE);
+            countdownLock.setVisibility(activeCountdown ? View.VISIBLE : View.GONE);
+            setupArea.setVisibility(!active && effectiveMode == 1 ? View.VISIBLE : View.GONE);
+            learningArea.setVisibility(active ? View.VISIBLE : View.GONE);
 
-            int setupVis = (!anyActive && effectiveMode != 0) ? View.VISIBLE : View.GONE;
-            if (setupArea.getVisibility() != setupVis) setupArea.setVisibility(setupVis);
-
-            int learnVis = anyActive ? View.VISIBLE : View.GONE;
-            if (lastLearningVis[0] != learnVis) {
-                learningArea.setVisibility(learnVis);
-                learningGap.setVisibility(learnVis);
-                lastLearningVis[0] = learnVis;
-            }
-            if (learnVis == View.VISIBLE) {
-                List<String> learnPkgs = new ArrayList<>();
-                for (Map.Entry<String, FocusState.Rule> entry : state.rules.entrySet()) {
+            if (active) {
+                Map<String, String> apps = new LinkedHashMap<>();
+                for (var entry : state.rules.entrySet()) {
                     if (entry.getValue().category() == FocusState.Category.LEARNING) {
-                        learnPkgs.add(entry.getKey());
+                        String name = entry.getValue().label();
+                        apps.put(entry.getKey(), name.isEmpty() ? "学习应用" : name);
                     }
                 }
-                StringBuilder kb = new StringBuilder();
-                for (String pkg : learnPkgs) {
-                    kb.append(pkg).append('|');
-                }
-                String curKey = kb.toString();
-                if (!curKey.equals(lastLearningKey[0])) {
-                    lastLearningKey[0] = curKey;
+                String label = locked ? "仅可使用学习应用" : "学习应用";
+                if (!label.equals(lastLearningLabel[0]) || !apps.equals(displayedApps)) {
+                    lastLearningLabel[0] = label;
+                    displayedApps.clear();
+                    displayedApps.putAll(apps);
                     learningArea.removeAllViews();
-                    learningArea.addView(text(activity, "锁定中 · 仅可用学习应用", 12, GREEN, true));
-                    gap(learningArea, 8);
-                    if (learnPkgs.isEmpty()) {
-                        learningArea.addView(text(activity, "暂未添加学习应用", 12, MUTED, false));
-                    } else {
-                        HorizontalScrollView hs = new HorizontalScrollView(activity);
-                        hs.setHorizontalScrollBarEnabled(false);
-                        LinearLayout strip = row(activity);
-                        for (int i = 0; i < learnPkgs.size(); i++) {
-                            String pkg = learnPkgs.get(i);
-                            FocusState.Rule rule = state.rules.get(pkg);
-                            String appName = rule != null && !rule.label().isEmpty() ? rule.label() : "学习应用";
-                            LinearLayout chip = row(activity);
-                            chip.setBackground(touchCard(activity, GREEN_SOFT, greenStroke(), 12));
-                            chip.setPadding(dp(activity, 10), dp(activity, 7), dp(activity, 10), dp(activity, 7));
-                            chip.addView(appIcon(activity, pkg, 22, 6));
-                            space(chip, 6);
-                            chip.addView(text(activity, appName, 12, GREEN, true));
-                            chip.setOnClickListener(v -> {
-                                tapHaptic(v);
-                                Intent launch = activity.getPackageManager().getLaunchIntentForPackage(pkg);
-                                if (launch != null) {
-                                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                    activity.startActivity(launch);
-                                } else {
-                                    Toast.makeText(activity, "无法打开「" + appName + "」", Toast.LENGTH_SHORT).show();
-                                }
-                            });
-                            strip.addView(chip);
-                            if (i + 1 < learnPkgs.size()) space(strip, 8);
+                    gap(learningArea, 26);
+                    learningArea.addView(TimerScene.appShortcuts(activity, apps, label, "暂未添加学习应用", pkg -> {
+                        Intent launch = activity.getPackageManager().getLaunchIntentForPackage(pkg);
+                        if (launch != null) {
+                            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            activity.startActivity(launch);
+                        } else {
+                            Toast.makeText(activity, "该学习应用已不可用", Toast.LENGTH_SHORT).show();
                         }
-                        hs.addView(strip);
-                        learningArea.addView(hs, -1, -2);
-                    }
+                    }), -1, -2);
                 }
             }
 
             if (lastModeTab[0] != effectiveMode) {
-                tabStopwatch.setBackground(effectiveMode == 0 ? shape(activity, BLUE_SOFT, 12) : null);
-                tabStopwatch.setTextColor(effectiveMode == 0 ? BLUE : MUTED);
-                tabCount.setBackground(effectiveMode == 1 ? shape(activity, BLUE_SOFT, 12) : null);
-                tabCount.setTextColor(effectiveMode == 1 ? BLUE : MUTED);
+                tabStopwatch.setBackground(effectiveMode == 0 ? shape(activity, 0x77d2eadb, 10) : null);
+                tabCount.setBackground(effectiveMode == 1 ? shape(activity, 0x77d2eadb, 10) : null);
+                tabStopwatch.setTextColor(effectiveMode == 0 ? TimerScene.TITLE : TimerScene.SECONDARY);
+                tabCount.setTextColor(effectiveMode == 1 ? TimerScene.TITLE : TimerScene.SECONDARY);
+                tabStopwatch.setSelected(effectiveMode == 0);
+                tabCount.setSelected(effectiveMode == 1);
                 lastModeTab[0] = effectiveMode;
             }
 
-            String stopHint = MainActivity.disciplineStopHint(effectiveMode);
-            if (!stopHint.contentEquals(startHint.getText())) startHint.setText(stopHint);
+            MainActivity.setTextIfChanged(startHint, MainActivity.disciplineStopHint(effectiveMode));
             if (effectiveMode == 0) {
-                boolean running = state.offlineRunning();
-                boolean paused = state.offlinePaused();
                 long elapsed = state.offlineElapsed(now);
                 long claimable = state.claimableOfflineMs(now);
-
-                int mascotRes = running ? R.drawable.mascot_strong : R.drawable.mascot_calm;
-                if (lastMascot[0] != mascotRes) {
-                    mascot.setImageResource(mascotRes);
-                    lastMascot[0] = mascotRes;
-                }
-                String pTitle = running ? "自律正计时进行中" : paused ? "自律正计时已暂停" : "自律正计时";
-                if (!pTitle.contentEquals(phaseLabel.getText())) phaseLabel.setText(pTitle);
-                int pColor = paused ? AMBER : BLUE;
-                if (lastPhaseColor[0] != pColor) {
-                    phaseLabel.setTextColor(pColor);
-                    lastPhaseColor[0] = pColor;
-                }
-
-                float sweep = running ? ((elapsed % FocusState.MINUTE) / (float) FocusState.MINUTE) : 1f;
-                if (running && sweep < 0.02f) sweep = 0.02f;
-                String ringSub = running ? "可兑换 +" + duration(claimable)
-                        : paused ? "已暂停 · 临时放行" : state.rateMode.label;
-                dial.update(countdown(elapsed), sweep, paused, false, ringSub);
-
+                boolean paused = state.offlinePaused();
+                boolean canClaim = activeOffline && state.canClaimOffline(now);
                 FocusState.Day day = state.days.get(FocusState.today().toString());
-                long todayOffline = (day == null ? 0L : day.offlineMs) + elapsed;
-                String detailStr = anyActive
-                        ? "今日累计自律 " + duration(todayOffline) + " · 除学习应用外其余全部锁定"
-                        : "可随时停止并结算";
-                if (!detailStr.contentEquals(detailLabel.getText())) detailLabel.setText(detailStr);
-
-                String startStr = "开启自律正计时";
-                if (!startStr.contentEquals(startBtn.getText())) startBtn.setText(startStr);
-                String endStr = "停止并结算";
-                if (!endStr.contentEquals(endBtn.getText())) endBtn.setText(endStr);
-                String pauseStr = running ? "暂停计时" : "继续计时";
-                if (!pauseStr.contentEquals(pauseBtn.getText())) pauseBtn.setText(pauseStr);
-
-                int stopBtnsVis = anyActive ? View.VISIBLE : View.GONE;
-                if (runningBtns.getVisibility() != stopBtnsVis) runningBtns.setVisibility(stopBtnsVis);
-                if (countdownLockBar.getVisibility() != View.GONE) countdownLockBar.setVisibility(View.GONE);
-
-                int showClaim = (anyActive && state.canClaimOffline(now)) ? View.VISIBLE : View.GONE;
-                if (lastClaimVis[0] != showClaim) {
-                    claimOfflineBtn.setVisibility(showClaim);
-                    lastClaimVis[0] = showClaim;
-                }
-                if (showClaim == View.VISIBLE) {
-                    String cTxt = "立即兑换 +" + shortMinutes(claimable) + " 分钟到可用时间";
-                    if (!cTxt.contentEquals(claimOfflineBtn.getText())) claimOfflineBtn.setText(cTxt);
-                }
+                long today = (day == null ? 0 : day.offlineMs) + elapsed;
+                MainActivity.setTextIfChanged(phase, paused ? "自律正计时 · 已暂停" : "自律正计时");
+                MainActivity.setTextIfChanged(clock, countdown(elapsed));
+                MainActivity.setTextIfChanged(reward, canClaim ? "可兑换 +" + duration(claimable) : "累计满 5 分钟后可兑换");
+                MainActivity.setTextIfChanged(detail, "今日累计自律 " + duration(today));
+                MainActivity.setTextIfChanged(startBtn, "开启自律正计时");
+                pauseBtn.update(paused ? R.drawable.ic_play : R.drawable.ic_pause, paused ? "继续" : "暂停");
+                claimOfflineBtn.setVisibility(canClaim ? View.VISIBLE : View.GONE);
+                if (canClaim) MainActivity.setTextIfChanged(claimOfflineBtn, "立即兑换 +" + shortMinutes(claimable) + " 分钟");
             } else {
-                long rem = state.remaining(now);
-                int mascotRes = activeCountdown ? R.drawable.mascot_strong : R.drawable.mascot_calm;
-                if (lastMascot[0] != mascotRes) {
-                    mascot.setImageResource(mascotRes);
-                    lastMascot[0] = mascotRes;
-                }
-
-                String pTitle = activeCountdown ? "自律倒计时进行中" : "自律倒计时";
-                if (!pTitle.contentEquals(phaseLabel.getText())) phaseLabel.setText(pTitle);
-                if (lastPhaseColor[0] != BLUE) {
-                    phaseLabel.setTextColor(BLUE);
-                    lastPhaseColor[0] = BLUE;
-                }
-
-                float progress = activeCountdown && state.phaseDuration > 0
-                        ? Math.min(1f, (float) rem / state.phaseDuration) : 1f;
-                String ringSub = activeCountdown ? "锁定中 · 不可停止"
-                        : state.rateMode.label;
-                dial.update(countdown(activeCountdown ? rem : state.presetWork * FocusState.MINUTE),
-                        progress, false, false, ringSub);
-
-                long expectedFocus = state.convertByMode((long) state.presetWork * FocusState.MINUTE);
-                String detailStr = activeCountdown
-                        ? "除正向学习应用外全部锁定 · 完成后自动发放时间奖励"
-                        : "开启后除正向学习应用外全部锁定，结束前不可停止 · 可得 " + duration(expectedFocus);
-                if (!detailStr.contentEquals(detailLabel.getText())) detailLabel.setText(detailStr);
-
-                String startStr = "开启自律倒计时";
-                if (!startStr.contentEquals(startBtn.getText())) startBtn.setText(startStr);
-
-                if (runningBtns.getVisibility() != View.GONE) runningBtns.setVisibility(View.GONE);
-                int lockBarVis = activeCountdown ? View.VISIBLE : View.GONE;
-                if (countdownLockBar.getVisibility() != lockBarVis) countdownLockBar.setVisibility(lockBarVis);
-                if (lastClaimVis[0] != View.GONE) {
-                    claimOfflineBtn.setVisibility(View.GONE);
-                    lastClaimVis[0] = View.GONE;
-                }
+                long remaining = activeCountdown ? state.remaining(now) : state.presetWork * FocusState.MINUTE;
+                MainActivity.setTextIfChanged(phase, activeCountdown && state.inBreak ? "自律休息计时" : "自律倒计时");
+                MainActivity.setTextIfChanged(clock, countdown(remaining));
+                MainActivity.setTextIfChanged(reward, activeCountdown ? "完成后自动结算"
+                        : "完成预计可得 " + duration(state.convertByMode(state.presetWork * FocusState.MINUTE)));
+                MainActivity.setTextIfChanged(detail, activeCountdown && !locked ? "休息中" : "");
+                MainActivity.setTextIfChanged(startBtn, "开启自律倒计时");
+                claimOfflineBtn.setVisibility(View.GONE);
             }
         };
 
+        Runnable[] rebuildSetup = new Runnable[1];
+        IntConsumer setMinutes = minutes -> {
+            state.presetWork = minutes;
+            onChanged.run();
+            rebuildSetup[0].run();
+            refresh.run();
+        };
         rebuildSetup[0] = () -> {
             setupArea.removeAllViews();
-            if (mode[0] == 1) {
-                int[] presets = {15, 25, 45, 60};
-                LinearLayout row = row(activity);
-                for (int m : presets) {
-                    boolean sel = state.presetWork == m;
-                    TextView chip = pillButton(activity, m + "分", sel ? BLUE_SOFT : CARD,
-                            sel ? BLUE : INK_SUB, 12, 38);
-                    if (!sel) chip.setBackground(touchCard(activity, CARD, BORDER, 12));
-                    chip.setOnClickListener(v -> {
-                        state.presetWork = m;
-                        onChanged.run();
-                        rebuildSetup[0].run();
-                        refresh.run();
-                    });
-                    weight(row, chip);
-                    space(row, 6);
-                }
-                boolean custom = state.presetWork != 15 && state.presetWork != 25
-                        && state.presetWork != 45 && state.presetWork != 60;
-                TextView customChip = pillButton(activity, custom ? state.presetWork + "分" : "自定义",
-                        custom ? BLUE_SOFT : CARD, custom ? BLUE : INK_SUB, 12, 38);
-                if (!custom) customChip.setBackground(touchCard(activity, CARD, BORDER, 12));
-                customChip.setOnClickListener(v -> askNumberSheet(activity, "自定义自律时长",
-                        "请输入 1 到 180 分钟", state.presetWork, 1, 180, n -> {
-                            state.presetWork = n;
-                            onChanged.run();
-                            rebuildSetup[0].run();
-                            refresh.run();
-                        }));
-                weight(row, customChip);
-                setupArea.addView(row);
+            if (mode[0] != 1) return;
+            gap(setupArea, 16);
+            LinearLayout options = row(activity);
+            boolean customSelected = true;
+            for (int preset : new int[]{15, 25, 45, 60}) {
+                boolean selected = state.presetWork == preset;
+                if (selected) customSelected = false;
+                TextView button = durationOption(activity, preset + "分", selected);
+                button.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    setMinutes.accept(preset);
+                });
+                weight(options, button);
+                space(options, 6);
             }
-            if (setupArea.getChildCount() > 0) gap(setupArea, 12);
+            TextView custom = durationOption(activity, customSelected ? state.presetWork + "分" : "自定义", customSelected);
+            custom.setOnClickListener(v -> askNumberSheet(activity, "自定义自律时长",
+                    "请输入 1 到 180 分钟", state.presetWork, 1, 180, setMinutes));
+            weight(options, custom);
+            setupArea.addView(options);
         };
 
         View.OnClickListener modeClick = v -> {
@@ -489,40 +344,33 @@ final class FocusSheets {
                 Toast.makeText(activity, "躺平模式当日无法兑换时间，明日 04:00 后恢复", Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (!state.canClaimOffline(now)) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                Toast.makeText(activity, "累计自律需满 5 分钟且可兑换满 1 分钟才可领取", Toast.LENGTH_SHORT).show();
-                return;
-            }
+            if (!state.canClaimOffline(now)) return;
             long gained = state.claimOffline(now, ZoneId.systemDefault());
             if (gained > 0L) {
                 haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
                 onChanged.run();
                 refresh.run();
-                Toast.makeText(activity, "已兑换 +" + duration(gained) + " 到今日可用时长", Toast.LENGTH_SHORT).show();
+                Toast.makeText(activity, "已兑换 +" + duration(gained) + " 到今日可用时间", Toast.LENGTH_SHORT).show();
             }
         });
 
         rebuildSetup[0].run();
         refresh.run();
-
-        dialog.setContentView(root);
-        Window win = dialog.getWindow();
-        if (win != null) {
-            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
-            win.setStatusBarColor(android.graphics.Color.TRANSPARENT);
-            win.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
-            if (Build.VERSION.SDK_INT >= 29) win.setNavigationBarContrastEnforced(false);
-            if (Build.VERSION.SDK_INT >= 30) win.setDecorFitsSystemWindows(false);
-        }
-        dialog.show();
-        applySystemBars(win, isDark());
-        root.requestApplyInsets();
-
+        scene.show(dialog);
         return new LiveRefresh() {
             @Override public void refresh() { refresh.run(); }
             @Override public boolean isShowing() { return dialog.isShowing(); }
         };
+    }
+
+    private static TextView durationOption(Context context, String title, boolean selected) {
+        TextView chip = pillButton(context, title, TimerScene.CONTROL, TimerScene.TITLE, 11, 38);
+        chip.setTextSize(12);
+        chip.setPadding(dp(context, 3), dp(context, 5), dp(context, 3), dp(context, 5));
+        chip.setBackground(touchCard(context, selected ? 0xffe6f1e8 : TimerScene.CONTROL, TimerScene.STROKE, 11));
+        chip.setTextColor(selected ? 0xff17382d : TimerScene.TITLE);
+        chip.setSelected(selected);
+        return chip;
     }
 
     static LiveRefresh showKeepAliveSheet(MainActivity activity, FocusState state,
@@ -2639,6 +2487,9 @@ final class FocusSheets {
             if (sheetRef[0] != null) sheetRef[0].dismiss();
             showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
         }));
+        gap(body, 10);
+        body.addView(settingRow(activity, R.drawable.ic_wallpaper, BLUE_SOFT, BLUE,
+                "计时背景", "自律模式与目的模式", null, () -> TimerAppearance.showSettings(activity, null)));
         gap(body, 16);
 
         body.addView(text(activity, "交互与视觉", 13, MUTED, true));

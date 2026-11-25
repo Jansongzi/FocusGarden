@@ -2,20 +2,15 @@ package com.focusgarden.app;
 
 import android.app.Dialog;
 import android.content.Intent;
-import android.graphics.Typeface;
-import android.os.Build;
 import android.text.Editable;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowInsets;
-import android.view.WindowInsetsController;
-import android.view.WindowManager;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -111,6 +106,13 @@ final class SoberModeUi {
                 ? primaryButton(activity, "开启目的模式")
                 : pillButton(activity, "可支配时间不足", BLUE_DISABLED_BG, BLUE_DISABLED_TEXT, 14, 46);
         body.addView(start, -1, -2);
+        gap(body, 7);
+        TextView appearance = secondaryButton(activity, "计时背景");
+        appearance.setOnClickListener(v -> {
+            tapHaptic(v);
+            TimerAppearance.showSettings(activity, null);
+        });
+        body.addView(appearance, -1, -2);
 
         Dialog sheet = bottomSheet(activity, "开启目的模式", null, body, true,
                 "目的模式",
@@ -353,136 +355,56 @@ final class SoberModeUi {
     }
 
     static final class Timer extends Dialog {
-        private final TextView minutes;
-        private final TextView seconds;
+        private final TextView clock;
 
         Timer(MainActivity activity, FocusState state, Runnable onPause, Runnable onEnd) {
-            super(activity, android.R.style.Theme_Material_Light_NoActionBar);
+            super(activity, R.style.Theme_FocusGarden_Timer);
             requestWindowFeature(Window.FEATURE_NO_TITLE);
             setCancelable(false);
+            TimerScene scene = new TimerScene(activity, TimerAppearance.Mode.PURPOSE);
 
-            FrameLayout stage = artwork(activity, 0);
-            View shade = new View(activity);
-            shade.setBackgroundColor(0x77091216);
-            stage.addView(shade, -1, -1);
-            LinearLayout layout = column(activity);
-            stage.addView(layout, -1, -1);
-            int gutter = dp(activity, 24);
-            layout.setOnApplyWindowInsetsListener((view, insets) -> {
-                if (Build.VERSION.SDK_INT >= 30) {
-                    var bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                    layout.setPadding(gutter + bars.left, gutter + bars.top, gutter + bars.right, gutter + bars.bottom);
-                } else {
-                    layout.setPadding(gutter, gutter, gutter, gutter);
-                }
-                return insets;
-            });
-            layout.setPadding(gutter, gutter, gutter, gutter);
-            layout.addView(text(activity, "目的模式", 20, ON_ACCENT, true));
+            LinearLayout header = row(activity);
+            weight(header, text(activity, "目的模式", 24, TimerScene.TITLE, true));
+            header.addView(TimerScene.lockStatus(activity, "锁机中"));
+            scene.layout.addView(header);
 
-            ScrollView center = new ScrollView(activity);
-            center.setFillViewport(true);
-            center.setVerticalScrollBarEnabled(false);
-            LinearLayout dial = column(activity);
-            dial.setGravity(Gravity.CENTER);
-            center.addView(dial, -1, -2);
-            layout.addView(center, new LinearLayout.LayoutParams(-1, 0, 1));
-
-            LinearLayout tiles = row(activity);
-            minutes = digit(activity);
-            seconds = digit(activity);
-            tiles.addView(minutes, new LinearLayout.LayoutParams(0, dp(activity, 116), 1));
-            space(tiles, 10);
-            tiles.addView(seconds, new LinearLayout.LayoutParams(0, dp(activity, 116), 1));
-            dial.addView(tiles, -1, -2);
-            gap(dial, 16);
+            LinearLayout body = scene.centerBody();
+            body.addView(TimerScene.caption(activity, "剩余时间", 16), -1, -2);
+            clock = TimerScene.clock(activity, true);
+            body.addView(clock, -1, dp(activity, 116));
 
             Map<String, String> apps = new LinkedHashMap<>(state.soberApps);
             if (apps.isEmpty() && !state.soberPackage.isEmpty()) {
-                apps.put(state.soberPackage, state.soberApp.isEmpty() ? state.soberPackage : state.soberApp);
+                apps.put(state.soberPackage, state.soberApp.isEmpty()
+                        ? AppCatalog.labelOf(activity, state.soberPackage) : state.soberApp);
             }
+            gap(body, 22);
+            body.addView(TimerScene.appShortcuts(activity, apps, "目标应用 · " + apps.size() + " 个",
+                    "暂无可打开的目标应用", pkg -> launchPurposeApp(activity, pkg)), -1, -2);
 
-            if (apps.size() == 1) {
-                var single = apps.entrySet().iterator().next();
-                LinearLayout badge = column(activity);
-                badge.setGravity(Gravity.CENTER_HORIZONTAL);
-                badge.addView(appIcon(activity, single.getKey(), 48, 13));
-                gap(badge, 10);
-                TextView purpose = text(activity, single.getValue(), 22, ON_ACCENT, true);
-                purpose.setGravity(Gravity.CENTER);
-                badge.addView(purpose, -1, -2);
-                dial.addView(badge, -1, -2);
+            LinearLayout control = row(activity);
+            control.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+            TimerScene.Action pause = new TimerScene.Action(activity, R.drawable.ic_pause, "暂停", false);
+            pause.setOnClickListener(v -> {
+                tapHaptic(v);
+                onPause.run();
+            });
+            control.addView(pause, dp(activity, 92), -2);
+            space(control, 25);
+            TimerScene.Action end = new TimerScene.Action(activity, R.drawable.ic_stop, "结束", true);
+            end.setOnClickListener(v -> {
+                tapHaptic(v);
+                onEnd.run();
+            });
+            control.addView(end, dp(activity, 92), -2);
+            scene.layout.addView(control, -1, -2);
 
-                gap(layout, 12);
-                TextView open = pillButton(activity, "打开 " + single.getValue(), ON_ACCENT, 0xff143b32, 20, 50);
-                open.setOnClickListener(v -> launchPurposeApp(activity, single.getKey()));
-                layout.addView(open, -1, -2);
-            } else if (!apps.isEmpty()) {
-                TextView label = text(activity, "已选 " + apps.size() + " 个目的应用 · 点击进入", 14, PALE, false);
-                label.setGravity(Gravity.CENTER);
-                dial.addView(label, -1, -2);
-                gap(dial, 12);
-
-                LinearLayout appList = column(activity);
-                int idx = 0;
-                int total = apps.size();
-                for (var entry : apps.entrySet()) {
-                    LinearLayout item = row(activity);
-                    item.setBackground(touch(activity, isDark() ? 0xe61c2534 : 0xf2ffffff, 16));
-                    item.setPadding(dp(activity, 14), dp(activity, 11), dp(activity, 14), dp(activity, 11));
-                    item.addView(appIcon(activity, entry.getKey(), 34, 9));
-                    space(item, 12);
-                    TextView name = text(activity, entry.getValue(), 15, INK, true);
-                    weight(item, name);
-                    space(item, 8);
-                    item.addView(iconView(activity, R.drawable.ic_chevron_right, 16, MUTED));
-                    item.setOnClickListener(v -> launchPurposeApp(activity, entry.getKey()));
-                    appList.addView(item, -1, -2);
-                    if (++idx < total) gap(appList, 8);
-                }
-                dial.addView(appList, -1, -2);
-            }
-
-            gap(layout, 8);
-            LinearLayout actions = row(activity);
-            TextView pause = pillButton(activity, "暂停", 0xbb173b31, ON_ACCENT, 16, 48);
-            pause.setOnClickListener(v -> onPause.run());
-            weight(actions, pause);
-            space(actions, 8);
-            TextView finish = pillButton(activity, "结束", 0xbb173b31, ON_ACCENT, 16, 48);
-            finish.setOnClickListener(v -> onEnd.run());
-            weight(actions, finish);
-            layout.addView(actions, -1, -2);
-
-            setContentView(stage);
-            Window window = getWindow();
-            if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false);
-            show();
-            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
-            if (Build.VERSION.SDK_INT >= 30 && window.getInsetsController() != null) {
-                int mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-                window.getInsetsController().setSystemBarsAppearance(0, mask);
-            }
+            update(state.soberRemaining(System.currentTimeMillis()));
+            scene.show(this);
         }
 
         void update(long remaining) {
-            String clock = clockText(remaining);
-            int colon = clock.indexOf(':');
-            String m = clock.substring(0, colon);
-            String s = clock.substring(colon + 1);
-            if (!m.contentEquals(minutes.getText())) minutes.setText(m);
-            if (!s.contentEquals(seconds.getText())) seconds.setText(s);
-        }
-
-        private static TextView digit(MainActivity activity) {
-            TextView digit = text(activity, "00", 72, ON_ACCENT, true);
-            digit.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-            digit.setGravity(Gravity.CENTER);
-            digit.setMaxLines(1);
-            digit.setAutoSizeTextTypeUniformWithConfiguration(24, 72, 1, TypedValue.COMPLEX_UNIT_SP);
-            digit.setBackground(shape(activity, 0xdd102820, 22));
-            return digit;
+            MainActivity.setTextIfChanged(clock, clockText(remaining));
         }
     }
 }

@@ -55,6 +55,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     static final String EXTRA_CONFIRM_STOPWATCH = "com.focusgarden.app.CONFIRM_STOPWATCH";
     private static final int REQ_PICK_WALLPAPER = 31;
     private static final int REQ_PICK_BLOCK_IMAGE = 32;
+    private static final int REQ_PICK_FOCUS_BACKGROUND = 33;
+    private static final int REQ_PICK_PURPOSE_BACKGROUND = 34;
     private static final int RULES_PAGE = 1;
     private static final int ABSTINENCE_PAGE = 2;
     private static final int INSIGHTS_PAGE = 3;
@@ -163,6 +165,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private String requestedBlockImage;
     private String loadingBlockImage;
     private Runnable blockImageChanged;
+    private Runnable timerBackgroundChanged;
+    private boolean timerBackgroundBusy;
     private Boolean lastSoberBadgeActive;
     private Boolean lastOfflineCanClaim;
     private Boolean lastStopwatchRunning;
@@ -393,6 +397,29 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PICK_FOCUS_BACKGROUND || requestCode == REQ_PICK_PURPOSE_BACKGROUND) {
+            Runnable changed = timerBackgroundChanged;
+            timerBackgroundChanged = null;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                timerBackgroundBusy = false;
+                return;
+            }
+            TimerAppearance.Mode mode = requestCode == REQ_PICK_FOCUS_BACKGROUND
+                    ? TimerAppearance.Mode.FOCUS : TimerAppearance.Mode.PURPOSE;
+            var uri = data.getData();
+            var app = getApplicationContext();
+            timerBackgroundBusy = true;
+            new Thread(() -> {
+                boolean saved = mode.save(app, uri);
+                main.post(() -> {
+                    timerBackgroundBusy = false;
+                    if (isDestroyed() || isFinishing()) return;
+                    if (saved && changed != null) changed.run();
+                    toast(saved ? "已更新" + mode.label + "背景" : "无法读取该图片，请换一张重试");
+                });
+            }, "focus-timer-background").start();
+            return;
+        }
         if (requestCode == REQ_PICK_BLOCK_IMAGE) {
             String id = requestedBlockImage;
             requestedBlockImage = null;
@@ -423,6 +450,33 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 toast("无法读取该图片，请换一张重试");
             }
         }
+    }
+
+    void pickTimerBackground(TimerAppearance.Mode mode, Runnable onChanged) {
+        if (timerBackgroundBusy) {
+            toast("正在载入图片");
+            return;
+        }
+        int requestCode = mode == TimerAppearance.Mode.FOCUS ? REQ_PICK_FOCUS_BACKGROUND : REQ_PICK_PURPOSE_BACKGROUND;
+        timerBackgroundChanged = onChanged;
+        timerBackgroundBusy = true;
+        try {
+            startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), requestCode);
+        } catch (android.content.ActivityNotFoundException e) {
+            timerBackgroundChanged = null;
+            timerBackgroundBusy = false;
+            toast("无法打开系统图片选择器");
+        }
+    }
+
+    void resetTimerBackground(TimerAppearance.Mode mode, Runnable onChanged) {
+        if (timerBackgroundBusy) {
+            toast("正在载入图片");
+            return;
+        }
+        mode.reset(this);
+        onChanged.run();
     }
 
     boolean pickBlockImage(String id, Runnable onFinished) {
