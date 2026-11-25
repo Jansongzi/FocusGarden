@@ -273,18 +273,6 @@ final class GardenUi {
                 cardBg(context, fillColor, strokeColor, radiusDp), null);
     }
 
-    static FrameLayout artwork(Context context, int radius) {
-        var frame = new FrameLayout(context);
-        frame.setBackground(shape(context, 0xff153a31, radius));
-        frame.setClipToOutline(true);
-        var art = new ImageView(context);
-        art.setImageResource(R.drawable.pond_at_dusk);
-        art.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        art.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        frame.addView(art, -1, -1);
-        return frame;
-    }
-
     static TextView pillButton(Context context, String label, int bg, int textColor, int radiusDp, int heightDp) {
         TextView v = text(context, label, 14, textColor, true);
         v.setGravity(Gravity.CENTER);

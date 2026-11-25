@@ -18,6 +18,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -33,12 +34,15 @@ final class SleepLockUi extends Dialog {
     private final FocusState state;
     private final Runnable onStateChanged;
 
+    private final ImageView backdropPhoto;
     private final View dimVeil;
     private final SevenSegmentClockView clockView;
     private final TextView remainSub;
     private final TextView streakView;
+    private final TextView promptView;
     private final TextView scheduleView;
     private final FrameLayout dimBtn;
+    private boolean hasPhotoBackdrop;
     private boolean dimmed;
     private int quoteOffset;
 
@@ -61,6 +65,12 @@ final class SleepLockUi extends Dialog {
 
         FrameLayout stage = new FrameLayout(activity);
         stage.addView(new SleepBackdropView(activity), -1, -1);
+
+        backdropPhoto = new ImageView(activity);
+        backdropPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        backdropPhoto.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        backdropPhoto.setVisibility(View.GONE);
+        stage.addView(backdropPhoto, -1, -1);
 
         dimVeil = new View(activity);
         dimVeil.setBackgroundColor(0x18000000);
@@ -111,8 +121,19 @@ final class SleepLockUi extends Dialog {
         content.addView(line, -1, dp(activity, 1));
         gap(content, 10);
 
+        LinearLayout statusHead = row(activity);
         streakView = text(activity, "", 13, 0xd8ffffff, true);
-        content.addView(streakView, -1, -2);
+        weight(statusHead, streakView);
+        FrameLayout bgBtn = iconBadge(activity, R.drawable.ic_wallpaper, 0x26ffffff, ON_ACCENT, 34, 17, 10);
+        bgBtn.setContentDescription("切换早睡锁机背景");
+        bgBtn.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ffffff),
+                cardBg(activity, 0x26ffffff, 0x45ffffff, 10), null));
+        bgBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            TimerAppearance.showSettings(activity, this::reloadBackground);
+        });
+        statusHead.addView(bgBtn);
+        content.addView(statusHead, -1, -2);
 
         // Center spacer + crisp 7-segment clock
         View topSpacer = new View(activity);
@@ -131,6 +152,13 @@ final class SleepLockUi extends Dialog {
 
         View midSpacer = new View(activity);
         content.addView(midSpacer, new LinearLayout.LayoutParams(1, 0, 0.9f));
+
+        promptView = text(activity, "", 20, ON_ACCENT, true);
+        promptView.setGravity(Gravity.CENTER);
+        promptView.setShadowLayer(dp(activity, 4), 0, dp(activity, 2), 0xaa000000);
+        promptView.setVisibility(View.GONE);
+        content.addView(promptView, -1, -2);
+        gap(content, 6);
 
         // Lower-center status stack
         TextView challengeTitle = text(activity, "早睡挑战", 19, ON_ACCENT, true);
@@ -158,7 +186,7 @@ final class SleepLockUi extends Dialog {
         dimBtn.setOnClickListener(v -> {
             tapHaptic(v);
             dimmed = !dimmed;
-            dimVeil.setBackgroundColor(dimmed ? 0x98000000 : 0x18000000);
+            applyDimState();
             dimBtn.setAlpha(dimmed ? 0.65f : 1f);
             Toast.makeText(activity, dimmed ? "已开启深睡护眼暗屏" : "已恢复常规夜览亮度", Toast.LENGTH_SHORT).show();
         });
@@ -190,7 +218,28 @@ final class SleepLockUi extends Dialog {
             win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
             applySystemBars(win, true);
         }
+        reloadBackground();
         update(System.currentTimeMillis());
+    }
+
+    private void applyDimState() {
+        int bgColor = dimmed
+                ? (hasPhotoBackdrop ? 0xb8000000 : 0x98000000)
+                : (hasPhotoBackdrop ? 0x6c000000 : 0x18000000);
+        dimVeil.setBackgroundColor(bgColor);
+    }
+
+    void reloadBackground() {
+        hasPhotoBackdrop = TimerAppearance.Mode.SLEEP.showIn(state, backdropPhoto);
+        backdropPhoto.setVisibility(hasPhotoBackdrop ? View.VISIBLE : View.GONE);
+        FocusState.BlockAppearance builtIn = FocusState.builtInBlockAppearance(state.sleepLockBackgroundId);
+        if (builtIn != null && !builtIn.sleepText().isEmpty()) {
+            promptView.setText(builtIn.displayText(FocusState.Restriction.BEDTIME));
+            promptView.setVisibility(View.VISIBLE);
+        } else {
+            promptView.setVisibility(View.GONE);
+        }
+        applyDimState();
     }
 
     private void handleDelayLock(View v) {

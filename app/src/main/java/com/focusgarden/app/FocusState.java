@@ -424,33 +424,149 @@ final class FocusState {
     boolean freeHabitSlotUsed;
 
     boolean timeAwarenessBar = true;
-    static final String DEFAULT_BLOCK_APPEARANCE = "default";
-    record BlockAppearance(String id, boolean fullImage, int squarePercent, int fullZoom, int textSize, String text) {
+    static final String LEGACY_DEFAULT_BLOCK_APPEARANCE = "default";
+    static final String BUILTIN_FULL_1 = "builtin_full_1";
+    static final String BUILTIN_FULL_2 = "builtin_full_2";
+    static final String BUILTIN_FULL_3 = "builtin_full_3";
+    static final String BUILTIN_FULL_4 = "builtin_full_4";
+    static final String BUILTIN_SQUARE_1 = "builtin_square_1";
+    static final String BUILTIN_SQUARE_2 = "builtin_square_2";
+    static final String BUILTIN_SQUARE_3 = "builtin_square_3";
+    static final String BUILTIN_SQUARE_4 = "builtin_square_4";
+    static final String BUILTIN_SQUARE_5 = "builtin_square_5";
+    static final String DEFAULT_BLOCK_APPEARANCE = BUILTIN_FULL_1;
+    static final int BUILTIN_SQUARE_PERCENT = 55;
+    static final int BUILTIN_TEXT_SIZE = 30;
+    static final String TIMER_BG_CUSTOM = "custom";
+    static final String SLEEP_BG_AURORA = "aurora";
+
+    record BlockAppearance(String id, boolean fullImage, int squarePercent, int fullZoom, int textSize,
+                           String text, String sleepText, boolean builtIn) {
         BlockAppearance {
             squarePercent = Math.max(30, Math.min(90, squarePercent));
             fullZoom = Math.max(100, Math.min(175, fullZoom));
             textSize = Math.max(18, Math.min(48, textSize));
+            text = text == null ? "" : text;
+            sleepText = sleepText == null ? "" : sleepText;
+        }
+
+        BlockAppearance(String id, boolean fullImage, int squarePercent, int fullZoom, int textSize, String text) {
+            this(id, fullImage, squarePercent, fullZoom, textSize, text, "", isBuiltInBlockId(id));
+        }
+
+        String displayText(Restriction reason) {
+            if (reason == Restriction.BEDTIME && !sleepText.isEmpty()) return sleepText;
+            return text;
         }
 
         static BlockAppearance defaults(String id, String text) {
-            return new BlockAppearance(id, false, 50, 100, 27, text);
+            return new BlockAppearance(id, false, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE, text, "", false);
         }
 
         static boolean validId(String id) {
-            return DEFAULT_BLOCK_APPEARANCE.equals(id) || id.matches(
-                    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+            return LEGACY_DEFAULT_BLOCK_APPEARANCE.equals(id)
+                    || isBuiltInBlockId(id)
+                    || (id != null && id.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"));
         }
+    }
+
+    private static final List<BlockAppearance> BUILTIN_BLOCK_APPEARANCES = createBuiltInBlockAppearances();
+
+    private static List<BlockAppearance> createBuiltInBlockAppearances() {
+        List<BlockAppearance> list = new ArrayList<>();
+        list.add(new BlockAppearance(BUILTIN_FULL_1, true, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "呆货，不准看了", "呆货，快去睡觉", true));
+        list.add(new BlockAppearance(BUILTIN_FULL_2, true, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "该学习啦！", "该睡觉啦！", true));
+        list.add(new BlockAppearance(BUILTIN_FULL_3, true, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "你就是扶不起的阿斗？", "还不睡，你就是扶不起的阿斗？", true));
+        list.add(new BlockAppearance(BUILTIN_FULL_4, true, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "不准玩了，听到没有", "不准熬夜了，听到没有", true));
+        list.add(new BlockAppearance(BUILTIN_SQUARE_1, false, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "你不要再假装学习了", "", true));
+        list.add(new BlockAppearance(BUILTIN_SQUARE_2, false, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "还在玩，真棒", "", true));
+        list.add(new BlockAppearance(BUILTIN_SQUARE_3, false, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "求你别玩了活爹", "", true));
+        list.add(new BlockAppearance(BUILTIN_SQUARE_4, false, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "回家吧孩子", "", true));
+        list.add(new BlockAppearance(BUILTIN_SQUARE_5, false, BUILTIN_SQUARE_PERCENT, 100, BUILTIN_TEXT_SIZE,
+                "这个人还在玩", "", true));
+        return java.util.Collections.unmodifiableList(list);
+    }
+
+    static List<BlockAppearance> builtInAppearances() {
+        return BUILTIN_BLOCK_APPEARANCES;
+    }
+
+    static List<BlockAppearance> builtInFullAppearances() {
+        List<BlockAppearance> out = new ArrayList<>();
+        for (BlockAppearance item : BUILTIN_BLOCK_APPEARANCES) {
+            if (item.fullImage()) out.add(item);
+        }
+        return out;
+    }
+
+    static BlockAppearance builtInBlockAppearance(String id) {
+        if (id == null) return null;
+        for (BlockAppearance item : BUILTIN_BLOCK_APPEARANCES) {
+            if (item.id().equals(id)) return item;
+        }
+        return null;
+    }
+
+    static boolean isBuiltInBlockId(String id) {
+        return builtInBlockAppearance(id) != null;
+    }
+
+    static boolean isBuiltInFullBlockId(String id) {
+        BlockAppearance item = builtInBlockAppearance(id);
+        return item != null && item.fullImage();
     }
 
     final Map<String, BlockAppearance> blockAppearances = new LinkedHashMap<>();
     final Set<String> enabledBlockAppearances = new LinkedHashSet<>();
+    int builtInBlockCatalogVersion = 1;
     String lastBlockAppearance = "";
+    String lastBedtimeBlockAppearance = "";
+    String focusTimerBackgroundId = BUILTIN_FULL_1;
+    String purposeTimerBackgroundId = BUILTIN_FULL_1;
+    String sleepLockBackgroundId = SLEEP_BG_AURORA;
 
     FocusState() {
-        blockAppearances.put(DEFAULT_BLOCK_APPEARANCE, BlockAppearance.defaults(DEFAULT_BLOCK_APPEARANCE, ""));
-        enabledBlockAppearances.add(DEFAULT_BLOCK_APPEARANCE);
+        ensureBuiltInBlockAppearances(true);
         seedDefaultRewardsIfNeeded();
         syncLegacyPercents();
+    }
+
+    void ensureBuiltInBlockAppearances(boolean enableMissingBuiltIns) {
+        Map<String, BlockAppearance> custom = new LinkedHashMap<>();
+        for (BlockAppearance item : blockAppearances.values()) {
+            if (!isBuiltInBlockId(item.id())) {
+                custom.put(item.id(), new BlockAppearance(item.id(), item.fullImage(), item.squarePercent(),
+                        item.fullZoom(), item.textSize(), item.text(), item.sleepText(), false));
+            }
+        }
+        blockAppearances.clear();
+        for (BlockAppearance builtIn : BUILTIN_BLOCK_APPEARANCES) {
+            blockAppearances.put(builtIn.id(), builtIn);
+            if (enableMissingBuiltIns) enabledBlockAppearances.add(builtIn.id());
+        }
+        blockAppearances.putAll(custom);
+        enabledBlockAppearances.retainAll(blockAppearances.keySet());
+        if (enabledBlockAppearances.isEmpty()) {
+            enabledBlockAppearances.add(DEFAULT_BLOCK_APPEARANCE);
+        }
+    }
+
+    boolean putCustomBlockAppearance(BlockAppearance appearance) {
+        if (appearance == null || isBuiltInBlockId(appearance.id()) || !BlockAppearance.validId(appearance.id())) {
+            return false;
+        }
+        blockAppearances.put(appearance.id(), new BlockAppearance(appearance.id(), appearance.fullImage(),
+                appearance.squarePercent(), appearance.fullZoom(), appearance.textSize(),
+                appearance.text(), appearance.sleepText(), false));
+        return true;
     }
 
     boolean setBlockAppearanceEnabled(String id, boolean enabled) {
@@ -460,14 +576,39 @@ final class FocusState {
     }
 
     boolean removeBlockAppearance(String id) {
+        if (isBuiltInBlockId(id)) return false;
         if (blockAppearances.size() <= 1 || blockAppearances.remove(id) == null) return false;
         enabledBlockAppearances.remove(id);
         if (enabledBlockAppearances.isEmpty()) enabledBlockAppearances.add(blockAppearances.keySet().iterator().next());
         if (id.equals(lastBlockAppearance)) lastBlockAppearance = "";
+        if (id.equals(lastBedtimeBlockAppearance)) lastBedtimeBlockAppearance = "";
         return true;
     }
 
     BlockAppearance nextBlockAppearance() {
+        return nextBlockAppearance(Restriction.BUDGET);
+    }
+
+    BlockAppearance nextBlockAppearance(Restriction reason) {
+        if (reason == Restriction.BEDTIME) {
+            List<BlockAppearance> candidates = new ArrayList<>();
+            for (BlockAppearance appearance : blockAppearances.values()) {
+                if (appearance.fullImage() && enabledBlockAppearances.contains(appearance.id())) {
+                    candidates.add(appearance);
+                }
+            }
+            if (candidates.isEmpty()) {
+                candidates.addAll(builtInFullAppearances());
+            }
+            BlockAppearance first = null;
+            boolean next = false;
+            for (BlockAppearance appearance : candidates) {
+                if (first == null) first = appearance;
+                if (next) return appearance;
+                next = appearance.id().equals(lastBedtimeBlockAppearance);
+            }
+            return first == null ? BUILTIN_BLOCK_APPEARANCES.get(0) : first;
+        }
         BlockAppearance first = null;
         boolean next = false;
         for (BlockAppearance appearance : blockAppearances.values()) {
@@ -477,6 +618,24 @@ final class FocusState {
             next = appearance.id().equals(lastBlockAppearance);
         }
         return first == null ? blockAppearances.values().iterator().next() : first;
+    }
+
+    boolean setFocusTimerBackgroundId(String id) {
+        if (!TIMER_BG_CUSTOM.equals(id) && !isBuiltInFullBlockId(id)) return false;
+        focusTimerBackgroundId = id;
+        return true;
+    }
+
+    boolean setPurposeTimerBackgroundId(String id) {
+        if (!TIMER_BG_CUSTOM.equals(id) && !isBuiltInFullBlockId(id)) return false;
+        purposeTimerBackgroundId = id;
+        return true;
+    }
+
+    boolean setSleepLockBackgroundId(String id) {
+        if (!SLEEP_BG_AURORA.equals(id) && !TIMER_BG_CUSTOM.equals(id) && !isBuiltInFullBlockId(id)) return false;
+        sleepLockBackgroundId = id;
+        return true;
     }
 
     void syncLegacyPercents() {

@@ -13,6 +13,7 @@ import java.util.Iterator;
 final class FocusStore {
     private static FocusStore instance;
     final FocusState state = new FocusState();
+    private final Context appContext;
     private final SharedPreferences preferences;
 
     static FocusStore get(Context context) {
@@ -21,7 +22,8 @@ final class FocusStore {
     }
 
     private FocusStore(Context context) {
-        preferences = context.getSharedPreferences("focus_garden", Context.MODE_PRIVATE);
+        this.appContext = context.getApplicationContext();
+        preferences = appContext.getSharedPreferences("focus_garden", Context.MODE_PRIVATE);
         try {
             load(new JSONObject(preferences.getString("state", "{}")));
         } catch (JSONException e) {
@@ -189,6 +191,21 @@ final class FocusStore {
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
         loadBlockAppearances(root);
+        String focusBg = root.optString("focusTimerBackgroundId", "");
+        if (!state.setFocusTimerBackgroundId(focusBg)) {
+            state.focusTimerBackgroundId = TimerAppearance.Mode.FOCUS.hasCustom(appContext)
+                    ? FocusState.TIMER_BG_CUSTOM : FocusState.BUILTIN_FULL_1;
+        }
+        String purposeBg = root.optString("purposeTimerBackgroundId", "");
+        if (!state.setPurposeTimerBackgroundId(purposeBg)) {
+            state.purposeTimerBackgroundId = TimerAppearance.Mode.PURPOSE.hasCustom(appContext)
+                    ? FocusState.TIMER_BG_CUSTOM : FocusState.BUILTIN_FULL_1;
+        }
+        String sleepBg = root.optString("sleepLockBackgroundId", "");
+        if (!state.setSleepLockBackgroundId(sleepBg)) {
+            state.sleepLockBackgroundId = TimerAppearance.Mode.SLEEP.hasCustom(appContext)
+                    ? FocusState.TIMER_BG_CUSTOM : FocusState.SLEEP_BG_AURORA;
+        }
 
         JSONArray earlySleep = root.optJSONArray("earlySleepDays");
         if (earlySleep != null) {
@@ -464,6 +481,7 @@ final class FocusStore {
     }
 
     private void loadBlockAppearances(JSONObject root) {
+        int catalogVer = root.optInt("builtInBlockCatalogVersion", 0);
         JSONArray entries = root.optJSONArray("blockAppearances");
         state.blockAppearances.clear();
         if (entries != null) {
@@ -471,30 +489,47 @@ final class FocusStore {
                 JSONObject item = entries.optJSONObject(i);
                 if (item == null) continue;
                 String id = item.optString("id", "");
-                if (!FocusState.BlockAppearance.validId(id)) continue;
-                state.blockAppearances.put(id, new FocusState.BlockAppearance(id, item.optBoolean("fullImage"),
-                        item.optInt("squarePercent", 50), item.optInt("fullZoom", 100),
-                        item.optInt("textSize", 27), item.optString("text", "")));
+                if (!FocusState.BlockAppearance.validId(id) || FocusState.isBuiltInBlockId(id)) continue;
+                boolean full = item.optBoolean("fullImage");
+                int square = item.optInt("squarePercent", 50);
+                int zoom = item.optInt("fullZoom", 100);
+                int textSize = item.optInt("textSize", 27);
+                String text = item.optString("text", "");
+                String sleepText = item.optString("sleepText", "");
+                if (catalogVer < 1 && FocusState.LEGACY_DEFAULT_BLOCK_APPEARANCE.equals(id)
+                        && !full && square == 50 && zoom == 100 && textSize == 27
+                        && text.trim().isEmpty() && sleepText.isEmpty() && !BlockImage.hasCustom(appContext, id)) {
+                    continue;
+                }
+                state.blockAppearances.put(id, new FocusState.BlockAppearance(id, full, square, zoom, textSize,
+                        text, sleepText, false));
             }
-        }
-        if (state.blockAppearances.isEmpty()) {
-            String id = FocusState.DEFAULT_BLOCK_APPEARANCE;
-            state.blockAppearances.put(id, FocusState.BlockAppearance.defaults(id, root.optString("blockMessage", "")));
         }
         state.enabledBlockAppearances.clear();
         JSONArray enabled = root.optJSONArray("enabledBlockAppearances");
+        state.ensureBuiltInBlockAppearances(catalogVer < 1);
+        state.builtInBlockCatalogVersion = 1;
         if (enabled != null) {
-            for (int i = 0; i < enabled.length(); i++) state.setBlockAppearanceEnabled(enabled.optString(i), true);
+            if (catalogVer >= 1) {
+                state.enabledBlockAppearances.clear();
+            }
+            for (int i = 0; i < enabled.length(); i++) {
+                state.setBlockAppearanceEnabled(enabled.optString(i), true);
+            }
         } else if (root.optBoolean("rotateBlockAppearances")) {
             state.enabledBlockAppearances.addAll(state.blockAppearances.keySet());
         } else {
-            state.setBlockAppearanceEnabled(root.optString("selectedBlockAppearance",
-                    FocusState.DEFAULT_BLOCK_APPEARANCE), true);
+            String legacySel = root.optString("selectedBlockAppearance", "");
+            if (state.blockAppearances.containsKey(legacySel)) {
+                state.setBlockAppearanceEnabled(legacySel, true);
+            }
         }
+        state.enabledBlockAppearances.retainAll(state.blockAppearances.keySet());
         if (state.enabledBlockAppearances.isEmpty()) {
-            state.enabledBlockAppearances.add(state.blockAppearances.keySet().iterator().next());
+            state.enabledBlockAppearances.add(FocusState.DEFAULT_BLOCK_APPEARANCE);
         }
         state.lastBlockAppearance = root.optString("lastBlockAppearance", "");
+        state.lastBedtimeBlockAppearance = root.optString("lastBedtimeBlockAppearance", "");
     }
 
     void save() {
@@ -506,10 +541,12 @@ final class FocusStore {
 
             JSONArray blockAppearances = new JSONArray();
             for (FocusState.BlockAppearance appearance : state.blockAppearances.values()) {
+                if (appearance.builtIn()) continue;
                 blockAppearances.put(new JSONObject()
                         .put("id", appearance.id()).put("fullImage", appearance.fullImage())
                         .put("squarePercent", appearance.squarePercent()).put("fullZoom", appearance.fullZoom())
-                        .put("textSize", appearance.textSize()).put("text", appearance.text()));
+                        .put("textSize", appearance.textSize()).put("text", appearance.text())
+                        .put("sleepText", appearance.sleepText()));
             }
 
             JSONArray soberWindows = new JSONArray();
@@ -594,9 +631,14 @@ final class FocusStore {
                     .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
                     .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
+                    .put("builtInBlockCatalogVersion", state.builtInBlockCatalogVersion)
                     .put("blockAppearances", blockAppearances)
                     .put("enabledBlockAppearances", new JSONArray(state.enabledBlockAppearances))
                     .put("lastBlockAppearance", state.lastBlockAppearance)
+                    .put("lastBedtimeBlockAppearance", state.lastBedtimeBlockAppearance)
+                    .put("focusTimerBackgroundId", state.focusTimerBackgroundId)
+                    .put("purposeTimerBackgroundId", state.purposeTimerBackgroundId)
+                    .put("sleepLockBackgroundId", state.sleepLockBackgroundId)
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
                     .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
                     .put("heartbeats", new JSONArray(state.heartbeats))

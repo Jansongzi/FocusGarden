@@ -901,7 +901,7 @@ public final class FocusService extends AccessibilityService {
             return;
         }
 
-        FocusState.BlockAppearance appearance = state.nextBlockAppearance();
+        FocusState.BlockAppearance appearance = state.nextBlockAppearance(reason);
         String buttonLabel = reason == FocusState.Restriction.SOBER ? "返回目的模式"
                 : reason == FocusState.Restriction.BEDTIME ? "返回早睡锁机"
                 : "返回桌面";
@@ -914,12 +914,17 @@ public final class FocusService extends AccessibilityService {
                 : () -> {
                     if (performGlobalAction(GLOBAL_ACTION_HOME)) requestWindowRefresh();
                 };
-        blockScreen = new BlockScreen(this, appearance, buttonLabel, primaryAction);
+        blockScreen = new BlockScreen(this, appearance, reason, buttonLabel, primaryAction);
         blockScreen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), reason));
         attachOverlay(blockScreen);
-        if (overlay != null && !appearance.id().equals(state.lastBlockAppearance)) {
-            state.lastBlockAppearance = appearance.id();
-            store.save();
+        if (overlay != null) {
+            if (reason == FocusState.Restriction.BEDTIME && !appearance.id().equals(state.lastBedtimeBlockAppearance)) {
+                state.lastBedtimeBlockAppearance = appearance.id();
+                store.save();
+            } else if (reason != FocusState.Restriction.BEDTIME && !appearance.id().equals(state.lastBlockAppearance)) {
+                state.lastBlockAppearance = appearance.id();
+                store.save();
+            }
         }
     }
 

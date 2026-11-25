@@ -11,17 +11,17 @@
 | 时间商店「时光杂货铺 · LITTLE TIME STORE」（奶油白浅色 `#FAF7F1`/`#FFFCF6` 与暖夜灯深色双主题、雾蓝条纹波浪遮阳棚、固定顶栏防滚动遮挡、平衡栏与背包角标、分类胶囊导航 `全部 / 道具 / 外观 / 心愿`、原木隔板开放式货架、`打卡保护卡`/`储蓄扩容卡`/20h `放纵卡` 分期兑换带积攒进度条与「继续积攒」按钮/`星空小猪` 等主题与液体/动效收藏、迁移后的 3 天自律宝箱与 2→1 躺平合成区、淡雅纸质壁挂心愿卡片与自定义编辑器、礼物飞入背包动效）及「我的背包仓库」（`全部 / 道具 / 卡牌 / 外观 / 心愿券` 实际使用、装备切换与心愿券 `核销使用`） | 同级 `TimeShopUi.java`、`ShopCatalog.java` |
 | 全屏戒断详情与冲动救急（平滑进出过渡动画、`总览 / 趋势 / 成就与奖励` 3 标签页去重设计、60s 呼吸引导 + 一键开启 5 分钟自律锁机、复发诱因标签与月度角标红叉日记日历 + 同日撤回恢复、多轮趋势柱状图与诱因归因、渐进阶段推进与 2×5 里程碑勋章墙）、时间兑换券动效/立体按键组件（`TicketCardLayout` / `Pressable3DButton` / `RedeemCoinView` / `AccordionHandle` / `RedeemAnimOverlay`）、游戏化放纵/躺平卡牌组件与合成/开箱层（`MilestoneTrackView` 3 节点成就轨与 `TreasureChestView` 宝箱、`CraftingBenchView` 2→1 可视化合成台、`ItemCardView`、开箱展示 `showChestRewardModal()` 与融合展示 `showCraftFusionModal()`）及早睡挑战全屏不可跳转夜览锁机弹窗（顶栏语录、7 段数字时钟、护眼暗度、35 分钟付费「修改延后 / 主动退出」） | 同级 `AbstinenceUi.java`、`RedeemUi.java`、`CardCraftUi.java`、`SleepLockUi.java` |
 | 动态浅色 / 深色设计系统与系统栏适配（`applyTheme()` / `isDark()` / `applySystemBars()`）、颜色、按钮、定制卡片弹窗（`cardDialog` / `infoDialog` / `confirmDialog` / `loadingDialog`）、单次测量限高弹窗（`MaxHeightScrollView`）、支持左上角动作槽的底部弹窗（`bottomSheet()`）、轻量规则提示按钮（`infoIcon` / `titleWithInfo`）、统一防抖触感通道（`HapticKind` / `tapHaptic()`）、开关、进度条与 24h 心跳条（`HeartbeatStripView`） | 同级 `GardenUi.java`、`GardenIcon.java` |
-| 自律与目的模式的全屏计时布局、独立背景与 7 日堆叠统计柱（自律与专注合并展示） | 同级 `TimerScene.java`、`TimerAppearance.java`、`InsightChart.java` |
+| 自律与目的模式的全屏计时布局、内置全屏素材/自选背景选择器（含早睡锁机背景与睡意提示）及 7 日堆叠统计柱（自律与专注合并展示） | 同级 `TimerScene.java`、`TimerAppearance.java`、`InsightChart.java` |
 | 保活与防关闭异步快照检测（`StatusSnapshot` / `refreshStatusAsync()`）、权限跳转、UsageStats 异步（04:00 逻辑日起点）与手动校准、自选壁纸持久化及服务同步 | 同级 `KeepAliveManager.java` |
 | 后台常驻保活前台服务（心跳记录、后台计步监听；维持 `24dp`/`0.16` 视觉透明但窗口 `alpha=1.0` + `48dp` 触控区及 Android 14+ `PendingIntent` BAL 兼容的可拖动边缘吸附悬浮球） | 同级 `KeepAliveService.java`、`KeepAliveWallpaperService.java`、`FocusDeviceAdmin.java` |
 | 语录加载、Gitee 优先与 GitHub 回退的更新检测、下载及校验 | 同级 `QuoteBank.java`、`GitHubUpdates.java` |
 | 前台应用窗口识别（过滤小尺寸悬浮球/侧边栏与 OEM 安全弹窗、目的模式期间优先保底已授权应用窗口防误拦）、早睡全屏锁机全应用及桌面持续拦截（「返回早睡锁机」）、多应用目的模式与桌面全非目标应用拦截、可拖拽半透明灰色悬浮计时药丸、躺平模式全免限、专注防关闭系统设置保护与顶部时间感知条 | 同级 `FocusService.java` |
-| 全屏图片与方图拦截界面、字号与图片尺寸、居中小胶囊主按钮、预览、多套界面顺序轮换 | 同级 `BlockAppearanceSettings.java`、`BlockScreen.java`、`BlockImage.java` |
+| 拦截素材库（4 张系统自带全屏 JPG + 5 张系统自带方图含 2 张动态 GIF，方图 55% / 30sp / 不可编辑可切换启用与日常/晚睡双态预览）与自定义界面轮换 | 同级 `BlockAppearanceSettings.java`、`BlockScreen.java`、`BlockAssets.java`、`BlockImage.java` |
 | 目的模式多应用复选框选择（隐藏包名）、全屏倒计时、目的应用直达与暂停操作 | 同级 `SoberModeUi.java` |
 | 启动更新检查、手动检查更新及下载安装弹窗 | 同级 `UpdatePanel.java` |
 | 桌面小组件与快捷设置磁贴（自律模式控制，禁止提前停倒计时） | 同级 `FocusWidget.java`、`FocusTile.java` 与 `app/src/main/res/layout/focus_widget.xml` |
 
-矢量图标（含 `ic_gift.xml`、`ic_target.xml`、`ic_feedback.xml`、`ic_mail.xml`、`ic_nav_redeem.xml`、`ic_nav_abstain.xml`）与小芽状态插画（`res/drawable/`）、池塘横幅（`res/drawable-nodpi/pond_at_dusk.png`）、语录库（`res/raw/quotes.json`）、壁纸/设备管理器配置（`res/xml/`）及其他资源均位于 `app/src/main/res/`。
+矢量图标（含 `ic_gift.xml`、`ic_target.xml`、`ic_feedback.xml`、`ic_mail.xml`、`ic_nav_redeem.xml`、`ic_nav_abstain.xml` 与 `bg_sleep_stars.xml` 渐变夜空）、内置全屏/方图拦截图片与小猪/社交图标（`res/drawable-nodpi/block_*.jpg`）、动态方图 GIF 与语录库（`res/raw/block_square_*.gif`、`res/raw/quotes.json`）、壁纸/设备管理器配置（`res/xml/`）及其他资源均位于 `app/src/main/res/`。
 
 ## 联调
 

@@ -2,6 +2,8 @@ package com.focusgarden.app;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,17 +22,25 @@ import java.util.concurrent.Executors;
 import static com.focusgarden.app.GardenUi.*;
 
 final class BlockScreen extends FrameLayout {
-    private static final int BACKGROUND = 0xff10352c;
+    private static final int BACKGROUND = 0xff102033;
+    private static final int SQUARE_FRAME = 0xff1a2b42;
     private static final Executor IMAGE_IO = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
     private final FocusState.BlockAppearance appearance;
     private final ImageView picture;
     private final LinearLayout panel;
     private final TextView status;
     private boolean customLoaded;
+    private boolean gifLoaded;
     private int builtInImage;
 
     BlockScreen(Context context, FocusState.BlockAppearance appearance, String buttonLabel, Runnable onPrimary) {
+        this(context, appearance, FocusState.Restriction.BUDGET, buttonLabel, onPrimary);
+    }
+
+    BlockScreen(Context context, FocusState.BlockAppearance appearance, FocusState.Restriction reason,
+                String buttonLabel, Runnable onPrimary) {
         super(context);
         this.appearance = appearance;
         setBackgroundColor(BACKGROUND);
@@ -43,11 +53,17 @@ final class BlockScreen extends FrameLayout {
             picture.setScaleY(appearance.fullZoom() / 100f);
             addView(picture, -1, -1);
             View shade = new View(context);
-            shade.setBackgroundColor(0x89000000);
+            shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[]{0x48000000, 0x76000000, 0xa8000000}));
             addView(shade, -1, -1);
         } else {
-            picture.setBackground(shape(context, 0xff1d483c, 20));
+            picture.setBackground(shape(context, SQUARE_FRAME, 20));
             picture.setClipToOutline(true);
+            picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        }
+
+        if (appearance.builtIn()) {
+            BlockAssets.bindStaticImage(picture, appearance.id(), full);
         }
 
         panel = column(context);
@@ -72,17 +88,20 @@ final class BlockScreen extends FrameLayout {
         scroll.addView(content, -1, -2);
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        String caption = appearance.displayText(reason);
         if (!full) {
             content.addView(picture, dp(context, 132), dp(context, 132));
-            if (!appearance.text().isEmpty()) gap(content, 20);
+            if (!caption.isEmpty()) gap(content, 20);
         }
-        if (!appearance.text().isEmpty()) {
-            TextView heading = text(context, appearance.text(), appearance.textSize(), ON_ACCENT, true);
+        if (!caption.isEmpty()) {
+            TextView heading = text(context, caption, appearance.textSize(), ON_ACCENT, true);
             heading.setGravity(Gravity.CENTER);
+            heading.setShadowLayer(dp(context, 4), 0, dp(context, 2), 0xaa000000);
             content.addView(heading, -1, -2);
         }
         status = text(context, "", 15, PALE, false);
         status.setGravity(Gravity.CENTER);
+        status.setShadowLayer(dp(context, 3), 0, dp(context, 1), 0x99000000);
         status.setVisibility(View.GONE);
         LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(-1, -2);
         statusLp.topMargin = dp(context, 10);
@@ -107,6 +126,25 @@ final class BlockScreen extends FrameLayout {
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         Context app = getContext().getApplicationContext();
+        if (appearance.builtIn()) {
+            if (!gifLoaded && BlockAssets.isGif(appearance.id()) && !RedeemUi.reducedMotion(app)) {
+                String id = appearance.id();
+                IMAGE_IO.execute(() -> {
+                    Drawable anim = BlockAssets.loadAnimatedGif(app, id);
+                    if (anim == null) return;
+                    MAIN.post(() -> {
+                        if (!isAttachedToWindow() || gifLoaded) return;
+                        gifLoaded = true;
+                        picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                        picture.setImageDrawable(anim);
+                        BlockAssets.startIfAnimated(anim);
+                    });
+                });
+            } else {
+                BlockAssets.startIfAnimated(picture.getDrawable());
+            }
+            return;
+        }
         if (!customLoaded && BlockImage.hasCustom(app, appearance.id())) {
             IMAGE_IO.execute(() -> {
                 Bitmap bitmap = BlockImage.load(app, appearance.id());
@@ -123,6 +161,11 @@ final class BlockScreen extends FrameLayout {
         }
     }
 
+    @Override protected void onDetachedFromWindow() {
+        BlockAssets.stopIfAnimated(picture.getDrawable());
+        super.onDetachedFromWindow();
+    }
+
     boolean isFullImage() {
         return appearance.fullImage();
     }
@@ -133,10 +176,10 @@ final class BlockScreen extends FrameLayout {
     }
 
     void setBuiltInImage(int image) {
+        if (appearance.builtIn()) return;
         if (!customLoaded && builtInImage != image) {
             builtInImage = image;
-            picture.setScaleType(appearance.fullImage() || image == R.drawable.pond_at_dusk
-                    ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+            picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
             picture.setImageResource(image);
         }
     }
@@ -161,11 +204,6 @@ final class BlockScreen extends FrameLayout {
     }
 
     static int builtInImage(boolean full, FocusState.Restriction reason) {
-        if (full) return R.drawable.pond_at_dusk;
-        return switch (reason) {
-            case BEDTIME -> R.drawable.mascot_sleep;
-            case BUDGET -> R.drawable.mascot_alert;
-            default -> R.drawable.mascot_strong;
-        };
+        return BlockAssets.fallbackDrawable(full);
     }
 }

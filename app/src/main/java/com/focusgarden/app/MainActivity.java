@@ -57,6 +57,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private static final int REQ_PICK_BLOCK_IMAGE = 32;
     private static final int REQ_PICK_FOCUS_BACKGROUND = 33;
     private static final int REQ_PICK_PURPOSE_BACKGROUND = 34;
+    private static final int REQ_PICK_SLEEP_BACKGROUND = 35;
     private static final int RULES_PAGE = 1;
     private static final int ABSTINENCE_PAGE = 2;
     private static final int INSIGHTS_PAGE = 3;
@@ -107,7 +108,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private LinearLayout homeContentRoot;
     private ValueAnimator vaultToggleAnimator;
     private View homeScrim;
-    private FrameLayout homeFloatingShop;
+    private LinearLayout homeFloatingActions;
+    private TextView homeSignIn;
     private FrameLayout homeFloatingSettings;
     private TextView homeVaultBig;
     private TextView homeCreditBig;
@@ -392,7 +394,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_PICK_FOCUS_BACKGROUND || requestCode == REQ_PICK_PURPOSE_BACKGROUND) {
+        if (requestCode == REQ_PICK_FOCUS_BACKGROUND
+                || requestCode == REQ_PICK_PURPOSE_BACKGROUND
+                || requestCode == REQ_PICK_SLEEP_BACKGROUND) {
             Runnable changed = timerBackgroundChanged;
             timerBackgroundChanged = null;
             if (resultCode != RESULT_OK || data == null || data.getData() == null) {
@@ -400,7 +404,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 return;
             }
             TimerAppearance.Mode mode = requestCode == REQ_PICK_FOCUS_BACKGROUND
-                    ? TimerAppearance.Mode.FOCUS : TimerAppearance.Mode.PURPOSE;
+                    ? TimerAppearance.Mode.FOCUS
+                    : requestCode == REQ_PICK_PURPOSE_BACKGROUND
+                    ? TimerAppearance.Mode.PURPOSE
+                    : TimerAppearance.Mode.SLEEP;
             var uri = data.getData();
             var app = getApplicationContext();
             timerBackgroundBusy = true;
@@ -409,7 +416,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 main.post(() -> {
                     timerBackgroundBusy = false;
                     if (isDestroyed() || isFinishing()) return;
-                    if (saved && changed != null) changed.run();
+                    if (saved) {
+                        mode.selectId(state, FocusState.TIMER_BG_CUSTOM);
+                        FocusStore.get(app).save();
+                        if (changed != null) changed.run();
+                    }
                     toast(saved ? "已更新" + mode.label + "背景" : "无法读取该图片，请换一张重试");
                 });
             }, "focus-timer-background").start();
@@ -452,7 +463,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
             toast("正在载入图片");
             return;
         }
-        int requestCode = mode == TimerAppearance.Mode.FOCUS ? REQ_PICK_FOCUS_BACKGROUND : REQ_PICK_PURPOSE_BACKGROUND;
+        int requestCode = switch (mode) {
+            case FOCUS -> REQ_PICK_FOCUS_BACKGROUND;
+            case PURPOSE -> REQ_PICK_PURPOSE_BACKGROUND;
+            case SLEEP -> REQ_PICK_SLEEP_BACKGROUND;
+        };
         timerBackgroundChanged = onChanged;
         timerBackgroundBusy = true;
         try {
@@ -709,15 +724,24 @@ public final class MainActivity extends Activity implements SensorEventListener 
             contentStage.addView(homeFloatingSettings, settingsLp);
 
             if (tab == 0) {
-                homeFloatingShop = topBarBtn(R.drawable.ic_shop, INK, "时间商店",
-                        () -> TimeShopUi.showTimeShopSheet(this, state, this::changed));
-                FrameLayout.LayoutParams shopLp = new FrameLayout.LayoutParams(dp(this, 38), dp(this, 38));
-                shopLp.gravity = Gravity.TOP | Gravity.END;
-                shopLp.topMargin = topInset + dp(this, 14);
-                shopLp.rightMargin = dp(this, 62);
-                contentStage.addView(homeFloatingShop, shopLp);
+                homeFloatingActions = row(this);
+                homeSignIn = pillButton(this, "", BLUE, ON_ACCENT, 12, 38);
+                homeSignIn.setTextSize(12);
+                homeSignIn.setSingleLine(true);
+                homeSignIn.setPadding(dp(this, 10), 0, dp(this, 10), 0);
+                homeSignIn.setOnClickListener(this::handleDailySignIn);
+                elevate(homeSignIn, 4);
+                homeFloatingActions.addView(homeSignIn, -2, dp(this, 38));
+                space(homeFloatingActions, 8);
+                homeFloatingActions.addView(topBarBtn(R.drawable.ic_shop, INK, "时间商店",
+                        () -> TimeShopUi.showTimeShopSheet(this, state, this::changed)), dp(this, 38), dp(this, 38));
+                FrameLayout.LayoutParams actionsLp = new FrameLayout.LayoutParams(-2, dp(this, 38), Gravity.TOP | Gravity.END);
+                actionsLp.topMargin = topInset + dp(this, 14);
+                actionsLp.rightMargin = dp(this, 62);
+                contentStage.addView(homeFloatingActions, actionsLp);
             } else {
-                homeFloatingShop = null;
+                homeFloatingActions = null;
+                homeSignIn = null;
             }
 
             scroll.setOnScrollChangeListener((v, sx, sy, osx, osy) -> {
@@ -870,12 +894,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     homeFloatingSettings.setLayoutParams(lp);
                 }
             }
-            if (homeFloatingShop != null && homeFloatingShop.getLayoutParams() instanceof FrameLayout.LayoutParams lp) {
+            if (homeFloatingActions != null && homeFloatingActions.getLayoutParams() instanceof FrameLayout.LayoutParams lp) {
                 int tm = topInset + dp(this, 14);
                 if (lp.topMargin != tm) {
                     lp.topMargin = tm;
-                    homeFloatingShop.setLayoutParams(lp);
+                    homeFloatingActions.setLayoutParams(lp);
                 }
+                boolean signedIn = state.isSignedIn(FocusState.today());
+                homeSignIn.setText(signedIn ? "✓ 已签到" : "签到");
+                homeSignIn.setTextColor(signedIn ? INK_SUB : ON_ACCENT);
+                homeSignIn.setBackground(touchCard(this, signedIn ? SURFACE_SUBTLE : BLUE,
+                        signedIn ? BORDER : blueStroke(), 12));
             }
         }
         lastLogicDate = FocusState.today().toString();
@@ -1217,7 +1246,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             gap(content, 12);
         }
 
-        content.addView(homeRewardCard(day));
+        content.addView(homeRewardCard());
 
         updateHomeLive();
     }
@@ -1382,27 +1411,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
         });
-        boolean signedIn = state.isSignedIn(today);
-        TextView signIn = pillButton(this, signedIn ? "✓ 已签到" : "签到",
-                signedIn ? SURFACE_SUBTLE : BLUE, signedIn ? INK_SUB : ON_ACCENT, 12, 34);
-        signIn.setTextSize(12);
-        signIn.setBackground(touchCard(this, signedIn ? SURFACE_SUBTLE : BLUE,
-                signedIn ? BORDER : blueStroke(), 12));
-        signIn.setOnClickListener(v -> {
-            long tappedAt = System.currentTimeMillis();
-            TimerReceiver.advance(this, tappedAt);
-            if (state.signIn(tappedAt, ZoneId.systemDefault())) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
-                toast("签到成功，已领取 10 分钟可用时长");
-            } else {
-                tapHaptic(v);
-                CheckInUi.show(this, state);
-            }
-        });
-        redeemHeader.addView(signIn);
-        space(redeemHeader, 6);
-
         boolean layFlat = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgent = state.rateMode == FocusState.RateMode.INDULGENT;
         boolean chestReady = state.canClaimIndulgentReward();
@@ -2180,7 +2188,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
     }
 
-    private LinearLayout homeRewardCard(FocusState.Day day) {
+    private void handleDailySignIn(View view) {
+        long tappedAt = System.currentTimeMillis();
+        TimerReceiver.advance(this, tappedAt);
+        if (state.signIn(tappedAt, ZoneId.systemDefault())) {
+            haptic(view, state.hapticFeedback, HapticKind.CONFIRM);
+            changed();
+            toast("签到成功，已领取 10 分钟可用时长");
+        } else {
+            tapHaptic(view);
+            CheckInUi.show(this, state);
+        }
+    }
+
+    private LinearLayout homeRewardCard() {
         state.seedDefaultRewardsIfNeeded();
         boolean layFlat = state.isLayFlat();
         long spendableMs = state.rewardSpendableMs();
@@ -2211,7 +2232,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 : "时光杂货铺 · 可支配 " + duration(spendableMs);
         int subColor = hasChest ? AMBER : layFlat ? PURPLE : TimeShopUi.storeMutedColor();
         TextView subTv = text(this, subText, 12, subColor, hasChest);
-        subTv.setSingleLine(true);
+        subTv.setMaxLines(2);
         subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
         titles.addView(subTv);
         weight(content, titles);
@@ -2221,7 +2242,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         enterBtn.applyState(hasChest ? RedeemUi.Pressable3DButton.Mode.GOLD_ENABLED
                 : RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, hasChest ? "去开箱" : "进入商店");
         if (!hasChest) enterBtn.setEnabledColors(0xffa6bddc, 0xff718eb7, 0xfff8f5ec);
-        content.addView(enterBtn, -2, -2);
+        content.addView(enterBtn, dp(this, 100), -2);
         card.addView(content, -1, -2);
 
         View.OnClickListener openShop = v -> {

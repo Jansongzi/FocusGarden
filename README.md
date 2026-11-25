@@ -27,7 +27,7 @@ Android 本地专注工具，支持 Android 8.1（API 27）及更高版本。产
    - 原后台保活卡与通用体验卡均收口至全页右上角悬浮「设置」：**强力守护与系统**（聚合后台保活权限、24h 心跳条、无障碍监测、通知权限、可拖动悬浮球、隐藏最近任务、自启动、设备管理器防卸载、自律防关闭、桌面小组件与快捷设置磁贴）、**通用设置**（震动反馈开关、时间感知条、应用拦截页风格、储蓄罐步长、管理兑换卡片）、**时间获取模式与上限**、**时间商店**、**调试模式**（开发测试阶段用于自由增减时间、发放放纵卡/躺平卡与强制解锁，后续版本移除）与**检查更新**。
    - 全应用弹窗与作息时间选择器均采用统一圆角卡片弹窗与底部表单设计；切页手势与交互控件采用统一防抖震动反馈通道。
    - 底部弹层约占屏幕高度的 80%。可向下拖动顶部把手、点按遮罩或用系统返回关闭。
-   - 「设置 → 通用设置 → 自定义拦截提示」支持保存多套界面。每套可选全屏图片或正方形大图，调整缩放、字号和文字，并预览。启用「轮换显示」后，每次新拦截按列表顺序切换一套界面。
+   - 「设置 → 通用设置 → 拦截素材库」内置系统全屏（4 张，均支持 30sp 提示语、晚睡主题文案改编及作为自律模式/目的模式/早睡锁机背景）与正方形（5 张，含 2 张动态 GIF，默认方图宽度 55%、30sp 提示字号）两组不可编辑/不可删素材，支持分别开关启用并支持新增自定义界面轮换。
 
 拦截服务通过 Android 无障碍接口确认获得焦点的应用窗口，只读取窗口或事件所属应用的包名。拦截图片与设置保存在本机。
 
@@ -70,8 +70,8 @@ java -cp "$classes:$ANDROID_SDK_ROOT/platforms/android-35/android.jar" com.focus
 
 规则检查覆盖兑换与每日重置、时间兑换券多源汇总与幂等一键领取、放纵卡/躺平卡与躺平模式冻结及重置倒计时、时间商店（`15m→120m` 储蓄扩容、打卡保护卡、20h 分期、永久外观购买/装备及心愿兑换券核销）、早睡锁机次日手动领奖与 35 分钟解锁、首次免费修改与 30 分钟上限调整、戒断防通胀上限/防回溯护盾/渐进阶段/复发诱因归因/同日误触撤回与里程碑、永久自律统计、系统计步兑换、目的模式的目标应用限制与退时、其他时间收支、UsageStats 校准、心跳记录，以及 Release 网页资产与摘要解析。
 
-## 插画来源
+## 插画与素材来源
 
-首页与拦截面板使用内置原创插画 `app/src/main/res/drawable-nodpi/pond_at_dusk.png`，小芽吉祥物与状态图标为本项目的 Android 矢量资源。
+全屏与正方形拦截素材及自律/目的/早睡可选全屏背景（`res/drawable-nodpi/block_*.jpg`、`res/raw/block_square_*.gif`）为内置系统素材，状态/导航图标为本项目的 Android 矢量资源。
 
-> Use case: illustration-story. Create a single original editorial illustration for the full-bleed landscape header of a Chinese mobile focus and digital wellbeing app named Focus Garden. Premium restrained contemporary Japanese botanical editorial style, tactile layered cut-paper with fine silkscreen grain, an intimate quiet pond at dusk, broad rounded lily leaves, a few softly lit fern tips and one very small abstract amber firefly. Composition: wide 3:2 landscape, concentrated distinctive artwork at far right and right lower corner; the left 52% is pure dark evergreen negative space with faint grain and no objects so live white app title fits with good contrast. Deep pine and midnight teal palette (#10352C to #173B31), sage foliage, muted pale chartreuse and amber accents. Elegant fundamentally flat lighting with gentle depth. No lettering, no text, no icons, no borders, no device mockup, no person, no stone mascot, no stock collage. The image is an actual artwork asset, not a screenshot. Ensure the right side artwork still reads in a crop to aspect 2.6:1.
+> 早期遗留的 `pond_at_dusk.png`、`timer_default_background.jpg`、`pond_overcast.xml`、`artwork.xml` 与旧版小芽拦截插画已于素材库升级后移除。

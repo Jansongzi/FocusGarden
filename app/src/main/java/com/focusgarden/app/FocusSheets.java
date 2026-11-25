@@ -2496,7 +2496,7 @@ final class FocusSheets {
         }));
         gap(body, 10);
         body.addView(settingRow(activity, R.drawable.ic_wallpaper, BLUE_SOFT, BLUE,
-                "计时背景", "自律模式与目的模式", null, () -> TimerAppearance.showSettings(activity, null)));
+                "计时与锁机背景", "自律 / 目的 / 早睡锁机背景", null, () -> TimerAppearance.showSettings(activity, null)));
         gap(body, 16);
 
         body.addView(text(activity, "交互与视觉", 13, MUTED, true));
@@ -2538,7 +2538,7 @@ final class FocusSheets {
         gap(body, 14);
 
         body.addView(settingRow(activity, R.drawable.ic_edit, BLUE_SOFT, BLUE,
-                "自定义拦截提示页", null, null,
+                "拦截素材库", "系统自带全屏/方图与自定义", null,
                 () -> BlockAppearanceSettings.show(activity, state, onChanged)));
         gap(body, 16);
 

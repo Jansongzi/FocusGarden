@@ -564,31 +564,84 @@ final class FocusStateCheck {
 
     private static void checkBlockAppearances() {
         FocusState state = new FocusState();
-        String first = FocusState.DEFAULT_BLOCK_APPEARANCE;
-        String second = "11111111-1111-1111-1111-111111111111";
-        String third = "22222222-2222-2222-2222-222222222222";
-        var configured = new FocusState.BlockAppearance(second, true, 10, 230, 80, "Take a break");
+        equal(9, state.blockAppearances.size());
+        equal(9, state.enabledBlockAppearances.size());
+        equal(FocusState.BUILTIN_FULL_1, state.focusTimerBackgroundId);
+        equal(FocusState.BUILTIN_FULL_1, state.purposeTimerBackgroundId);
+        equal(FocusState.SLEEP_BG_AURORA, state.sleepLockBackgroundId);
+
+        int fullCount = 0;
+        int squareCount = 0;
+        for (FocusState.BlockAppearance item : state.blockAppearances.values()) {
+            equal(true, item.builtIn());
+            equal(30, item.textSize());
+            equal(55, item.squarePercent());
+            if (item.fullImage()) {
+                fullCount++;
+                equal(false, item.sleepText().isEmpty());
+                equal(false, item.displayText(FocusState.Restriction.BEDTIME).equals(item.text()));
+            } else {
+                squareCount++;
+            }
+        }
+        equal(4, fullCount);
+        equal(5, squareCount);
+
+        // Built-in presets cannot be deleted or edited directly
+        equal(false, state.removeBlockAppearance(FocusState.BUILTIN_FULL_1));
+        equal(false, state.putCustomBlockAppearance(new FocusState.BlockAppearance(
+                FocusState.BUILTIN_FULL_1, false, 70, 110, 20, "hack")));
+        equal(30, state.blockAppearances.get(FocusState.BUILTIN_FULL_1).textSize());
+
+        // Bedtime rotation picks only enabled full-screen items with sleep-adapted prompt
+        FocusState.BlockAppearance firstSleep = state.nextBlockAppearance(FocusState.Restriction.BEDTIME);
+        equal(true, firstSleep.fullImage());
+        equal("呆货，快去睡觉", firstSleep.displayText(FocusState.Restriction.BEDTIME));
+        state.lastBedtimeBlockAppearance = FocusState.BUILTIN_FULL_1;
+        equal("该睡觉啦！", state.nextBlockAppearance(FocusState.Restriction.BEDTIME).displayText(FocusState.Restriction.BEDTIME));
+        state.lastBedtimeBlockAppearance = FocusState.BUILTIN_FULL_2;
+        equal("还不睡，你就是扶不起的阿斗？", state.nextBlockAppearance(FocusState.Restriction.BEDTIME).displayText(FocusState.Restriction.BEDTIME));
+        state.lastBedtimeBlockAppearance = FocusState.BUILTIN_FULL_3;
+        equal("不准熬夜了，听到没有", state.nextBlockAppearance(FocusState.Restriction.BEDTIME).displayText(FocusState.Restriction.BEDTIME));
+
+        // Disabling all full-screen items still falls back to built-in full-screen presets on bedtime lock
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_FULL_1, false);
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_FULL_2, false);
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_FULL_3, false);
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_FULL_4, false);
+        equal(true, state.nextBlockAppearance(FocusState.Restriction.BEDTIME).fullImage());
+
+        // Disabling down to 1 enabled item leaves the last item locked on
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_SQUARE_1, false);
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_SQUARE_2, false);
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_SQUARE_3, false);
+        state.setBlockAppearanceEnabled(FocusState.BUILTIN_SQUARE_4, false);
+        equal(1, state.enabledBlockAppearances.size());
+        equal(false, state.setBlockAppearanceEnabled(FocusState.BUILTIN_SQUARE_5, false));
+        equal(FocusState.BUILTIN_SQUARE_5, state.nextBlockAppearance().id());
+
+        // Custom UUID appearances work alongside built-ins
+        String customA = "11111111-1111-1111-1111-111111111111";
+        var configured = new FocusState.BlockAppearance(customA, true, 10, 230, 80, "Take a break");
         equal(30, configured.squarePercent());
         equal(175, configured.fullZoom());
         equal(48, configured.textSize());
-        equal(first, state.nextBlockAppearance().id());
-        state.blockAppearances.put(second, configured);
-        state.blockAppearances.put(third, FocusState.BlockAppearance.defaults(third, ""));
-        equal(false, state.setBlockAppearanceEnabled(first, false));
-        equal(first, state.nextBlockAppearance().id());
-        equal(true, state.setBlockAppearanceEnabled(second, true));
-        state.lastBlockAppearance = first;
-        equal(configured, state.nextBlockAppearance());
-        equal(first, state.lastBlockAppearance);
-        state.lastBlockAppearance = second;
-        equal(first, state.nextBlockAppearance().id());
-        equal(true, state.setBlockAppearanceEnabled(first, false));
-        equal(configured, state.nextBlockAppearance());
-        equal(true, state.removeBlockAppearance(second));
-        equal(first, state.nextBlockAppearance().id());
-        equal(java.util.Set.of(first), state.enabledBlockAppearances);
-        equal(false, state.setBlockAppearanceEnabled(second, true));
+        equal(false, configured.builtIn());
+        equal(true, state.putCustomBlockAppearance(configured));
+        equal(true, state.setBlockAppearanceEnabled(customA, true));
+        state.lastBlockAppearance = FocusState.BUILTIN_SQUARE_5;
+        equal(customA, state.nextBlockAppearance().id());
+        equal(true, state.removeBlockAppearance(customA));
+        equal(false, state.setBlockAppearanceEnabled(customA, true));
         equal(false, FocusState.BlockAppearance.validId("../escape"));
+
+        // Timer & Sleep background validation
+        equal(true, state.setFocusTimerBackgroundId(FocusState.BUILTIN_FULL_2));
+        equal(true, state.setPurposeTimerBackgroundId(FocusState.TIMER_BG_CUSTOM));
+        equal(false, state.setFocusTimerBackgroundId(FocusState.BUILTIN_SQUARE_1));
+        equal(false, state.setPurposeTimerBackgroundId(FocusState.SLEEP_BG_AURORA));
+        equal(true, state.setSleepLockBackgroundId(FocusState.BUILTIN_FULL_4));
+        equal(false, state.setSleepLockBackgroundId(FocusState.BUILTIN_SQUARE_2));
     }
 
     private static void checkSoberRefund(long noon) {

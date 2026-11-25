@@ -11,7 +11,7 @@ final class BlockImage {
     private BlockImage() {}
 
     private static AtomicFile file(Context context, String id) {
-        String name = FocusState.DEFAULT_BLOCK_APPEARANCE.equals(id)
+        String name = FocusState.LEGACY_DEFAULT_BLOCK_APPEARANCE.equals(id)
                 ? "restriction_image.png" : "restriction_image_" + id + ".png";
         return new AtomicFile(new File(context.getFilesDir(), name));
     }
