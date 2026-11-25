@@ -11,6 +11,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
+import android.text.Layout;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -621,6 +622,110 @@ final class OnboardingUi {
         parent.addView(line, -1, dp(parent.getContext(), 1));
     }
 
+    /** Pop-out angry chibi modal shown when the configured sleep span exceeds 10 hours. */
+    static void showSleepTooLongDialog(Activity activity) {
+        Dialog dialog = new Dialog(activity);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCancelable(true);
+        dialog.setCanceledOnTouchOutside(true);
+
+        FrameLayout backdrop = new FrameLayout(activity);
+        backdrop.setClipChildren(false);
+        backdrop.setClipToPadding(false);
+        int hPad = dp(activity, 20);
+        backdrop.setPadding(hPad, dp(activity, 16), hPad, dp(activity, 16));
+
+        int screenW = activity.getResources().getDisplayMetrics().widthPixels;
+        int stageW = Math.min(dp(activity, 344), Math.max(dp(activity, 240), screenW - dp(activity, 40)));
+        FrameLayout stage = new FrameLayout(activity);
+        stage.setClipChildren(false);
+        stage.setClipToPadding(false);
+
+        LinearLayout card = column(activity);
+        GradientDrawable cardDrawable = new GradientDrawable();
+        cardDrawable.setColor(CARD);
+        cardDrawable.setCornerRadius(dp(activity, 24));
+        cardDrawable.setStroke(dp(activity, 1.5f), blueStroke());
+        card.setBackground(cardDrawable);
+        card.setPadding(dp(activity, 16), dp(activity, 16), dp(activity, 16), dp(activity, 16));
+        elevate(card, 12);
+
+        LinearLayout copyCol = column(activity);
+        copyCol.setPadding(dp(activity, 116), dp(activity, 2), dp(activity, 2), dp(activity, 2));
+        copyCol.setMinimumHeight(dp(activity, 82));
+        copyCol.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView titleTv = text(activity, "不能睡这么久啦！", 19, INK, true);
+        titleTv.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
+        copyCol.addView(titleTv);
+        gap(copyCol, 6);
+
+        TextView subTv = text(activity, "睡眠时间不能超过 10 小时哦～", 13, INK_SUB, false);
+        subTv.setLineSpacing(dp(activity, 2.5f), 1.08f);
+        subTv.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
+        copyCol.addView(subTv);
+        card.addView(copyCol, -1, -2);
+        gap(card, 16);
+
+        TextView okBtn = pillButton(activity, "知道啦", BLUE, ON_ACCENT, 14, 46);
+        okBtn.setTextSize(15f);
+        okBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            dialog.dismiss();
+        });
+        card.addView(okBtn, -1, -2);
+
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(-1, -2);
+        cardLp.topMargin = dp(activity, 24);
+        stage.addView(card, cardLp);
+
+        View footShadow = new View(activity);
+        GradientDrawable shadowOval = new GradientDrawable();
+        shadowOval.setShape(GradientDrawable.OVAL);
+        shadowOval.setColor(isDark() ? 0x40000000 : 0x1A182218);
+        footShadow.setBackground(shadowOval);
+        footShadow.setOutlineProvider(null);
+        footShadow.setElevation(dp(activity, 13));
+        FrameLayout.LayoutParams shadowLp = new FrameLayout.LayoutParams(dp(activity, 74), dp(activity, 10),
+                Gravity.TOP | Gravity.START);
+        shadowLp.leftMargin = dp(activity, 28);
+        shadowLp.topMargin = dp(activity, 102);
+        stage.addView(footShadow, shadowLp);
+
+        ImageView mascotImg = new ImageView(activity);
+        mascotImg.setImageResource(R.drawable.guide_mascot_sleep_angry);
+        mascotImg.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        mascotImg.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        mascotImg.setOutlineProvider(null);
+        mascotImg.setElevation(dp(activity, 14));
+        FrameLayout.LayoutParams mascotLp = new FrameLayout.LayoutParams(dp(activity, 122), dp(activity, 112),
+                Gravity.TOP | Gravity.START);
+        mascotLp.leftMargin = dp(activity, 6);
+        mascotLp.topMargin = 0;
+        stage.addView(mascotImg, mascotLp);
+
+        backdrop.addView(stage, new FrameLayout.LayoutParams(stageW, -2, Gravity.CENTER));
+        dialog.setContentView(backdrop);
+
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawableResource(android.R.color.transparent);
+            win.setGravity(Gravity.CENTER);
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            win.setDimAmount(isDark() ? 0.65f : 0.46f);
+        }
+
+        if (!RedeemUi.reducedMotion(activity)) {
+            stage.setScaleX(0.94f);
+            stage.setScaleY(0.94f);
+            stage.setAlpha(0f);
+            stage.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(170)
+                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+        }
+        dialog.show();
+    }
+
     private static final class BoundedScrollView extends ScrollView {
         private final int maxHeightPx;
 
@@ -717,33 +822,34 @@ final class OnboardingUi {
             mascotShadowPaint.setColor(isDark() ? 0x40000000 : 0x1A182218);
 
             cardContent = column(ctx);
-            cardContent.setPadding(dp(ctx, 14), dp(ctx, 13), dp(ctx, 14), dp(ctx, 12));
+            cardContent.setPadding(dp(ctx, 12), dp(ctx, 11), dp(ctx, 12), dp(ctx, 10));
 
             copyCol = column(ctx);
             copyCol.setPadding(dp(ctx, 98), 0, dp(ctx, 2), 0);
-            copyCol.setMinimumHeight(dp(ctx, 76));
+            copyCol.setMinimumHeight(dp(ctx, 80));
 
-            stepEyebrowTv = text(ctx, "", 11, MUTED, true);
+            stepEyebrowTv = text(ctx, "", 10.5f, MUTED, true);
             stepEyebrowTv.setSingleLine(true);
             stepEyebrowTv.setLetterSpacing(0.06f);
             copyCol.addView(stepEyebrowTv);
             gap(copyCol, 2);
 
-            titleTv = text(ctx, "", 16, INK, true);
+            titleTv = text(ctx, "", 15.5f, INK, true);
             copyCol.addView(titleTv);
-            gap(copyCol, 4);
+            gap(copyCol, 3);
 
-            bodyTv = text(ctx, "", 13, INK_SUB, false);
-            bodyTv.setLineSpacing(dp(ctx, 2f), 1.06f);
+            bodyTv = text(ctx, "", 12.5f, INK_SUB, false);
+            bodyTv.setLineSpacing(dp(ctx, 1.5f), 1.05f);
+            bodyTv.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
             copyCol.addView(bodyTv);
             cardContent.addView(copyCol, -1, -2);
-            gap(cardContent, 10);
+            gap(cardContent, 6);
 
             LinearLayout actions = row(ctx);
-            skipTv = text(ctx, "跳过引导", 12.5f, MUTED, true);
+            skipTv = text(ctx, "跳过引导", 12f, MUTED, true);
             skipTv.setGravity(Gravity.CENTER_VERTICAL);
-            skipTv.setMinimumHeight(dp(ctx, 34));
-            skipTv.setPadding(dp(ctx, 4), dp(ctx, 4), dp(ctx, 8), dp(ctx, 4));
+            skipTv.setMinimumHeight(dp(ctx, 32));
+            skipTv.setPadding(dp(ctx, 4), dp(ctx, 3), dp(ctx, 8), dp(ctx, 3));
             skipTv.setOnClickListener(v -> {
                 tapHaptic(v);
                 dismiss();
@@ -755,10 +861,10 @@ final class OnboardingUi {
             dotsSlot.addView(dotsView, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
             actions.addView(dotsSlot, new LinearLayout.LayoutParams(0, -2, 1f));
 
-            nextBtn = pillButton(ctx, "下一步 →", BLUE, ON_ACCENT, 18, 34);
-            nextBtn.setTextSize(12.5f);
+            nextBtn = pillButton(ctx, "下一步 →", BLUE, ON_ACCENT, 16, 32);
+            nextBtn.setTextSize(12f);
             nextBtn.setSingleLine(true);
-            nextBtn.setPadding(dp(ctx, 16), dp(ctx, 5), dp(ctx, 16), dp(ctx, 5));
+            nextBtn.setPadding(dp(ctx, 14), dp(ctx, 4), dp(ctx, 14), dp(ctx, 4));
             nextBtn.setOnClickListener(v -> {
                 tapHaptic(v);
                 advanceOrFinish();
@@ -773,7 +879,7 @@ final class OnboardingUi {
             cardContent.setVisibility(View.INVISIBLE);
             mascotImg.setVisibility(View.INVISIBLE);
             addView(cardContent, new FrameLayout.LayoutParams(-1, -2));
-            addView(mascotImg, new FrameLayout.LayoutParams(dp(ctx, 94), dp(ctx, 102)));
+            addView(mascotImg, new FrameLayout.LayoutParams(dp(ctx, 106), dp(ctx, 118)));
         }
 
         static SpotlightGuideView show(FrameLayout host, ScrollView scroller,
@@ -924,17 +1030,26 @@ final class OnboardingUi {
             currentRadiusPx = dp(ctx, step.cornerRadiusDp());
             hasTargetRect = cutoutRect.width() > 0 && cutoutRect.height() > 0;
 
-            int sideMargin = dp(ctx, 20);
-            int cardMaxW = Math.max(dp(ctx, 220), hostW - sideMargin * 2);
+            int sideMargin = dp(ctx, 16);
+            int cardMaxW = Math.min(dp(ctx, 356), Math.max(dp(ctx, 220), hostW - sideMargin * 2));
+            int cardLeft = Math.round((hostW - cardMaxW) * 0.5f);
             cardContent.measure(
                     MeasureSpec.makeMeasureSpec(cardMaxW, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(hostH, MeasureSpec.AT_MOST));
             int cardH = cardContent.getMeasuredHeight();
 
-            int mascotProtrude = dp(ctx, 26);
+            int maxProtrude = dp(ctx, 22);
+            int minProtrude = dp(ctx, 14);
+            int copyH = copyCol.getMeasuredHeight();
+            int textBottomInCard = cardContent.getPaddingTop() + copyH;
+            int maxMascotBottomInCard = textBottomInCard + dp(ctx, 2);
+            int mascotH = Math.max(dp(ctx, 114), Math.min(dp(ctx, 130), maxMascotBottomInCard + maxProtrude));
+            int mascotW = dp(ctx, 106);
+            int actualProtrude = Math.max(minProtrude, Math.min(maxProtrude, mascotH - maxMascotBottomInCard));
+
             int arrowH = dp(ctx, 10);
-            int pointerGap = dp(ctx, 18);
-            int topSafe = dp(ctx, 36) + mascotProtrude;
+            int pointerGap = dp(ctx, 20);
+            int topSafe = dp(ctx, 36) + maxProtrude;
             int bottomSafe = dp(ctx, 24) + arrowH;
 
             float spaceBelow = (hostH - bottomSafe) - cutoutRect.bottom;
@@ -955,15 +1070,13 @@ final class OnboardingUi {
             lp.width = cardMaxW;
             lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             lp.gravity = Gravity.TOP | Gravity.START;
-            lp.leftMargin = sideMargin;
+            lp.leftMargin = cardLeft;
             lp.topMargin = cardTop;
             cardContent.setLayoutParams(lp);
             cardContent.setVisibility(View.VISIBLE);
 
-            int mascotW = dp(ctx, 94);
-            int mascotH = dp(ctx, 102);
-            int mascotLeft = sideMargin + dp(ctx, 4);
-            int mascotTop = cardTop - mascotProtrude;
+            int mascotLeft = cardLeft + dp(ctx, 2);
+            int mascotTop = cardTop - actualProtrude;
             FrameLayout.LayoutParams mLp = (FrameLayout.LayoutParams) mascotImg.getLayoutParams();
             mLp.width = mascotW;
             mLp.height = mascotH;
@@ -973,18 +1086,20 @@ final class OnboardingUi {
             mascotImg.setLayoutParams(mLp);
             mascotImg.setVisibility(View.VISIBLE);
 
-            cardRect.set(sideMargin, cardTop, sideMargin + cardMaxW, cardTop + cardH);
+            cardRect.set(cardLeft, cardTop, cardLeft + cardMaxW, cardTop + cardH);
+            float footCenterX = mascotLeft + mascotW * 0.5f;
+            float footY = Math.min(cardRect.bottom - dp(ctx, 38), mascotTop + mascotH - dp(ctx, 4));
             mascotFootShadowRect.set(
-                    sideMargin + dp(ctx, 24),
-                    cardTop + dp(ctx, 68),
-                    sideMargin + dp(ctx, 78),
-                    cardTop + dp(ctx, 76));
+                    footCenterX - dp(ctx, 28),
+                    footY - dp(ctx, 4),
+                    footCenterX + dp(ctx, 28),
+                    footY + dp(ctx, 4));
 
             float r = dp(ctx, 20);
             float halfArrowW = dp(ctx, 9);
             float minArrowX = bubbleArrowUp
-                    ? (sideMargin + dp(ctx, 112))
-                    : (sideMargin + r + halfArrowW + dp(ctx, 6));
+                    ? (cardLeft + dp(ctx, 114))
+                    : (cardLeft + r + halfArrowW + dp(ctx, 6));
             float maxArrowX = cardRect.right - r - halfArrowW - dp(ctx, 6);
             if (minArrowX > maxArrowX) minArrowX = (cardRect.left + cardRect.right) * 0.5f;
             bubbleArrowCenterX = Math.max(minArrowX, Math.min(maxArrowX, cutoutRect.centerX()));

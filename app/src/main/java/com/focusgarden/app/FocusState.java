@@ -37,6 +37,11 @@ final class FocusState {
     static final int VAULT_EXPAND_CARD_COST_MINUTES = 60;
     static final int INDULGENT_INSTALLMENT_TOTAL_MINUTES = 20 * 60;
     static final int SLEEP_CONFIG_COST_MINUTES = 35;
+    static final int SLEEP_START_MIN_MINUTE = 21 * 60;
+    static final int SLEEP_START_MAX_MINUTE = 23 * 60 + 30;
+    static final int SLEEP_END_MIN_MINUTE = 5 * 60;
+    static final int SLEEP_END_MAX_MINUTE = 8 * 60 + 30;
+    static final int MAX_SLEEP_DURATION_MINUTES = 10 * 60;
     static final int MODE_SWITCH_COST_MINUTES = 30;
     static final int DAILY_CAP_CHANGE_COST_MINUTES = 30;
     static final int INDULGENT_UNLOCK_DAYS = 3;
@@ -1857,6 +1862,39 @@ final class FocusState {
     boolean checkIn(String id, long now, ZoneId zone) {
         CheckInResult res = checkInWithResult(id, now, zone);
         return res == CheckInResult.OK || res == CheckInResult.OK_CAPPED;
+    }
+
+    static int sleepDurationMinutes(int startMinute, int endMinute) {
+        int s = Math.floorMod(startMinute, 24 * 60);
+        int e = Math.floorMod(endMinute, 24 * 60);
+        int diff = Math.floorMod(e - s, 24 * 60);
+        return diff == 0 ? 24 * 60 : diff;
+    }
+
+    static boolean isValidSleepStart(int minute) {
+        return minute >= SLEEP_START_MIN_MINUTE && minute <= SLEEP_START_MAX_MINUTE;
+    }
+
+    static boolean isValidSleepEnd(int minute) {
+        return minute >= SLEEP_END_MIN_MINUTE && minute <= SLEEP_END_MAX_MINUTE;
+    }
+
+    static boolean isValidSleepDuration(int startMinute, int endMinute) {
+        return startMinute != endMinute && sleepDurationMinutes(startMinute, endMinute) <= MAX_SLEEP_DURATION_MINUTES;
+    }
+
+    static boolean isValidSleepSchedule(int startMinute, int endMinute) {
+        return isValidSleepStart(startMinute)
+                && isValidSleepEnd(endMinute)
+                && isValidSleepDuration(startMinute, endMinute);
+    }
+
+    static int clampSleepStart(int minute) {
+        return Math.max(SLEEP_START_MIN_MINUTE, Math.min(SLEEP_START_MAX_MINUTE, minute));
+    }
+
+    static int clampSleepEnd(int minute) {
+        return Math.max(SLEEP_END_MIN_MINUTE, Math.min(SLEEP_END_MAX_MINUTE, minute));
     }
 
     boolean earlySleepChecked(LocalDate date) {

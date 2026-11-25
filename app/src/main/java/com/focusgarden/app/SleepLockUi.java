@@ -254,8 +254,13 @@ final class SleepLockUi extends Dialog {
             return;
         }
         tapHaptic(v);
-        FocusSheets.pickClock(activity, state.sleepStart, state.sleepEnd, newStart -> {
+        FocusSheets.pickSleepStartClock(activity, state.sleepStart, newStart -> {
             if (newStart == state.sleepStart) return;
+            if (!FocusState.isValidSleepDuration(newStart, state.sleepEnd)) {
+                haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
+                OnboardingUi.showSleepTooLongDialog(activity);
+                return;
+            }
             confirmDialog(activity, R.drawable.ic_clock, AMBER_SOFT, AMBER,
                     "消耗 35 分钟延后入睡时间？",
                     "入睡时间将修改为 " + clock(newStart) + "。\n\n本次操作将立即扣除 35 分钟自由时间（优先扣可用，不足扣储蓄罐），且本轮早睡挑战判定失败、明天不可领取奖励。",

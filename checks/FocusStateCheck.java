@@ -967,6 +967,32 @@ final class FocusStateCheck {
         equal(true, sleepFail.evaluateEarlySleep(at("2026-11-29T07:05:00Z"), UTC));
         equal(true, sleepFail.hasPendingEarlySleepReward(at("2026-11-29T07:05:00Z"), UTC));
 
+        // Sleep schedule range bounds & max 10h validation
+        equal(true, FocusState.isValidSleepStart(21 * 60));
+        equal(true, FocusState.isValidSleepStart(23 * 60 + 30));
+        equal(false, FocusState.isValidSleepStart(20 * 60 + 59));
+        equal(false, FocusState.isValidSleepStart(23 * 60 + 31));
+        equal(true, FocusState.isValidSleepEnd(5 * 60));
+        equal(true, FocusState.isValidSleepEnd(8 * 60 + 30));
+        equal(false, FocusState.isValidSleepEnd(4 * 60 + 59));
+        equal(false, FocusState.isValidSleepEnd(8 * 60 + 31));
+        equal(600, FocusState.sleepDurationMinutes(21 * 60, 7 * 60));
+        equal(true, FocusState.isValidSleepDuration(21 * 60, 7 * 60));
+        equal(601, FocusState.sleepDurationMinutes(21 * 60, 7 * 60 + 1));
+        equal(false, FocusState.isValidSleepDuration(21 * 60, 7 * 60 + 1));
+        equal(690, FocusState.sleepDurationMinutes(21 * 60, 8 * 60 + 30));
+        equal(false, FocusState.isValidSleepDuration(21 * 60, 8 * 60 + 30));
+        equal(600, FocusState.sleepDurationMinutes(22 * 60 + 30, 8 * 60 + 30));
+        equal(true, FocusState.isValidSleepDuration(22 * 60 + 30, 8 * 60 + 30));
+        equal(330, FocusState.sleepDurationMinutes(23 * 60 + 30, 5 * 60));
+        equal(true, FocusState.isValidSleepSchedule(23 * 60 + 30, 5 * 60));
+        equal(false, FocusState.isValidSleepSchedule(21 * 60, 8 * 60 + 30));
+        equal(false, FocusState.isValidSleepSchedule(20 * 60 + 30, 6 * 60));
+        equal(FocusState.SLEEP_START_MIN_MINUTE, FocusState.clampSleepStart(18 * 60));
+        equal(FocusState.SLEEP_START_MAX_MINUTE, FocusState.clampSleepStart(23 * 60 + 55));
+        equal(FocusState.SLEEP_END_MIN_MINUTE, FocusState.clampSleepEnd(4 * 60 + 30));
+        equal(FocusState.SLEEP_END_MAX_MINUTE, FocusState.clampSleepEnd(9 * 60));
+
         // 3. Abstinence lifecycle + anti-reclaim edit guard + calendar relapse diary + permanent stats
         var abs = new FocusState();
         long startAbs = at("2026-11-20T08:00:00Z");

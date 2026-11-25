@@ -3,7 +3,6 @@ package com.focusgarden.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
-import android.app.TimePickerDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -1174,7 +1173,7 @@ final class FocusSheets {
 
         sheetRef[0] = bottomSheet(activity, "早睡挑战", null, body, true,
                 "早睡挑战",
-                "设定适合自己的入睡和起床时间。完整经历睡眠锁机时段后可手动领奖。");
+                "可设置 21:00–23:30 入睡、05:00–08:30 起床，睡眠时长不超过 10 小时。完整经历睡眠锁机时段后可手动领奖。");
     }
 
     private static String sleepScheduleLabel(int start, int end) {
@@ -1195,31 +1194,41 @@ final class FocusSheets {
     }
 
     private static void showSleepScheduleEditor(MainActivity activity, FocusState state, Runnable onChanged) {
-        int[] times = {state.sleepStart, state.sleepEnd};
+        int[] times = {
+                FocusState.clampSleepStart(state.sleepStart),
+                FocusState.clampSleepEnd(state.sleepEnd)
+        };
         LinearLayout body = column(activity);
         TextView start = secondaryButton(activity, "");
         TextView end = secondaryButton(activity, "");
         TextView summary = text(activity, "", 13, INK_SUB, false);
         TextView save = primaryButton(activity, "保存作息");
         Runnable refresh = () -> {
-            start.setText("入睡 " + clock(times[0]));
-            end.setText("起床 " + clock(times[1]));
-            int minutes = Math.floorMod(times[1] - times[0], 24 * 60);
-            summary.setText(minutes == 0
-                    ? "入睡和起床时间需要不同"
-                    : sleepScheduleLabel(times[0], times[1]) + " · 锁机 "
-                            + duration(minutes * FocusState.MINUTE));
-            save.setEnabled(minutes != 0);
-            save.setAlpha(minutes == 0 ? 0.5f : 1f);
+            start.setText("早睡 " + clock(times[0]));
+            end.setText("早起 " + clock(times[1]));
+            int minutes = FocusState.sleepDurationMinutes(times[0], times[1]);
+            boolean tooLong = minutes > FocusState.MAX_SLEEP_DURATION_MINUTES;
+            summary.setText(sleepScheduleLabel(times[0], times[1]) + " · 睡眠 "
+                    + duration(minutes * FocusState.MINUTE)
+                    + (tooLong ? "（超过 10 小时上限）" : ""));
+            summary.setTextColor(tooLong ? RED : INK_SUB);
+            save.setEnabled(true);
+            save.setAlpha(1f);
         };
-        start.setOnClickListener(v -> pickSleepTime(activity, "入睡时间", times[0], time -> {
-            times[0] = time;
-            refresh.run();
-        }));
-        end.setOnClickListener(v -> pickSleepTime(activity, "起床时间", times[1], time -> {
-            times[1] = time;
-            refresh.run();
-        }));
+        start.setOnClickListener(v -> {
+            tapHaptic(v);
+            pickSleepStartClock(activity, times[0], time -> {
+                times[0] = time;
+                refresh.run();
+            });
+        });
+        end.setOnClickListener(v -> {
+            tapHaptic(v);
+            pickSleepEndClock(activity, times[1], time -> {
+                times[1] = time;
+                refresh.run();
+            });
+        });
 
         LinearLayout timeRow = row(activity);
         weight(timeRow, start);
@@ -1231,9 +1240,17 @@ final class FocusSheets {
         gap(body, 16);
         body.addView(save, -1, -2);
         refresh.run();
-        Dialog sheet = bottomSheet(activity, "编辑作息", "支持白天作息和跨午夜时段。", body);
+        Dialog sheet = bottomSheet(activity, "编辑作息", "早睡 21:00–23:30 · 早起 05:00–08:30 · 区间不超过 10 小时", body);
         save.setOnClickListener(v -> {
-            if (times[0] == times[1]) return;
+            if (!FocusState.isValidSleepDuration(times[0], times[1])) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                OnboardingUi.showSleepTooLongDialog(activity);
+                return;
+            }
+            if (!FocusState.isValidSleepStart(times[0]) || !FocusState.isValidSleepEnd(times[1])) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                return;
+            }
             tapHaptic(v);
             sheet.dismiss();
             if (times[0] == state.sleepStart && times[1] == state.sleepEnd) return;
@@ -1257,14 +1274,6 @@ final class FocusSheets {
                     sleepScheduleLabel(times[0], times[1]) + "（修改时段将判定本轮早睡挑战失败）",
                     cost, forcePaid, apply);
         });
-    }
-
-    private static void pickSleepTime(Activity activity, String title, int current, IntConsumer onPicked) {
-        TimePickerDialog picker = new TimePickerDialog(activity,
-                (view, hour, minute) -> onPicked.accept(hour * 60 + minute),
-                current / 60, current % 60, true);
-        picker.setTitle(title);
-        picker.show();
     }
 
     static LinearLayout weekSleepStrip(Context context, FocusState state, LocalDate today) {
@@ -3614,6 +3623,139 @@ final class FocusSheets {
             tapHaptic(v);
             sheet.dismiss();
             onPicked.accept(updated);
+        });
+    }
+
+    static void pickSleepStartClock(Activity activity, int current, IntConsumer onPicked) {
+        pickBoundedClock(activity, "选择早睡时间", "可选时段 21:00 ～ 23:30", current,
+                FocusState.SLEEP_START_MIN_MINUTE, FocusState.SLEEP_START_MAX_MINUTE,
+                new int[]{21 * 60, 21 * 60 + 30, 22 * 60, 22 * 60 + 30, 23 * 60, 23 * 60 + 30},
+                3, onPicked);
+    }
+
+    static void pickSleepEndClock(Activity activity, int current, IntConsumer onPicked) {
+        pickBoundedClock(activity, "选择早起时间", "可选时段 05:00 ～ 08:30", current,
+                FocusState.SLEEP_END_MIN_MINUTE, FocusState.SLEEP_END_MAX_MINUTE,
+                new int[]{5 * 60, 5 * 60 + 30, 6 * 60, 6 * 60 + 30, 7 * 60, 7 * 60 + 30, 8 * 60, 8 * 60 + 30},
+                4, onPicked);
+    }
+
+    private static void pickBoundedClock(Activity activity, String title, String subtitle,
+                                         int current, int minMinute, int maxMinute,
+                                         int[] presets, int presetsPerRow, IntConsumer onPicked) {
+        final int[] val = {Math.max(minMinute, Math.min(maxMinute, current))};
+
+        LinearLayout body = column(activity);
+
+        TextView clockBadge = text(activity, "", 32, BLUE, true);
+        clockBadge.setGravity(Gravity.CENTER);
+        clockBadge.setBackground(cardBg(activity, BLUE_SOFT, blueStroke(), 18));
+        clockBadge.setPadding(dp(activity, 20), dp(activity, 16), dp(activity, 20), dp(activity, 16));
+        body.addView(clockBadge, -1, -2);
+        gap(body, 14);
+
+        LinearLayout adjustRow = row(activity);
+        TextView hMinus = pillButton(activity, "-1 时", SURFACE_SUBTLE, INK, 12, 42);
+        hMinus.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
+        TextView hPlus = pillButton(activity, "+1 时", SURFACE_SUBTLE, INK, 12, 42);
+        hPlus.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
+        TextView mMinus = pillButton(activity, "-5 分", SURFACE_SUBTLE, INK, 12, 42);
+        mMinus.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
+        TextView mPlus = pillButton(activity, "+5 分", SURFACE_SUBTLE, INK, 12, 42);
+        mPlus.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 12));
+        weight(adjustRow, hMinus);
+        space(adjustRow, 8);
+        weight(adjustRow, hPlus);
+        space(adjustRow, 8);
+        weight(adjustRow, mMinus);
+        space(adjustRow, 8);
+        weight(adjustRow, mPlus);
+        body.addView(adjustRow);
+        gap(body, 14);
+
+        body.addView(text(activity, "快捷时刻", 12, MUTED, true));
+        gap(body, 8);
+        LinearLayout presetWrap = column(activity);
+        body.addView(presetWrap);
+        gap(body, 18);
+
+        Runnable[] refreshClock = new Runnable[1];
+        refreshClock[0] = () -> {
+            int cur = val[0];
+            clockBadge.setText(clock(cur));
+
+            boolean canSubH = cur - 60 >= minMinute;
+            boolean canAddH = cur + 60 <= maxMinute;
+            boolean canSubM = cur - 5 >= minMinute;
+            boolean canAddM = cur + 5 <= maxMinute;
+            hMinus.setEnabled(canSubH);
+            hMinus.setAlpha(canSubH ? 1f : 0.42f);
+            hPlus.setEnabled(canAddH);
+            hPlus.setAlpha(canAddH ? 1f : 0.42f);
+            mMinus.setEnabled(canSubM);
+            mMinus.setAlpha(canSubM ? 1f : 0.42f);
+            mPlus.setEnabled(canAddM);
+            mPlus.setAlpha(canAddM ? 1f : 0.42f);
+
+            presetWrap.removeAllViews();
+            int cols = Math.max(1, presetsPerRow);
+            for (int start = 0; start < presets.length; start += cols) {
+                if (start > 0) gap(presetWrap, 6);
+                LinearLayout pRow = row(activity);
+                int endIdx = Math.min(presets.length, start + cols);
+                for (int i = start; i < endIdx; i++) {
+                    int p = presets[i];
+                    boolean active = cur == p;
+                    TextView chip = pillButton(activity, clock(p), active ? BLUE_SOFT : SURFACE_SUBTLE,
+                            active ? BLUE : INK_SUB, 10, 36);
+                    if (!active) chip.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 10));
+                    else chip.setBackground(cardBg(activity, BLUE_SOFT, blueStroke(), 10));
+                    chip.setOnClickListener(v -> {
+                        tapHaptic(v);
+                        val[0] = p;
+                        refreshClock[0].run();
+                    });
+                    weight(pRow, chip);
+                    if (i + 1 < endIdx) space(pRow, 6);
+                }
+                presetWrap.addView(pRow);
+            }
+        };
+
+        hMinus.setOnClickListener(v -> {
+            if (val[0] - 60 < minMinute) return;
+            tapHaptic(v);
+            val[0] -= 60;
+            refreshClock[0].run();
+        });
+        hPlus.setOnClickListener(v -> {
+            if (val[0] + 60 > maxMinute) return;
+            tapHaptic(v);
+            val[0] += 60;
+            refreshClock[0].run();
+        });
+        mMinus.setOnClickListener(v -> {
+            if (val[0] - 5 < minMinute) return;
+            tapHaptic(v);
+            val[0] -= 5;
+            refreshClock[0].run();
+        });
+        mPlus.setOnClickListener(v -> {
+            if (val[0] + 5 > maxMinute) return;
+            tapHaptic(v);
+            val[0] += 5;
+            refreshClock[0].run();
+        });
+
+        refreshClock[0].run();
+
+        TextView confirmBtn = primaryButton(activity, "确认时间");
+        body.addView(confirmBtn, -1, -2);
+        Dialog sheet = bottomSheet(activity, title, subtitle, body);
+        confirmBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            sheet.dismiss();
+            onPicked.accept(val[0]);
         });
     }
 }
