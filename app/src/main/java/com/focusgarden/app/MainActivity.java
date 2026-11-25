@@ -154,8 +154,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private long displayedVoucherClaimableMin = -1L;
     private long displayedVoucherEarnedMin = -1L;
     private String selectedAbstinenceId;
-    private int abstinenceQuoteOffset;
-    private AbstinenceHeroTicker abstinenceHeroTicker;
+    private AbstinenceUi.Dashboard abstinenceDashboard;
+    private LocalDate abstinenceDiaryDate;
+    private String abstinenceDiaryProject;
     private String lastLogicDate = "";
     private boolean lastAccessibilityEnabled;
     private Dialog timerConfirmation;
@@ -173,52 +174,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private FocusSheets.LiveRefresh liveKeepAliveSheet;
     private final List<AbstinenceTicker> liveAbstinenceTickers = new ArrayList<>();
 
-    private static final class AbstinenceHeroTicker {
-        final FocusState.Abstinence item;
-        final TextView durView;
-        final AbstinenceUi.AbstinenceRingView ringView;
-        final AbstinenceUi.SproutStageView sproutView;
-        final TextView leftTileVal;
-        final TextView rightTileVal;
-
-        AbstinenceHeroTicker(FocusState.Abstinence item, TextView durView,
-                             AbstinenceUi.AbstinenceRingView ringView,
-                             AbstinenceUi.SproutStageView sproutView,
-                             TextView leftTileVal, TextView rightTileVal) {
-            this.item = item;
-            this.durView = durView;
-            this.ringView = ringView;
-            this.sproutView = sproutView;
-            this.leftTileVal = leftTileVal;
-            this.rightTileVal = rightTileVal;
-        }
-    }
-
     private static final class AbstinenceTicker {
         final FocusState.Abstinence item;
         final TextView clockView;
-        final TextView pctView;
-        final CapsuleBar bar;
         final TextView actionBtn;
-        final TextView pillView;
-        final boolean compact;
         boolean lastReached;
         boolean lastCanClaim;
-        float lastBarProgress;
 
-        AbstinenceTicker(FocusState.Abstinence item, TextView clockView, TextView pctView,
-                         CapsuleBar bar, TextView actionBtn, TextView pillView, boolean compact,
-                         boolean reached, boolean canClaim, float barProgress) {
+        AbstinenceTicker(FocusState.Abstinence item, TextView clockView, TextView actionBtn,
+                         boolean reached, boolean canClaim) {
             this.item = item;
             this.clockView = clockView;
-            this.pctView = pctView;
-            this.bar = bar;
             this.actionBtn = actionBtn;
-            this.pillView = pillView;
-            this.compact = compact;
             this.lastReached = reached;
             this.lastCanClaim = canClaim;
-            this.lastBarProgress = barProgress;
         }
     }
 
@@ -626,7 +595,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemCardSubs.clear();
         displayedVoucherClaimableMin = -1L;
         displayedVoucherEarnedMin = -1L;
-        abstinenceHeroTicker = null;
+        abstinenceDashboard = null;
         liveAbstinenceTickers.clear();
     }
 
@@ -698,7 +667,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             scrimLp.gravity = Gravity.TOP;
             contentStage.addView(homeScrim, scrimLp);
 
-            homeFloatingSettings = topBarBtn(R.drawable.ic_settings, INK, "设置", this::openSettings);
+            homeFloatingSettings = topBarBtn(R.drawable.ic_settings, INK, "设置", this::openPageSettings);
             FrameLayout.LayoutParams settingsLp = new FrameLayout.LayoutParams(dp(this, 38), dp(this, 38));
             settingsLp.gravity = Gravity.TOP | Gravity.END;
             settingsLp.topMargin = topInset + dp(this, 14);
@@ -2194,7 +2163,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         space(content, 8);
 
         TextView enterBtn = pillButton(this, hasChest ? "去开箱" : "进入商店",
-                hasChest ? AMBER_SOFT : 0xffa6bddc, hasChest ? AMBER : 0xff172b48, 11, 34);
+                hasChest ? AMBER_SOFT : 0xffa6bddc, hasChest ? AMBER : 0xfff8f5ec, 11, 34);
         enterBtn.setSingleLine(true);
         content.addView(enterBtn);
         card.addView(content, -1, -2);
@@ -2463,10 +2432,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 rowBox.setOnClickListener(v -> {
                     tapHaptic(v);
                     selectedAbstinenceId = a.id;
-                    AbstinenceUi.showDetail(this, state, a.id, this::changed);
+                    switchTab(ABSTINENCE_PAGE);
                 });
-                liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv, null, null, actBtn, null, true,
-                        reached, canClaim, 0f));
+                liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv, actBtn, reached, canClaim));
                 body.addView(rowBox);
                 if (i + 1 < preview.size()) gap(body, 8);
             }
@@ -2614,91 +2582,36 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
 
         long habitCapLeft = state.remainingHabitCapMs(today);
-        if (abstinenceHeroTicker != null) {
-            FocusState.Abstinence heroItem = abstinenceHeroTicker.item;
-            long hElapsed = state.abstinenceElapsedMs(heroItem, now);
-            long hTarget = state.abstinenceTargetMs(heroItem);
-            int hPct = hTarget <= 0L ? 100 : (int) Math.min(100L, hElapsed * 100L / hTarget);
-            float hRatio = hTarget <= 0L ? 1f : Math.min(1f, (float) hElapsed / hTarget);
-            boolean hCanClaim = state.canClaimAbstinence(heroItem, now);
-            boolean hReached = state.abstinenceReached(heroItem, now);
-            long hGuardRem = state.abstinenceGuardRemainingMs(heroItem, now);
-            setTextIfChanged(abstinenceHeroTicker.durView, AbstinenceUi.formatHeroDuration(hElapsed));
-            abstinenceHeroTicker.ringView.update(hRatio, hPct);
-            if (abstinenceHeroTicker.sproutView != null) {
-                abstinenceHeroTicker.sproutView.update(hElapsed);
-            }
-            String leftTxt;
-            if (heroItem.dailySavingYuan > 0.001) {
-                leftTxt = String.format(Locale.ROOT, "¥%.2f", (hElapsed / 86_400_000.0) * heroItem.dailySavingYuan);
-            } else if (hGuardRem > 0L && hReached) {
-                leftTxt = "护盾 " + AbstinenceUi.formatSummaryDuration(hGuardRem);
-            } else if (hCanClaim) {
-                leftTxt = layFlat ? "今日暂停"
-                        : habitCapLeft <= 0L ? "明日可领"
-                        : "可领 +" + Math.min(heroItem.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分";
-            } else if (hReached) {
-                leftTxt = "可进阶 " + FocusSheets.formatAbstinenceTarget(FocusState.nextAbstinenceStageHours(heroItem.targetHours));
-            } else {
-                leftTxt = "+" + heroItem.rewardMinutes + " 分钟";
-            }
-            setTextIfChanged(abstinenceHeroTicker.leftTileVal, leftTxt);
-            setTextIfChanged(abstinenceHeroTicker.rightTileVal,
-                    AbstinenceUi.formatSummaryDuration(Math.max(heroItem.longestMs, hElapsed)));
-        }
+        if (abstinenceDashboard != null) abstinenceDashboard.update(now);
 
         for (AbstinenceTicker t : liveAbstinenceTickers) {
             long elapsed = state.abstinenceElapsedMs(t.item, now);
-            long target = state.abstinenceTargetMs(t.item);
             boolean reached = state.abstinenceReached(t.item, now);
             boolean canClaim = state.canClaimAbstinence(t.item, now);
             long guardRem = state.abstinenceGuardRemainingMs(t.item, now);
-            int pct = target <= 0 ? 100 : (int) Math.min(100L, elapsed * 100L / target);
             boolean stateChanged = reached != t.lastReached || canClaim != t.lastCanClaim;
-            if (t.compact) {
-                setTextIfChanged(t.clockView, formatAbstinenceElapsed(elapsed) + " / "
-                        + FocusSheets.formatAbstinenceTarget(t.item.targetHours));
-                String lbl = (canClaim && layFlat) ? "今日暂停"
-                        : (guardRem > 0L && reached) ? "护盾"
-                        : (canClaim && habitCapLeft <= 0L) ? "明日可领"
-                        : canClaim ? "领 +" + Math.min(t.item.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分"
-                        : reached ? "进阶"
-                        : "+" + t.item.rewardMinutes + " 分";
-                setTextIfChanged(t.actionBtn, lbl);
-                if ((stateChanged || guardRem > 0L) && t.actionBtn != null) {
-                    int bg = (canClaim && !layFlat && habitCapLeft > 0L) ? BLUE
-                            : (canClaim && layFlat) ? PURPLE_SOFT
-                            : (guardRem > 0L && reached) ? AMBER_SOFT
-                            : (canClaim && habitCapLeft <= 0L) ? CARD
-                            : reached ? GREEN_SOFT : CARD;
-                    int fg = (canClaim && !layFlat && habitCapLeft > 0L) ? ON_ACCENT
-                            : (canClaim && layFlat) ? PURPLE
-                            : (guardRem > 0L && reached) ? AMBER
-                            : (canClaim && habitCapLeft <= 0L) ? MUTED
-                            : reached ? GREEN : INK_SUB;
-                    t.actionBtn.setTextColor(fg);
-                    t.actionBtn.setBackground(touch(this, bg, 10));
-                    t.lastReached = reached;
-                    t.lastCanClaim = canClaim;
-                }
-            } else {
-                setTextIfChanged(t.clockView, "已坚持 " + AbstinenceUi.formatSummaryDuration(elapsed)
-                        + " · 目标 " + FocusSheets.formatAbstinenceTarget(t.item.targetHours));
-                if (t.pillView != null) {
-                    String pillText = (guardRem > 0L && reached) ? "护盾中"
-                            : canClaim ? (layFlat ? "今日暂停" : habitCapLeft <= 0L ? "明日可领"
-                            : "可领 +" + Math.min(t.item.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分")
-                            : reached ? "可进阶"
-                            : (pct + "%");
-                    setTextIfChanged(t.pillView, pillText);
-                }
-                if (t.bar != null) {
-                    float barProgress = target <= 0 ? 1f : Math.min(1f, (float) elapsed / target);
-                    if (Math.abs(barProgress - t.lastBarProgress) >= 0.002f || stateChanged) {
-                        t.bar.setProgress(barProgress);
-                        t.lastBarProgress = barProgress;
-                    }
-                }
+            setTextIfChanged(t.clockView, formatAbstinenceElapsed(elapsed) + " / "
+                    + FocusSheets.formatAbstinenceTarget(t.item.targetHours));
+            String lbl = (canClaim && layFlat) ? "今日暂停"
+                    : (guardRem > 0L && reached) ? "护盾"
+                    : (canClaim && habitCapLeft <= 0L) ? "明日可领"
+                    : canClaim ? "领 +" + Math.min(t.item.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分"
+                    : reached ? "进阶"
+                    : "+" + t.item.rewardMinutes + " 分";
+            setTextIfChanged(t.actionBtn, lbl);
+            if ((stateChanged || guardRem > 0L) && t.actionBtn != null) {
+                int bg = (canClaim && !layFlat && habitCapLeft > 0L) ? BLUE
+                        : (canClaim && layFlat) ? PURPLE_SOFT
+                        : (guardRem > 0L && reached) ? AMBER_SOFT
+                        : (canClaim && habitCapLeft <= 0L) ? CARD
+                        : reached ? GREEN_SOFT : CARD;
+                int fg = (canClaim && !layFlat && habitCapLeft > 0L) ? ON_ACCENT
+                        : (canClaim && layFlat) ? PURPLE
+                        : (guardRem > 0L && reached) ? AMBER
+                        : (canClaim && habitCapLeft <= 0L) ? MUTED
+                        : reached ? GREEN : INK_SUB;
+                t.actionBtn.setTextColor(fg);
+                t.actionBtn.setBackground(touch(this, bg, 10));
                 t.lastReached = reached;
                 t.lastCanClaim = canClaim;
             }
@@ -3181,9 +3094,20 @@ public final class MainActivity extends Activity implements SensorEventListener 
     // TAB 2: 戒断 (Focus Garden Unified Abstinence Tracker)
     // =========================================================================
     private void abstinence() {
-        long now = System.currentTimeMillis();
-        ZoneId zone = ZoneId.systemDefault();
-        int total = state.abstinences.size();
+        if (!state.abstinences.isEmpty()) {
+            FocusState.Abstinence selected = state.abstinences.get(selectedAbstinenceId);
+            if (selected == null) selected = state.abstinences.values().iterator().next();
+            selectedAbstinenceId = selected.id;
+            if (!selected.id.equals(abstinenceDiaryProject)) {
+                abstinenceDiaryProject = selected.id;
+                abstinenceDiaryDate = LocalDate.now();
+            }
+            abstinenceDashboard = new AbstinenceUi.Dashboard(this, state, selected, abstinenceDiaryDate,
+                    date -> abstinenceDiaryDate = date, this::changed);
+            pages.addView(abstinenceDashboard, -1, -2);
+            return;
+        }
+
         LocalDate calNow = LocalDate.now();
         String dateSub = calNow.format(DateTimeFormatter.ofPattern("M月d日 · EEEE", Locale.SIMPLIFIED_CHINESE));
 
@@ -3209,305 +3133,117 @@ public final class MainActivity extends Activity implements SensorEventListener 
         pages.addView(head);
         gap(pages, 16);
 
-        if (total == 0) {
-            LinearLayout hero = column(this);
-            hero.setBackground(gradientBg(this, AbstinenceUi.heroTopColor(), AbstinenceUi.heroBottomColor(), 24));
-            hero.setPadding(dp(this, 20), dp(this, 20), dp(this, 20), dp(this, 20));
-            elevate(hero, 4);
-            LinearLayout heroRow = row(this);
-            LinearLayout heroCopy = column(this);
-            heroCopy.addView(text(this, "• 清醒守护 · 温和自律", 12, AbstinenceUi.heroSubColor(), true));
-            gap(heroCopy, 6);
-            heroCopy.addView(text(this, "迈出改变的第一步", 24, ON_ACCENT, true));
-            gap(heroCopy, 6);
-            heroCopy.addView(text(this, "冲动救急 · 复发日记 · 渐进里程碑", 13, 0xd8ffffff, false));
-            weight(heroRow, heroCopy);
-            space(heroRow, 12);
-            heroRow.addView(new AbstinenceUi.SproutStageView(this, true, 0L), dp(this, 64), dp(this, 64));
-            hero.addView(heroRow);
-            pages.addView(hero);
-            gap(pages, 14);
+        LinearLayout hero = column(this);
+        hero.setBackground(gradientBg(this, AbstinenceUi.heroTopColor(), AbstinenceUi.heroBottomColor(), 24));
+        hero.setPadding(dp(this, 20), dp(this, 20), dp(this, 20), dp(this, 20));
+        elevate(hero, 4);
+        LinearLayout heroRow = row(this);
+        LinearLayout heroCopy = column(this);
+        heroCopy.addView(text(this, "• 清醒守护 · 温和自律", 12, AbstinenceUi.heroSubColor(), true));
+        gap(heroCopy, 6);
+        heroCopy.addView(text(this, "迈出改变的第一步", 24, ON_ACCENT, true));
+        gap(heroCopy, 6);
+        heroCopy.addView(text(this, "冲动救急 · 复发日记 · 渐进里程碑", 13, 0xd8ffffff, false));
+        weight(heroRow, heroCopy);
+        space(heroRow, 12);
+        heroRow.addView(new AbstinenceUi.SproutStageView(this, true, 0L), dp(this, 64), dp(this, 64));
+        hero.addView(heroRow);
+        pages.addView(hero);
+        gap(pages, 14);
 
-            LinearLayout empty = surfaceCard();
-            empty.addView(text(this, "快速开始一个戒断项目", 16, INK, true));
-            gap(empty, 12);
-            String[][] quickTemplates = {
-                    {"戒熬夜刷手机", "24", "10", "2"},
-                    {"戒刷短视频", "24", "10", "1"},
-                    {"戒奶茶甜饮", "72", "15", "0"},
-                    {"戒游戏冲动", "24", "15", "3"}
-            };
-            for (int r = 0; r < 2; r++) {
-                LinearLayout tplRow = row(this);
-                for (int c = 0; c < 2; c++) {
-                    String[] item = quickTemplates[r * 2 + c];
-                    String tplName = item[0];
-                    int tplHours = Integer.parseInt(item[1]);
-                    int tplReward = Integer.parseInt(item[2]);
-                    int tplIcon = Integer.parseInt(item[3]);
-                    TextView chip = pillButton(this, tplName + " · +" + tplReward + "分",
-                            SURFACE_SUBTLE, INK, 12, 40);
-                    chip.setSingleLine(true);
-                    chip.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
-                    chip.setTextSize(12);
-                    chip.setOnClickListener(v -> {
-                        haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                        String newId = java.util.UUID.randomUUID().toString();
-                        state.addAbstinenceTracked(newId, tplName, System.currentTimeMillis(),
-                                tplHours, tplReward, "", 0.0, tplIcon, null, System.currentTimeMillis());
-                        selectedAbstinenceId = newId;
-                        changed();
-                        toast("已开启戒断「" + tplName + "」");
-                    });
-                    weight(tplRow, chip);
-                    if (c == 0) space(tplRow, 8);
-                }
-                empty.addView(tplRow);
-                if (r == 0) gap(empty, 8);
-            }
-            pages.addView(empty);
-            gap(pages, 14);
-        } else {
-            FocusState.Abstinence primary = selectedAbstinenceId != null
-                    ? state.abstinences.get(selectedAbstinenceId) : null;
-            if (primary == null) primary = state.abstinences.values().iterator().next();
-            selectedAbstinenceId = primary.id;
-
-            long pElapsed = state.abstinenceElapsedMs(primary, now);
-            long pTarget = state.abstinenceTargetMs(primary);
-            float pRatio = pTarget <= 0L ? 1f : Math.min(1f, (float) pElapsed / pTarget);
-            int pPct = pTarget <= 0L ? 100 : (int) Math.min(100L, pElapsed * 100L / pTarget);
-            boolean pCanClaim = state.canClaimAbstinence(primary, now);
-            boolean pReached = state.abstinenceReached(primary, now);
-            long pGuardRem = state.abstinenceGuardRemainingMs(primary, now);
-            long habitCapLeft = state.remainingHabitCapMs(FocusState.logicDate(now, zone));
-
-            // Cohesive Focus Garden Brand-Blue Hero Card
-            LinearLayout hero = column(this);
-            hero.setBackground(gradientBg(this, AbstinenceUi.heroTopColor(), AbstinenceUi.heroBottomColor(), 24));
-            hero.setPadding(dp(this, 18), dp(this, 18), dp(this, 18), dp(this, 18));
-            elevate(hero, 5);
-
-            LinearLayout heroTop = row(this);
-            AbstinenceUi.SproutStageView heroSprout = new AbstinenceUi.SproutStageView(this, true, pElapsed);
-            heroTop.addView(heroSprout, dp(this, 32), dp(this, 32));
-            space(heroTop, 8);
-            weight(heroTop, text(this, "正在坚持 · " + primary.name, 14, ON_ACCENT, true));
-            heroTop.addView(text(this, "详情 ›", 13, AbstinenceUi.heroSubColor(), false));
-            hero.addView(heroTop);
-            gap(hero, 12);
-
-            LinearLayout heroMid = row(this);
-            LinearLayout heroMidLeft = column(this);
-            TextView heroDurTv = text(this, AbstinenceUi.formatHeroDuration(pElapsed), 28, ON_ACCENT, true);
-            heroDurTv.setFontFeatureSettings("tnum");
-            heroMidLeft.addView(heroDurTv);
-            gap(heroMidLeft, 4);
-            heroMidLeft.addView(text(this, AbstinenceUi.stageLabel(pElapsed) + " · 目标 "
-                    + FocusSheets.formatAbstinenceTarget(primary.targetHours),
-                    12, AbstinenceUi.heroSubColor(), false));
-            weight(heroMid, heroMidLeft);
-            space(heroMid, 12);
-            AbstinenceUi.AbstinenceRingView ringView = new AbstinenceUi.AbstinenceRingView(this, pRatio, pPct);
-            heroMid.addView(ringView, dp(this, 84), dp(this, 84));
-            hero.addView(heroMid);
-            gap(hero, 14);
-
-            LinearLayout tiles = row(this);
-            boolean showSaving = primary.dailySavingYuan > 0.001;
-            LinearLayout leftTile = column(this);
-            leftTile.setBackground(shape(this, 0x22ffffff, 14));
-            leftTile.setPadding(dp(this, 14), dp(this, 10), dp(this, 14), dp(this, 10));
-            leftTile.addView(text(this, showSaving ? "预计节省" : "本阶奖励", 11, AbstinenceUi.heroSubColor(), false));
-            gap(leftTile, 3);
-            String leftValStr;
-            if (showSaving) {
-                leftValStr = String.format(Locale.ROOT, "¥%.2f", (pElapsed / 86_400_000.0) * primary.dailySavingYuan);
-            } else if (pGuardRem > 0L && pReached) {
-                leftValStr = "护盾 " + AbstinenceUi.formatSummaryDuration(pGuardRem);
-            } else if (pCanClaim) {
-                leftValStr = state.isLayFlat() ? "今日暂停"
-                        : habitCapLeft <= 0L ? "明日可领"
-                        : "可领 +" + Math.min(primary.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分";
-            } else if (pReached) {
-                leftValStr = "可进阶 " + FocusSheets.formatAbstinenceTarget(
-                        FocusState.nextAbstinenceStageHours(primary.targetHours));
-            } else {
-                leftValStr = "+" + primary.rewardMinutes + " 分钟";
-            }
-            TextView leftValTv = text(this, leftValStr, 16, ON_ACCENT, true);
-            leftValTv.setFontFeatureSettings("tnum");
-            leftTile.addView(leftValTv);
-
-            LinearLayout rightTile = column(this);
-            rightTile.setBackground(shape(this, 0x22ffffff, 14));
-            rightTile.setPadding(dp(this, 14), dp(this, 10), dp(this, 14), dp(this, 10));
-            rightTile.addView(text(this, "最长坚持", 11, AbstinenceUi.heroSubColor(), false));
-            gap(rightTile, 3);
-            TextView rightValTv = text(this, AbstinenceUi.formatSummaryDuration(Math.max(primary.longestMs, pElapsed)),
-                    16, ON_ACCENT, true);
-            rightValTv.setFontFeatureSettings("tnum");
-            rightTile.addView(rightValTv);
-
-            tiles.addView(leftTile, new LinearLayout.LayoutParams(0, -2, 1f));
-            space(tiles, 10);
-            tiles.addView(rightTile, new LinearLayout.LayoutParams(0, -2, 1f));
-            hero.addView(tiles);
-
-            FocusState.Abstinence heroPrimary = primary;
-            hero.setOnClickListener(v -> {
-                tapHaptic(v);
-                AbstinenceUi.showDetail(this, state, heroPrimary.id, this::changed);
-            });
-            abstinenceHeroTicker = new AbstinenceHeroTicker(primary, heroDurTv, ringView, heroSprout, leftValTv, rightValTv);
-            pages.addView(hero);
-            gap(pages, 10);
-
-            // Fast Impulse Defense Strip beneath Hero
-            LinearLayout heroQuick = row(this);
-            TextView urgeBtn = pillButton(this, "冲动救急 · 呼吸与锁机", BLUE_SOFT, BLUE, 14, 42);
-            urgeBtn.setBackground(touchCard(this, BLUE_SOFT, blueStroke(), 14));
-            urgeBtn.setTextSize(13);
-            urgeBtn.setOnClickListener(v -> {
-                tapHaptic(v);
-                AbstinenceUi.showUrgeRescueDialog(this, state, heroPrimary, this::changed);
-            });
-            heroQuick.addView(urgeBtn, new LinearLayout.LayoutParams(0, dp(this, 42), 1.15f));
-            space(heroQuick, 10);
-
-            String ctxLbl = (pCanClaim && !state.isLayFlat() && habitCapLeft > 0L)
-                    ? "领 +" + Math.min(heroPrimary.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分"
-                    : (pReached && pGuardRem <= 0L)
-                    ? "进阶 " + FocusSheets.formatAbstinenceTarget(
-                    FocusState.nextAbstinenceStageHours(heroPrimary.targetHours))
-                    : "复发日记与趋势";
-            boolean highlightCtx = (pCanClaim && !state.isLayFlat() && habitCapLeft > 0L);
-            TextView ctxBtn = pillButton(this, ctxLbl,
-                    highlightCtx ? BLUE : CARD,
-                    highlightCtx ? ON_ACCENT : INK, 14, 42);
-            if (!highlightCtx) ctxBtn.setBackground(touchCard(this, CARD, BORDER, 14));
-            ctxBtn.setTextSize(13);
-            ctxBtn.setOnClickListener(v -> {
-                long curNow = System.currentTimeMillis();
-                if (state.canClaimAbstinence(heroPrimary, curNow)
-                        || state.abstinenceReached(heroPrimary, curNow) && state.abstinenceGuardRemainingMs(heroPrimary, curNow) <= 0L) {
-                    handleAbstinencePrimaryAction(v, heroPrimary);
-                } else {
-                    tapHaptic(v);
-                    AbstinenceUi.showDetail(this, state, heroPrimary.id, this::changed);
-                }
-            });
-            heroQuick.addView(ctxBtn, new LinearLayout.LayoutParams(0, dp(this, 42), 1f));
-            pages.addView(heroQuick);
-            gap(pages, 18);
-
-            // 我的戒断 section header
-            LinearLayout listHead = row(this);
-            weight(listHead, text(this, "我的戒断", 17, INK, true));
-            TextView countPill = text(this, total + " 项", 12, BLUE, true);
-            countPill.setBackground(shape(this, BLUE_SOFT, 10));
-            countPill.setPadding(dp(this, 10), dp(this, 4), dp(this, 10), dp(this, 4));
-            listHead.addView(countPill);
-            pages.addView(listHead);
-            gap(pages, 10);
-
-            for (var entry : state.abstinences.entrySet()) {
-                FocusState.Abstinence a = entry.getValue();
-                long elapsed = state.abstinenceElapsedMs(a, now);
-                long target = state.abstinenceTargetMs(a);
-                boolean reached = state.abstinenceReached(a, now);
-                boolean canClaim = state.canClaimAbstinence(a, now);
-                long guardRem = state.abstinenceGuardRemainingMs(a, now);
-                int pct = target <= 0 ? 100 : (int) Math.min(100L, elapsed * 100L / target);
-
-                LinearLayout card = row(this);
-                card.setBackground(touchCard(this, CARD, (canClaim && habitCapLeft > 0L) ? blueStroke() : BORDER, 18));
-                card.setPadding(dp(this, 14), dp(this, 14), dp(this, 14), dp(this, 14));
-                elevate(card, 1.5f);
-
-                card.addView(iconBadge(this, AbstinenceUi.iconForIndex(a.iconIndex),
-                        AbstinenceUi.badgeBg(a.iconIndex), AbstinenceUi.badgeTint(a.iconIndex), 44, 22, 12));
-                space(card, 12);
-
-                LinearLayout mid = column(this);
-                LinearLayout topLine = row(this);
-                weight(topLine, text(this, a.name, 16, INK, true));
-                String pillStr = (guardRem > 0L && reached) ? "护盾中"
-                        : canClaim ? (state.isLayFlat() ? "今日暂停"
-                        : habitCapLeft <= 0L ? "明日可领"
-                        : "可领 +" + Math.min(a.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分")
-                        : reached ? "可进阶"
-                        : (pct + "%");
-                int pillFg = (guardRem > 0L && reached) ? AMBER
-                        : (canClaim && state.isLayFlat()) ? PURPLE
-                        : (canClaim && habitCapLeft > 0L) ? BLUE
-                        : reached ? GREEN : BLUE;
-                int pillBg = (guardRem > 0L && reached) ? AMBER_SOFT
-                        : (canClaim && state.isLayFlat()) ? PURPLE_SOFT
-                        : reached ? GREEN_SOFT : BLUE_SOFT;
-                TextView pctPill = text(this, pillStr, 11, pillFg, true);
-                pctPill.setFontFeatureSettings("tnum");
-                pctPill.setBackground(shape(this, pillBg, 9));
-                pctPill.setPadding(dp(this, 9), dp(this, 3), dp(this, 9), dp(this, 3));
-                topLine.addView(pctPill);
-                mid.addView(topLine);
-                gap(mid, 4);
-
-                TextView subTv = text(this, "已坚持 " + AbstinenceUi.formatSummaryDuration(elapsed)
-                        + " · 目标 " + FocusSheets.formatAbstinenceTarget(a.targetHours), 12, MUTED, false);
-                subTv.setFontFeatureSettings("tnum");
-                mid.addView(subTv);
-                gap(mid, 8);
-
-                CapsuleBar bar = new CapsuleBar(this);
-                bar.setColors(LINE, reached ? GREEN : BLUE);
-                float initProg = target <= 0 ? 1f : Math.min(1f, (float) elapsed / target);
-                bar.setProgress(initProg);
-                mid.addView(bar, -1, dp(this, 5));
-                weight(card, mid);
-                space(card, 10);
-
-                card.addView(iconView(this, R.drawable.ic_chevron_right, 16, MUTED));
-                card.setOnClickListener(v -> {
-                    tapHaptic(v);
-                    selectedAbstinenceId = a.id;
-                    AbstinenceUi.showDetail(this, state, a.id, this::changed);
+        LinearLayout empty = surfaceCard();
+        empty.addView(text(this, "快速开始一个戒断项目", 16, INK, true));
+        gap(empty, 12);
+        String[][] quickTemplates = {
+                {"戒熬夜刷手机", "24", "10", "2"},
+                {"戒刷短视频", "24", "10", "1"},
+                {"戒奶茶甜饮", "72", "15", "0"},
+                {"戒游戏冲动", "24", "15", "3"}
+        };
+        for (int r = 0; r < 2; r++) {
+            LinearLayout tplRow = row(this);
+            for (int c = 0; c < 2; c++) {
+                String[] item = quickTemplates[r * 2 + c];
+                String tplName = item[0];
+                int tplHours = Integer.parseInt(item[1]);
+                int tplReward = Integer.parseInt(item[2]);
+                int tplIcon = Integer.parseInt(item[3]);
+                TextView chip = pillButton(this, tplName + " · +" + tplReward + "分",
+                        SURFACE_SUBTLE, INK, 12, 40);
+                chip.setSingleLine(true);
+                chip.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
+                chip.setTextSize(12);
+                chip.setOnClickListener(v -> {
+                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                    String newId = java.util.UUID.randomUUID().toString();
+                    state.addAbstinenceTracked(newId, tplName, System.currentTimeMillis(),
+                            tplHours, tplReward, "", 0.0, tplIcon, null, System.currentTimeMillis());
+                    selectedAbstinenceId = newId;
+                    changed();
+                    toast("已开启戒断「" + tplName + "」");
                 });
-
-                liveAbstinenceTickers.add(new AbstinenceTicker(a, subTv, null, bar, null, pctPill, false,
-                        reached, canClaim, initProg));
-                pages.addView(card);
-                gap(pages, 10);
+                weight(tplRow, chip);
+                if (c == 0) space(tplRow, 8);
             }
-            gap(pages, 4);
+            empty.addView(tplRow);
+            if (r == 0) gap(empty, 8);
+        }
+        pages.addView(empty);
+        gap(pages, 14);
+    }
+
+    private void openPageSettings() {
+        FocusState.Abstinence item = state.abstinences.get(selectedAbstinenceId);
+        if (tab != ABSTINENCE_PAGE || item == null) {
+            openSettings();
+            return;
         }
 
-        // 每日一句 card in unified Focus Garden blue
-        LinearLayout quoteCard = row(this);
-        quoteCard.setBackground(touchCard(this, CARD, BORDER, 18));
-        quoteCard.setPadding(dp(this, 16), dp(this, 14), dp(this, 16), dp(this, 14));
-        elevate(quoteCard, 1.5f);
-        View barAccent = new View(this);
-        barAccent.setBackground(shape(this, BLUE, 3));
-        quoteCard.addView(barAccent, dp(this, 4), dp(this, 40));
-        space(quoteCard, 12);
-        LinearLayout qCopy = column(this);
-        qCopy.addView(text(this, "每日一句", 12, BLUE, true));
-        gap(qCopy, 4);
-        TextView qBody = text(this, "", 14, INK, true);
-        qCopy.addView(qBody);
-        weight(quoteCard, qCopy);
-        Runnable renderAbsQuote = () -> {
-            QuoteBank.Quote q = QuoteBank.quoteForOffset(this, abstinenceQuoteOffset);
-            setTextIfChanged(qBody, q.text());
-        };
-        renderAbsQuote.run();
-        quoteCard.setOnClickListener(v -> {
-            tapHaptic(v);
-            abstinenceQuoteOffset++;
-            renderAbsQuote.run();
+        LinearLayout body = column(this);
+        Dialog[] panel = {null};
+        body.addView(text(this, item.name, 15, INK, true));
+        gap(body, 12);
+        addAbstinenceOption(body, "编辑当前项目", () -> {
+            panel[0].dismiss();
+            FocusSheets.showAbstinenceEditor(this, state, item.id, item, this::changed);
         });
-        pages.addView(quoteCard);
+        addAbstinenceOption(body, "新建戒断", () -> {
+            panel[0].dismiss();
+            FocusSheets.showAbstinenceEditor(this, state, null, null, () -> {
+                for (String id : state.abstinences.keySet()) selectedAbstinenceId = id;
+                changed();
+                scroll.scrollTo(0, 0);
+            });
+        });
+        if (state.abstinences.size() > 1) {
+            gap(body, 4);
+            body.addView(text(this, "切换项目", 13, MUTED, true));
+            gap(body, 8);
+            for (FocusState.Abstinence project : state.abstinences.values()) {
+                if (project.id.equals(item.id)) continue;
+                addAbstinenceOption(body, project.name, () -> {
+                    panel[0].dismiss();
+                    selectedAbstinenceId = project.id;
+                    redraw();
+                    scroll.scrollTo(0, 0);
+                });
+            }
+        }
+        addAbstinenceOption(body, "应用设置", () -> {
+            panel[0].dismiss();
+            openSettings();
+        });
+        panel[0] = rightSheet(this, "戒断设置", body);
+    }
+
+    private void addAbstinenceOption(LinearLayout body, String label, Runnable action) {
+        TextView button = secondaryButton(this, label);
+        button.setOnClickListener(v -> {
+            tapHaptic(v);
+            action.run();
+        });
+        body.addView(button, -1, -2);
+        gap(body, 8);
     }
 
     private void handleAbstinencePrimaryAction(View v, FocusState.Abstinence a) {

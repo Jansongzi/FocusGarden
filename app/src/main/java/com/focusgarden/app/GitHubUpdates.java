@@ -83,13 +83,27 @@ final class GitHubUpdates {
     }
 
     static Release latestUpdate(String installedVersion) throws Exception {
+        return latestUpdate(installedVersion, () -> giteeRelease("latest"), () -> latest(DEFAULT_REPOSITORY));
+    }
+
+    static Release latestUpdate(String installedVersion, Callable<Release> domestic, Callable<Release> github)
+            throws Exception {
         return trySources(() -> {
-            Release release = giteeRelease("latest");
-            if (UpdateRules.compare(release.version, installedVersion) < 0) {
+            Release release = domestic.call();
+            int comparison = UpdateRules.compare(release.version, installedVersion);
+            if (comparison < 0) {
                 throw new IOException("国内更新源版本落后");
             }
+            if (comparison == 0) {
+                try {
+                    Release alternate = github.call();
+                    if (UpdateRules.compare(alternate.version, release.version) > 0) return alternate;
+                } catch (Exception ignored) {
+                    // The domestic source already confirmed the installed version.
+                }
+            }
             return release;
-        }, () -> latest(DEFAULT_REPOSITORY));
+        }, github);
     }
 
     static <T> T trySources(Callable<T> domestic, Callable<T> github) throws Exception {

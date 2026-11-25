@@ -1,6 +1,7 @@
 package com.focusgarden.app;
 
 import static com.focusgarden.app.GardenUi.*;
+import static com.focusgarden.app.MainActivity.setTextIfChanged;
 
 import android.app.Dialog;
 import android.content.Context;
@@ -11,24 +12,17 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
-import android.graphics.SweepGradient;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputFilter;
 import android.text.InputType;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
-import android.view.Window;
-import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -37,12 +31,16 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 final class AbstinenceUi {
     static final int[] MILESTONE_DAYS = {1, 3, 7, 14, 30, 60, 90, 180, 270, 365};
@@ -109,18 +107,6 @@ final class AbstinenceUi {
         return 0xff5eead4;
     }
 
-    static String formatHeroDuration(long ms) {
-        long sec = Math.max(0L, ms / 1000L);
-        long days = sec / 86_400L;
-        long hrs = (sec % 86_400L) / 3600L;
-        long mins = (sec % 3600L) / 60L;
-        long secs = sec % 60L;
-        if (days > 0L) {
-            return String.format(Locale.ROOT, "%d 天 %02d时%02d分%02d秒", days, hrs, mins, secs);
-        }
-        return String.format(Locale.ROOT, "%02d时%02d分%02d秒", hrs, mins, secs);
-    }
-
     static String formatSummaryDuration(long ms) {
         long mins = Math.max(0L, ms / 60_000L);
         if (mins < 60L) return mins + "m";
@@ -138,473 +124,361 @@ final class AbstinenceUi {
         return STARTED_FMT.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()));
     }
 
-    static String stageLabel(long elapsedMs) {
-        long days = elapsedMs / 86_400_000L;
-        if (days >= 30) return "繁茂成林";
-        if (days >= 7) return "枝叶渐丰";
-        if (days >= 3) return "稳步拔节";
-        if (days >= 1) return "初露新芽";
-        return "破土蓄力";
-    }
+    static final class Dashboard extends LinearLayout {
+        private final FocusState state;
+        private final FocusState.Abstinence item;
+        private final GoalRing ring;
+        private final TextView days;
+        private final TextView clock;
+        private final TextView remaining;
+        private final TextView progress;
+        private final TextView longest;
+        private final TextView saving;
 
-    static void showDetail(MainActivity activity, FocusState state, String id, Runnable onChanged) {
-        FocusState.Abstinence initial = state.abstinences.get(id);
-        if (initial == null) return;
+        Dashboard(MainActivity activity, FocusState state, FocusState.Abstinence item, LocalDate date,
+                  Consumer<LocalDate> onSelectedDate, Runnable onChanged) {
+            super(activity);
+            this.state = state;
+            this.item = item;
+            setOrientation(VERTICAL);
 
-        Dialog dialog = new Dialog(activity, isDark()
-                ? android.R.style.Theme_Material_NoActionBar
-                : android.R.style.Theme_Material_Light_NoActionBar);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+            TextView name = text(activity, item.name, 30, INK, true);
+            if (Build.VERSION.SDK_INT >= 28) name.setAccessibilityHeading(true);
+            name.setPadding(0, 0, dp(activity, 48), 0);
+            addView(name, -1, -2);
+            gap(this, 4);
+            addView(text(activity, "始于 " + formatStartedAt(item.startedMs), 12, MUTED, false));
+            gap(this, 19);
 
-        LinearLayout root = column(activity);
-        root.setBackgroundColor(PAPER);
-        root.setPadding(dp(activity, 18), dp(activity, 14), dp(activity, 18), dp(activity, 18));
-        root.setOnApplyWindowInsetsListener((view, insets) -> {
-            if (Build.VERSION.SDK_INT >= 30) {
-                var e = insets.getInsets(android.view.WindowInsets.Type.systemBars()
-                        | android.view.WindowInsets.Type.displayCutout());
-                view.setPadding(e.left + dp(activity, 18), e.top + dp(activity, 12),
-                        e.right + dp(activity, 18), e.bottom + dp(activity, 14));
-            } else {
-                view.setPadding(insets.getSystemWindowInsetLeft() + dp(activity, 18),
-                        insets.getSystemWindowInsetTop() + dp(activity, 12),
-                        insets.getSystemWindowInsetRight() + dp(activity, 18),
-                        insets.getSystemWindowInsetBottom() + dp(activity, 14));
+            String target = "目标 " + FocusSheets.formatAbstinenceTarget(item.targetHours);
+            String stage = String.format(Locale.ROOT, "第 %02d 阶段 · %s", item.completedCount + 1, target);
+            addView(sectionHeading(activity, "当前目标", stage));
+            gap(this, 10);
+
+            LinearLayout goal = dashboardCard(activity);
+            FrameLayout clockFace = new FrameLayout(activity);
+            int screenWidth = activity.getResources().getConfiguration().screenWidthDp;
+            int size = dp(activity, Math.min(230, Math.max(172, screenWidth * 0.54f)));
+            LayoutParams faceParams = new LayoutParams(size, size);
+            faceParams.gravity = Gravity.CENTER_HORIZONTAL;
+            ring = new GoalRing(activity);
+            clockFace.addView(ring, new FrameLayout.LayoutParams(-1, -1));
+
+            LinearLayout face = column(activity);
+            face.setGravity(Gravity.CENTER);
+            face.addView(text(activity, "已坚持", 12, MUTED, false), -2, -2);
+            LinearLayout dayLine = row(activity);
+            dayLine.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+            days = number(activity, "", 47, INK);
+            days.setIncludeFontPadding(false);
+            dayLine.addView(days);
+            space(dayLine, 4);
+            TextView dayUnit = text(activity, "天", 19, INK, true);
+            dayUnit.setPadding(0, 0, 0, dp(activity, 4));
+            dayLine.addView(dayUnit);
+            face.addView(dayLine, -1, -2);
+            gap(face, 7);
+            clock = number(activity, "", 22, INK_SUB);
+            face.addView(clock, -2, -2);
+            gap(face, 9);
+            face.addView(text(activity, target, 12, MUTED, false), -2, -2);
+            clockFace.addView(face, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+            goal.addView(clockFace, faceParams);
+            gap(goal, 9);
+
+            TextView reason = iconLabel(activity, item.reason.isEmpty() ? "记住为何开始，专注当下。" : item.reason,
+                    R.drawable.ic_target, INK_SUB, 15);
+            reason.setGravity(Gravity.CENTER);
+            reason.setPadding(dp(activity, 10), dp(activity, 4), dp(activity, 10), dp(activity, 4));
+            reason.setOnClickListener(v -> {
+                tapHaptic(v);
+                showReasonDialog(activity, item, onChanged);
+            });
+            goal.addView(reason, -2, -2);
+            ((LayoutParams) reason.getLayoutParams()).gravity = Gravity.CENTER_HORIZONTAL;
+            gap(goal, 12);
+            divider(goal);
+            gap(goal, 10);
+
+            LinearLayout deadline = row(activity);
+            weight(deadline, iconLabel(activity, "距离目标", R.drawable.ic_clock, MUTED, 13));
+            remaining = number(activity, "", 18, INK);
+            remaining.setGravity(Gravity.END);
+            deadline.addView(remaining);
+            goal.addView(deadline);
+            gap(goal, 13);
+
+            LinearLayout stats = row(activity);
+            stats.setGravity(Gravity.TOP);
+            stats.setPadding(dp(activity, 4), dp(activity, 10), dp(activity, 4), dp(activity, 10));
+            stats.setBackground(shape(activity, SURFACE_SUBTLE, 14));
+            progress = addStat(stats, "阶段完成度", INK, true);
+            longest = addStat(stats, "历史最长", INK, true);
+            addStat(stats, "本阶奖励", BLUE, false).setText("+" + item.rewardMinutes + " 分钟");
+            goal.addView(stats);
+
+            saving = item.dailySavingYuan > 0.001 ? text(activity, "", 12, MUTED, false) : null;
+            if (saving != null) {
+                gap(goal, 6);
+                goal.addView(saving);
             }
-            return insets;
-        });
+            gap(goal, 11);
 
-        final int[] tabIdx = {0};
-        final YearMonth[] calMonth = {YearMonth.now()};
-        final Handler uiHandler = new Handler(Looper.getMainLooper());
-        final TextView[] liveDur = {null};
-        final AbstinenceRingView[] liveRing = {null};
-        final SproutStageView[] liveSprout = {null};
-        final boolean[] dismissing = {false};
+            LinearLayout actions = row(activity);
+            weight(actions, dashboardAction(activity, "冷静一下", R.drawable.ic_shield, RED_SOFT, RED, redStroke(),
+                    () -> showUrgeRescueDialog(activity, state, item, onChanged)));
+            space(actions, 9);
+            weight(actions, dashboardAction(activity, "日记与趋势", R.drawable.ic_timeline, BLUE_SOFT, BLUE, blueStroke(),
+                    () -> showDiaryAndTrends(activity, state, item, true, onChanged)));
+            goal.addView(actions);
+            addView(goal);
+            gap(this, 10);
 
-        Runnable closeAnim = () -> {
-            if (dismissing[0]) return;
-            dismissing[0] = true;
-            if (RedeemUi.reducedMotion(activity)) {
-                dialog.dismiss();
-                return;
-            }
-            root.animate().alpha(0f).translationY(dp(activity, 24)).setDuration(150)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .withEndAction(dialog::dismiss).start();
-        };
+            addView(dashboardLink(activity, "查看目标与成就", "阶段目标、里程碑与奖励", R.drawable.ic_target,
+                    () -> showAchievements(activity, state, item, onChanged)));
+            gap(this, 17);
+            addView(sectionHeading(activity, "日记", "坚持与情绪记录"));
+            gap(this, 10);
+            addView(new DiaryCalendar(activity, state, item, date, onSelectedDate, onChanged));
+            gap(this, 10);
+            addView(dashboardLink(activity, "查看全部日记", "回顾记录与情绪变化", R.drawable.ic_timeline,
+                    () -> showDiaryAndTrends(activity, state, item, false, onChanged)));
+            update(System.currentTimeMillis());
+        }
 
-        // Top Bar (unified Focus Garden square action tiles)
-        LinearLayout topBar = row(activity);
-        FrameLayout backBtn = new FrameLayout(activity);
-        backBtn.setBackground(touchCard(activity, CARD, BORDER, 12));
-        backBtn.setContentDescription("返回戒断主页");
-        ImageView backIv = iconView(activity, R.drawable.ic_chevron_right, 18, INK);
-        backIv.setScaleX(-1f);
-        FrameLayout.LayoutParams backLp = new FrameLayout.LayoutParams(dp(activity, 18), dp(activity, 18), Gravity.CENTER);
-        backBtn.addView(backIv, backLp);
-        backBtn.setOnClickListener(v -> {
-            tapHaptic(v);
-            closeAnim.run();
-        });
-        topBar.addView(backBtn, dp(activity, 38), dp(activity, 38));
-        space(topBar, 12);
-
-        LinearLayout titleCol = column(activity);
-        TextView titleTv = text(activity, initial.name, 18, INK, true);
-        titleTv.setSingleLine(true);
-        titleTv.setEllipsize(TextUtils.TruncateAt.END);
-        titleCol.addView(titleTv);
-        TextView subTitleTv = text(activity, "", 11, MUTED, false);
-        subTitleTv.setSingleLine(true);
-        titleCol.addView(subTitleTv);
-        weight(topBar, titleCol);
-        space(topBar, 10);
-
-        FrameLayout editBtn = new FrameLayout(activity);
-        editBtn.setBackground(touchCard(activity, CARD, BORDER, 12));
-        editBtn.setContentDescription("编辑戒断设置");
-        FrameLayout.LayoutParams editLp = new FrameLayout.LayoutParams(dp(activity, 18), dp(activity, 18), Gravity.CENTER);
-        editBtn.addView(iconView(activity, R.drawable.ic_edit, 18, BLUE), editLp);
-        topBar.addView(editBtn, dp(activity, 38), dp(activity, 38));
-        root.addView(topBar);
-        gap(root, 12);
-
-        LinearLayout segWrap = row(activity);
-        segWrap.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 14));
-        segWrap.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-        root.addView(segWrap, -1, -2);
-        gap(root, 14);
-
-        ScrollView scroll = new ScrollView(activity);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setClipToPadding(false);
-        LinearLayout content = column(activity);
-        content.setPadding(0, 0, 0, dp(activity, 20));
-        scroll.addView(content, -1, -2);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-
-        Runnable[] render = new Runnable[1];
-        Runnable syncData = () -> {
-            onChanged.run();
-            if (state.abstinences.containsKey(id)) render[0].run();
-            else dialog.dismiss();
-        };
-
-        editBtn.setOnClickListener(v -> {
-            FocusState.Abstinence cur = state.abstinences.get(id);
-            if (cur == null) return;
-            tapHaptic(v);
-            FocusSheets.showAbstinenceEditor(activity, state, id, cur, syncData);
-        });
-
-        render[0] = () -> {
-            FocusState.Abstinence item = state.abstinences.get(id);
-            if (item == null) {
-                dialog.dismiss();
-                return;
-            }
-            long now = System.currentTimeMillis();
-            ZoneId zone = ZoneId.systemDefault();
+        void update(long now) {
             long elapsed = state.abstinenceElapsedMs(item, now);
             long target = state.abstinenceTargetMs(item);
-            float ratio = target <= 0L ? 1f : Math.min(1f, (float) elapsed / target);
-            int pct = target <= 0L ? 100 : (int) Math.min(100L, elapsed * 100L / target);
-
-            titleTv.setText(item.name);
-            subTitleTv.setText(stageLabel(elapsed) + " · 始于 " + formatStartedAt(item.startedMs));
-
-            segWrap.removeAllViews();
-            String[] tabLabels = {"总览", "趋势", "成就与奖励"};
-            for (int i = 0; i < tabLabels.length; i++) {
-                int idx = i;
-                boolean active = tabIdx[0] == idx;
-                TextView t = text(activity, tabLabels[i], 13, active ? BLUE : MUTED, active);
-                t.setGravity(Gravity.CENTER);
-                t.setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8));
-                t.setBackground(active ? cardBg(activity, CARD, BORDER, 10) : null);
-                t.setOnClickListener(v -> {
-                    if (tabIdx[0] != idx) {
-                        tapHaptic(v);
-                        tabIdx[0] = idx;
-                        render[0].run();
-                    }
-                });
-                segWrap.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
+            double ratio = target <= 0 ? 1 : Math.min(1, (double) elapsed / target);
+            ring.update((float) ratio);
+            setTextIfChanged(days, Long.toString(elapsed / 86_400_000L));
+            setTextIfChanged(clock, timeOfDay(elapsed / 1000L));
+            long secondsLeft = (Math.max(0L, target - elapsed) + 999) / 1000;
+            long daysLeft = secondsLeft / 86_400L;
+            setTextIfChanged(remaining, secondsLeft == 0 ? "已达目标"
+                    : (daysLeft > 0 ? daysLeft + "天 " : "") + timeOfDay(secondsLeft));
+            setTextIfChanged(progress, String.format(Locale.ROOT, "%.1f%%", ratio * 100));
+            long best = Math.max(item.longestMs, elapsed);
+            long bestDays = best / 86_400_000L;
+            long bestHours = best / 3_600_000L;
+            setTextIfChanged(longest, bestDays > 0 ? bestDays + "天" + bestHours % 24 + "时"
+                    : bestHours > 0 ? bestHours + "小时" : best / 60_000L + "分钟");
+            if (saving != null) {
+                setTextIfChanged(saving, String.format(Locale.ROOT, "预计节省 ¥%.2f",
+                        elapsed / 86_400_000.0 * item.dailySavingYuan));
             }
-
-            content.removeAllViews();
-            liveDur[0] = null;
-            liveRing[0] = null;
-            liveSprout[0] = null;
-
-            if (tabIdx[0] == 0) {
-                renderOverviewTab(activity, state, item, now, zone, elapsed, ratio, pct,
-                        calMonth, content, liveDur, liveRing, liveSprout, render[0], syncData);
-            } else if (tabIdx[0] == 1) {
-                renderTrendsTab(activity, state, item, now, zone, elapsed, content);
-            } else {
-                renderRewardsTab(activity, state, item, now, zone, elapsed, content, syncData);
-            }
-        };
-
-        Runnable liveTicker = new Runnable() {
-            @Override
-            public void run() {
-                if (!dialog.isShowing()) return;
-                FocusState.Abstinence item = state.abstinences.get(id);
-                if (item != null && tabIdx[0] == 0) {
-                    long now = System.currentTimeMillis();
-                    long elapsed = state.abstinenceElapsedMs(item, now);
-                    long target = state.abstinenceTargetMs(item);
-                    float ratio = target <= 0L ? 1f : Math.min(1f, (float) elapsed / target);
-                    int pct = target <= 0L ? 100 : (int) Math.min(100L, elapsed * 100L / target);
-                    if (liveDur[0] != null) liveDur[0].setText(formatHeroDuration(elapsed));
-                    if (liveRing[0] != null) liveRing[0].update(ratio, pct);
-                    if (liveSprout[0] != null) liveSprout[0].update(elapsed);
-                }
-                uiHandler.postDelayed(this, 1000L);
-            }
-        };
-
-        render[0].run();
-        dialog.setOnCancelListener(d -> uiHandler.removeCallbacksAndMessages(null));
-        dialog.setOnDismissListener(d -> uiHandler.removeCallbacksAndMessages(null));
-        Window win = dialog.getWindow();
-        if (win != null) {
-            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            win.setBackgroundDrawable(shape(activity, PAPER, 0));
-            win.setStatusBarColor(android.graphics.Color.TRANSPARENT);
-            win.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
-            if (Build.VERSION.SDK_INT >= 29) win.setNavigationBarContrastEnforced(false);
-            if (Build.VERSION.SDK_INT >= 30) win.setDecorFitsSystemWindows(false);
         }
-        dialog.setContentView(root);
-        root.requestApplyInsets();
-        dialog.show();
-        if (win != null) {
-            win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            applySystemBars(win, isDark());
-        }
-        if (!RedeemUi.reducedMotion(activity)) {
-            root.setAlpha(0f);
-            root.setTranslationY(dp(activity, 18));
-            root.animate().alpha(1f).translationY(0f).setDuration(190)
-                    .setInterpolator(new DecelerateInterpolator()).start();
-        }
-        uiHandler.postDelayed(liveTicker, 1000L);
     }
 
-    private static void renderOverviewTab(MainActivity activity, FocusState state, FocusState.Abstinence item,
-                                          long now, ZoneId zone, long elapsed, float ratio, int pct,
-                                          YearMonth[] calMonth, LinearLayout content,
-                                          TextView[] liveDur, AbstinenceRingView[] liveRing,
-                                          SproutStageView[] liveSprout, Runnable refreshView, Runnable syncData) {
-        boolean reached = state.abstinenceReached(item, now);
-        boolean canClaim = state.canClaimAbstinence(item, now);
-        long guardRemMs = state.abstinenceGuardRemainingMs(item, now);
-        long capLeftMs = state.remainingHabitCapMs(FocusState.logicDate(now, zone));
-        boolean layFlat = state.isLayFlat();
-        int nextStage = FocusState.nextAbstinenceStageHours(item.targetHours);
+    private static String timeOfDay(long seconds) {
+        return String.format(Locale.ROOT, "%02d:%02d:%02d", seconds / 3600 % 24, seconds / 60 % 60, seconds % 60);
+    }
 
-        // Brand-Blue Focus Garden Hero Card
-        LinearLayout hero = column(activity);
-        hero.setBackground(gradientBg(activity, heroTopColor(), heroBottomColor(), 24));
-        hero.setPadding(dp(activity, 18), dp(activity, 18), dp(activity, 18), dp(activity, 18));
-        elevate(hero, 4);
+    private static LinearLayout dashboardCard(Context context) {
+        LinearLayout card = column(context);
+        card.setBackground(cardBg(context, CARD, BORDER, 22));
+        card.setPadding(dp(context, 17), dp(context, 17), dp(context, 17), dp(context, 17));
+        return card;
+    }
 
-        LinearLayout heroTop = row(activity);
-        SproutStageView sprout = new SproutStageView(activity, true, elapsed);
-        liveSprout[0] = sprout;
-        heroTop.addView(sprout, dp(activity, 34), dp(activity, 34));
-        space(heroTop, 8);
-        weight(heroTop, text(activity, stageLabel(elapsed) + " · 目标 "
-                + FocusSheets.formatAbstinenceTarget(item.targetHours), 13, heroSubColor(), true));
-        TextView cyclePill = pillButton(activity, "第 " + (item.completedCount + 1) + " 阶段",
-                0x28ffffff, ON_ACCENT, 10, 26);
-        heroTop.addView(cyclePill);
-        hero.addView(heroTop);
-        gap(hero, 12);
+    private static LinearLayout sectionHeading(Context context, String title, String subtitle) {
+        LinearLayout line = row(context);
+        TextView heading = text(context, title, 18, INK, true);
+        if (Build.VERSION.SDK_INT >= 28) heading.setAccessibilityHeading(true);
+        line.addView(heading);
+        space(line, 10);
+        TextView detail = text(context, subtitle, 12, MUTED, false);
+        detail.setGravity(Gravity.END);
+        weight(line, detail);
+        return line;
+    }
 
-        LinearLayout heroMid = row(activity);
-        LinearLayout leftCol = column(activity);
-        TextView durTv = text(activity, formatHeroDuration(elapsed), 28, ON_ACCENT, true);
-        durTv.setFontFeatureSettings("tnum");
-        liveDur[0] = durTv;
-        leftCol.addView(durTv);
-        gap(leftCol, 5);
-        leftCol.addView(text(activity, "坚持开始于 " + formatStartedAt(item.startedMs), 12, heroSubColor(), false));
-        weight(heroMid, leftCol);
-        space(heroMid, 12);
-        AbstinenceRingView ring = new AbstinenceRingView(activity, ratio, pct);
-        liveRing[0] = ring;
-        heroMid.addView(ring, dp(activity, 84), dp(activity, 84));
-        hero.addView(heroMid);
-        gap(hero, 14);
+    private static TextView number(Context context, String label, int size, int color) {
+        TextView value = text(context, label, size, color, true);
+        value.setFontFeatureSettings("tnum");
+        return value;
+    }
 
-        // Two frosted stat tiles inside hero
-        LinearLayout tiles = row(activity);
-        boolean showSaving = item.dailySavingYuan > 0.001;
-        String t1Label = showSaving ? "预计节省" : "本阶奖励";
-        String t1Val;
-        if (showSaving) {
-            t1Val = String.format(Locale.ROOT, "¥%.2f", (elapsed / 86_400_000.0) * item.dailySavingYuan);
-        } else if (guardRemMs > 0L) {
-            t1Val = "护盾 " + formatSummaryDuration(guardRemMs);
-        } else if (canClaim && layFlat) {
-            t1Val = "今日暂停";
-        } else if (canClaim && capLeftMs <= 0L) {
-            t1Val = "今日满额";
-        } else if (canClaim) {
-            t1Val = "可领 +" + Math.min(item.rewardMinutes, (int) (capLeftMs / FocusState.MINUTE)) + "分";
-        } else if (reached) {
-            t1Val = "可进阶 " + FocusSheets.formatAbstinenceTarget(nextStage);
-        } else {
-            t1Val = "+" + item.rewardMinutes + " 分钟";
+    private static TextView addStat(LinearLayout stats, String label, int color, boolean separator) {
+        Context context = stats.getContext();
+        LinearLayout tile = column(context);
+        tile.setGravity(Gravity.CENTER_HORIZONTAL);
+        tile.setPadding(dp(context, 3), 0, dp(context, 3), 0);
+        TextView caption = text(context, label, 11, MUTED, false);
+        caption.setGravity(Gravity.CENTER);
+        tile.addView(caption);
+        gap(tile, 5);
+        TextView value = number(context, "", 15, color);
+        value.setGravity(Gravity.CENTER);
+        tile.addView(value);
+        weight(stats, tile);
+        if (separator) {
+            View rule = new View(context);
+            rule.setBackgroundColor(BORDER);
+            stats.addView(rule, dp(context, 1), dp(context, 38));
         }
+        return value;
+    }
 
-        LinearLayout tile1 = column(activity);
-        tile1.setBackground(shape(activity, 0x22ffffff, 14));
-        tile1.setPadding(dp(activity, 13), dp(activity, 10), dp(activity, 13), dp(activity, 10));
-        tile1.addView(text(activity, t1Label, 11, heroSubColor(), false));
-        gap(tile1, 3);
-        TextView t1ValTv = text(activity, t1Val, 16, ON_ACCENT, true);
-        t1ValTv.setFontFeatureSettings("tnum");
-        tile1.addView(t1ValTv);
+    private static void divider(LinearLayout container) {
+        View rule = new View(container.getContext());
+        rule.setBackgroundColor(BORDER);
+        container.addView(rule, -1, dp(container.getContext(), 1));
+    }
 
-        LinearLayout tile2 = column(activity);
-        tile2.setBackground(shape(activity, 0x22ffffff, 14));
-        tile2.setPadding(dp(activity, 13), dp(activity, 10), dp(activity, 13), dp(activity, 10));
-        tile2.addView(text(activity, "历史最长", 11, heroSubColor(), false));
-        gap(tile2, 3);
-        TextView t2ValTv = text(activity, formatSummaryDuration(Math.max(item.longestMs, elapsed)), 16, ON_ACCENT, true);
-        t2ValTv.setFontFeatureSettings("tnum");
-        tile2.addView(t2ValTv);
+    private static TextView iconLabel(Context context, String label, int icon, int color, int size) {
+        TextView view = text(context, label, size, color, true);
+        addLabelIcon(view, icon, color);
+        return view;
+    }
 
-        tiles.addView(tile1, new LinearLayout.LayoutParams(0, -2, 1f));
-        space(tiles, 10);
-        tiles.addView(tile2, new LinearLayout.LayoutParams(0, -2, 1f));
-        hero.addView(tiles);
-        content.addView(hero);
-        gap(content, 12);
+    private static void addLabelIcon(TextView view, int icon, int tint) {
+        var drawable = view.getContext().getDrawable(icon).mutate();
+        drawable.setTint(tint);
+        int size = dp(view.getContext(), 16);
+        drawable.setBounds(0, 0, size, size);
+        view.setCompoundDrawablesRelative(drawable, null, null, null);
+        view.setCompoundDrawablePadding(dp(view.getContext(), 6));
+    }
 
-        // Quick Action Row: Urge Rescue + Context CTA
-        LinearLayout actionRow = row(activity);
-        TextView rescueBtn = pillButton(activity, "冲动救急 · 呼吸与锁机", BLUE_SOFT, BLUE, 14, 44);
-        rescueBtn.setBackground(touchCard(activity, BLUE_SOFT, blueStroke(), 14));
-        rescueBtn.setTextSize(13);
-        rescueBtn.setOnClickListener(v -> {
-            tapHaptic(v);
-            showUrgeRescueDialog(activity, state, item, syncData);
-        });
-        actionRow.addView(rescueBtn, new LinearLayout.LayoutParams(0, dp(activity, 44), 1.15f));
-        space(actionRow, 10);
-
-        if (canClaim) {
-            boolean blocked = layFlat || capLeftMs <= 0L;
-            String claimLabel = layFlat ? "躺平暂停"
-                    : capLeftMs <= 0L ? "明日可领"
-                    : "领 +" + Math.min(item.rewardMinutes, (int) (capLeftMs / FocusState.MINUTE)) + "分";
-            TextView claimBtn = pillButton(activity, claimLabel,
-                    blocked ? SURFACE_SUBTLE : BLUE, blocked ? MUTED : ON_ACCENT, 14, 44);
-            if (blocked) claimBtn.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 14));
-            claimBtn.setTextSize(13);
-            claimBtn.setOnClickListener(v -> {
-                long curNow = System.currentTimeMillis();
-                if (state.isLayFlat()) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    Toast.makeText(activity, "躺平模式当日无法兑换，明日 04:00 恢复", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (state.remainingHabitCapMs(FocusState.logicDate(curNow, zone)) <= 0L) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    Toast.makeText(activity, "今日戒断奖励已达 " + state.habitDailyCapMinutes + " 分钟上限，明日 04:00 后可领",
-                            Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                long gained = state.claimAbstinence(item.id, curNow, zone);
-                if (gained > 0L) {
-                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                    syncData.run();
-                    Toast.makeText(activity, "阶段达标！+" + (gained / FocusState.MINUTE) + " 分钟已存入可用时间",
-                            Toast.LENGTH_SHORT).show();
-                }
-            });
-            actionRow.addView(claimBtn, new LinearLayout.LayoutParams(0, dp(activity, 44), 1f));
-        } else if (reached && guardRemMs <= 0L) {
-            String nextLbl = nextStage > item.targetHours
-                    ? "进阶 " + FocusSheets.formatAbstinenceTarget(nextStage) : "开启新一轮";
-            TextView advBtn = pillButton(activity, nextLbl, GREEN_SOFT, GREEN, 14, 44);
-            advBtn.setBackground(touchCard(activity, GREEN_SOFT, greenStroke(), 14));
-            advBtn.setTextSize(13);
-            advBtn.setOnClickListener(v -> {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                int updated = state.advanceAbstinenceStage(item.id, System.currentTimeMillis(), zone);
-                syncData.run();
-                Toast.makeText(activity, nextStage > item.targetHours
-                        ? "已保留连胜，进阶至 " + FocusSheets.formatAbstinenceTarget(updated) + " 阶段！"
-                        : "已开启新一轮挑战", Toast.LENGTH_SHORT).show();
-            });
-            actionRow.addView(advBtn, new LinearLayout.LayoutParams(0, dp(activity, 44), 1f));
-        } else {
-            TextView relapseBtn = pillButton(activity, "记录破戒", RED_SOFT, RED, 14, 44);
-            relapseBtn.setBackground(touchCard(activity, RED_SOFT, redStroke(), 14));
-            relapseBtn.setTextSize(13);
-            relapseBtn.setOnClickListener(v -> {
-                tapHaptic(v);
-                showRecordRelapseDialog(activity, state, item, syncData);
-            });
-            actionRow.addView(relapseBtn, new LinearLayout.LayoutParams(0, dp(activity, 44), 0.9f));
-        }
-        content.addView(actionRow);
-
-        if (guardRemMs > 0L && reached) {
-            gap(content, 8);
-            LinearLayout guardHint = row(activity);
-            guardHint.setBackground(cardBg(activity, AMBER_SOFT, amberStroke(), 12));
-            guardHint.setPadding(dp(activity, 12), dp(activity, 9), dp(activity, 12), dp(activity, 9));
-            guardHint.addView(iconView(activity, R.drawable.ic_shield, 15, AMBER));
-            space(guardHint, 8);
-            guardHint.addView(text(activity, "起始时间被回溯或目标缩减，奖励护盾保护剩余 "
-                    + formatSummaryDuration(guardRemMs) + "，期满后自动可领。", 12, INK_SUB, false));
-            content.addView(guardHint);
-        }
-
-        if (canClaim || (reached && guardRemMs <= 0L)) {
-            gap(content, 8);
-            TextView linkRelapse = text(activity, "若刚刚不慎破戒，点击这里诚实记录并复盘 ›", 12, RED, false);
-            linkRelapse.setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4));
-            linkRelapse.setOnClickListener(v -> {
-                tapHaptic(v);
-                showRecordRelapseDialog(activity, state, item, syncData);
-            });
-            content.addView(linkRelapse);
-        }
-        gap(content, 14);
-
-        // 初心与理由 Card
-        LinearLayout reasonCard = column(activity);
-        reasonCard.setBackground(cardBg(activity, CARD, BORDER, 18));
-        reasonCard.setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 16), dp(activity, 14));
-        LinearLayout rHead = row(activity);
-        rHead.addView(iconView(activity, R.drawable.ic_target, 16, BLUE));
-        space(rHead, 8);
-        weight(rHead, text(activity, "想改变的理由", 15, INK, true));
-        TextView rEdit = text(activity, item.reason.isEmpty() ? "+ 写下初心" : "编辑", 12, BLUE, true);
-        rEdit.setOnClickListener(v -> {
-            tapHaptic(v);
-            showReasonDialog(activity, item, syncData);
-        });
-        rHead.addView(rEdit);
-        reasonCard.addView(rHead);
-        gap(reasonCard, 8);
-        boolean hasReason = !item.reason.isEmpty();
-        TextView reasonBody = text(activity,
-                hasReason ? item.reason : "写下一句真正触动你的改变理由，下次冲动时会第一时间提醒你。",
-                14, hasReason ? INK : MUTED, false);
-        reasonBody.setOnClickListener(v -> {
-            tapHaptic(v);
-            showReasonDialog(activity, item, syncData);
-        });
-        reasonCard.addView(reasonBody);
-        content.addView(reasonCard);
-        gap(content, 12);
-
-        // Linked Restricted Apps Strip
-        if (!item.linkedPackages.isEmpty()) {
-            LinearLayout linkCard = column(activity);
-            linkCard.setBackground(cardBg(activity, CARD, BORDER, 18));
-            linkCard.setPadding(dp(activity, 16), dp(activity, 13), dp(activity, 16), dp(activity, 13));
-            LinearLayout lHead = row(activity);
-            weight(lHead, text(activity, "关联拦截提醒应用", 14, INK, true));
-            TextView manageLink = text(activity, "调整", 12, BLUE, true);
-            manageLink.setOnClickListener(v -> {
-                tapHaptic(v);
-                FocusSheets.showAbstinenceEditor(activity, state, item.id, item, syncData);
-            });
-            lHead.addView(manageLink);
-            linkCard.addView(lHead);
-            gap(linkCard, 6);
-            StringBuilder labels = new StringBuilder();
-            int shown = 0;
-            for (String pkg : item.linkedPackages) {
-                if (shown > 0) labels.append(" · ");
-                FocusState.Rule rule = state.rules.get(pkg);
-                String lbl = rule != null && !rule.label().isEmpty() ? rule.label() : AppCatalog.labelOf(activity, pkg);
-                labels.append(lbl);
-                shown++;
-                if (shown >= 5 && item.linkedPackages.size() > 5) {
-                    labels.append(" 等 ").append(item.linkedPackages.size()).append(" 项");
-                    break;
-                }
+    private static LinearLayout dashboardAction(Context context, String title, int icon,
+                                                int fill, int ink, int stroke, Runnable action) {
+        LinearLayout btn = row(context);
+        btn.setGravity(Gravity.CENTER);
+        btn.setMinimumHeight(dp(context, 44));
+        btn.setPadding(dp(context, 8), dp(context, 6), dp(context, 8), dp(context, 6));
+        btn.setBackground(touchCard(context, fill, stroke, 12));
+        btn.addView(iconView(context, icon, 16, ink));
+        space(btn, 6);
+        TextView label = text(context, title, 13, ink, true);
+        label.setGravity(Gravity.CENTER);
+        btn.addView(label);
+        btn.setFocusable(true);
+        btn.setContentDescription(title);
+        label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        btn.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host,
+                    android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setClassName(android.widget.Button.class.getName());
             }
-            linkCard.addView(text(activity, "拦截 " + labels + " 时将展示你的连胜与初心", 12, INK_SUB, false));
-            content.addView(linkCard);
-            gap(content, 12);
-        }
+        });
+        btn.setOnClickListener(v -> {
+            tapHaptic(v);
+            action.run();
+        });
+        return btn;
+    }
 
-        // Monthly Relapse Calendar Card
-        content.addView(buildCalendarCard(activity, state, item, calMonth, refreshView, syncData));
+    private static LinearLayout dashboardLink(Context context, String title, String caption,
+                                              int icon, Runnable action) {
+        LinearLayout link = row(context);
+        link.setBackground(touchCard(context, CARD, BORDER, 16));
+        link.setPadding(dp(context, 16), dp(context, 13), dp(context, 16), dp(context, 13));
+        link.addView(iconView(context, icon, 18, BLUE));
+        space(link, 11);
+        LinearLayout label = column(context);
+        label.addView(text(context, title, 15, BLUE, true));
+        gap(label, 3);
+        label.addView(text(context, caption, 12, MUTED, false));
+        weight(link, label);
+        space(link, 8);
+        link.addView(iconView(context, R.drawable.ic_chevron_right, 14, MUTED));
+        link.setFocusable(true);
+        link.setOnClickListener(v -> {
+            tapHaptic(v);
+            action.run();
+        });
+        return link;
+    }
+
+    private static void showAchievements(MainActivity activity, FocusState state, FocusState.Abstinence item,
+                                         Runnable onChanged) {
+        LinearLayout body = column(activity);
+        refreshAchievements(activity, state, item, body, onChanged);
+        bottomSheet(activity, "目标与成就", item.name, body);
+    }
+
+    private static void refreshAchievements(MainActivity activity, FocusState state, FocusState.Abstinence item,
+                                            LinearLayout body, Runnable onChanged) {
+        body.removeAllViews();
+        long now = System.currentTimeMillis();
+        renderRewardsTab(activity, state, item, now, ZoneId.systemDefault(), state.abstinenceElapsedMs(item, now),
+                body, () -> {
+                    onChanged.run();
+                    refreshAchievements(activity, state, item, body, onChanged);
+                });
+    }
+
+    private static void showDiaryAndTrends(MainActivity activity, FocusState state, FocusState.Abstinence item,
+                                           boolean trendsFirst, Runnable onChanged) {
+        LinearLayout body = column(activity);
+        LinearLayout tabs = row(activity);
+        LinearLayout content = column(activity);
+        body.addView(tabs, -1, -2);
+        gap(body, 12);
+        body.addView(content, -1, -2);
+
+        Consumer<Boolean> render = trends -> {
+            content.removeAllViews();
+            for (int i = 0; i < tabs.getChildCount(); i++) {
+                TextView tab = (TextView) tabs.getChildAt(i);
+                boolean selected = (i == 1) == trends;
+                tab.setSelected(selected);
+                tab.setTextColor(selected ? BLUE : INK_SUB);
+                tab.setBackground(touchCard(activity, selected ? BLUE_SOFT : CARD, BORDER, 12));
+            }
+            if (trends) {
+                long now = System.currentTimeMillis();
+                renderTrendsTab(activity, state, item, now, ZoneId.systemDefault(), state.abstinenceElapsedMs(item, now), content);
+            } else {
+                renderDiaryList(activity, state, item, content, onChanged);
+            }
+        };
+
+        for (String name : new String[]{"全部日记", "趋势"}) {
+            TextView tab = pillButton(activity, name, CARD, INK_SUB, 12, 40);
+            tab.setOnClickListener(v -> {
+                tapHaptic(v);
+                render.accept("趋势".equals(name));
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1f);
+            if (tabs.getChildCount() == 1) params.setMarginStart(dp(activity, 8));
+            tabs.addView(tab, params);
+        }
+        render.accept(trendsFirst);
+        bottomSheet(activity, "日记与趋势", item.name, body);
+    }
+
+    private static void renderDiaryList(MainActivity activity, FocusState state, FocusState.Abstinence item,
+                                        LinearLayout content, Runnable onChanged) {
+        content.removeAllViews();
+        TreeSet<String> dates = new TreeSet<>(Comparator.reverseOrder());
+        dates.addAll(item.diaryNotes.keySet());
+        dates.addAll(item.diaryTriggers.keySet());
+        dates.addAll(item.relapseDates);
+        if (dates.isEmpty()) {
+            content.addView(text(activity, "还没有日记。可以在日历中选一天，记下当时的想法。", 14, MUTED, false));
+        }
+        for (String key : dates) {
+            LocalDate date;
+            try {
+                date = LocalDate.parse(key);
+            } catch (DateTimeParseException ignored) {
+                continue;
+            }
+            if (date.isAfter(LocalDate.now())) continue;
+            String status = item.relapseDates.contains(key) ? " · 破戒" : "";
+            String trigger = item.diaryTriggers.getOrDefault(key, "");
+            if (!trigger.isEmpty()) status += " · " + trigger;
+            LinearLayout entry = dashboardLink(activity, date + status, item.diaryNotes.getOrDefault(key, "查看当天记录"),
+                    R.drawable.ic_timeline, () -> showDateDiaryDialog(activity, state, item, date, () -> {
+                        onChanged.run();
+                        renderDiaryList(activity, state, item, content, onChanged);
+                    }));
+            content.addView(entry);
+            gap(content, 8);
+        }
     }
 
     private static void renderTrendsTab(MainActivity activity, FocusState state, FocusState.Abstinence item,
@@ -830,100 +704,162 @@ final class AbstinenceUi {
         content.addView(buildMilestonesCard(activity, item, elapsed));
     }
 
-    private static LinearLayout buildCalendarCard(MainActivity activity, FocusState state, FocusState.Abstinence item,
-                                                  YearMonth[] calMonth, Runnable refreshView, Runnable syncData) {
-        LinearLayout card = column(activity);
-        card.setBackground(cardBg(activity, CARD, BORDER, 20));
-        card.setPadding(dp(activity, 16), dp(activity, 16), dp(activity, 16), dp(activity, 14));
+    private static final class DiaryCalendar extends LinearLayout {
+        private final MainActivity activity;
+        private final FocusState state;
+        private final FocusState.Abstinence item;
+        private final Consumer<LocalDate> onSelectedDate;
+        private final Runnable onChanged;
+        private LocalDate selected;
+        private YearMonth shownMonth;
 
-        LinearLayout header = row(activity);
-        weight(header, text(activity, "复发与情绪日记", 16, INK, true));
-
-        TextView prevM = pillButton(activity, "‹", SURFACE_SUBTLE, INK, 10, 30);
-        prevM.setPadding(dp(activity, 10), 0, dp(activity, 10), 0);
-        prevM.setOnClickListener(v -> {
-            tapHaptic(v);
-            calMonth[0] = calMonth[0].minusMonths(1);
-            refreshView.run();
-        });
-        String mTitle = calMonth[0].getYear() + "年" + calMonth[0].getMonthValue() + "月";
-        TextView monthLabel = text(activity, mTitle, 13, INK_SUB, true);
-        monthLabel.setPadding(dp(activity, 8), 0, dp(activity, 8), 0);
-        boolean canNext = calMonth[0].isBefore(YearMonth.now());
-        TextView nextM = pillButton(activity, "›", SURFACE_SUBTLE, canNext ? INK : MUTED, 10, 30);
-        nextM.setPadding(dp(activity, 10), 0, dp(activity, 10), 0);
-        nextM.setOnClickListener(v -> {
-            if (!canNext) {
-                tapHaptic(v);
-                return;
-            }
-            tapHaptic(v);
-            calMonth[0] = calMonth[0].plusMonths(1);
-            refreshView.run();
-        });
-        header.addView(prevM);
-        header.addView(monthLabel);
-        header.addView(nextM);
-        card.addView(header);
-        gap(card, 12);
-
-        String[] weekdays = {"一", "二", "三", "四", "五", "六", "日"};
-        LinearLayout wRow = row(activity);
-        for (String wd : weekdays) {
-            TextView tv = text(activity, wd, 11, MUTED, true);
-            tv.setGravity(Gravity.CENTER);
-            wRow.addView(tv, new LinearLayout.LayoutParams(0, -2, 1f));
+        DiaryCalendar(MainActivity activity, FocusState state, FocusState.Abstinence item, LocalDate date,
+                      Consumer<LocalDate> onSelectedDate, Runnable onChanged) {
+            super(activity);
+            this.activity = activity;
+            this.state = state;
+            this.item = item;
+            this.onSelectedDate = onSelectedDate;
+            this.onChanged = onChanged;
+            selected = date == null || date.isAfter(LocalDate.now()) ? LocalDate.now() : date;
+            shownMonth = YearMonth.from(selected);
+            setOrientation(VERTICAL);
+            setBackground(cardBg(activity, CARD, BORDER, 22));
+            setPadding(dp(activity, 15), dp(activity, 15), dp(activity, 15), dp(activity, 14));
+            render();
         }
-        card.addView(wRow);
-        gap(card, 6);
 
-        LocalDate today = LocalDate.now();
-        LocalDate startDate = state.abstinenceFirstTrackedDay(item, ZoneId.systemDefault());
-        LocalDate first = calMonth[0].atDay(1);
-        int offset = first.getDayOfWeek().getValue() - 1;
-        int len = calMonth[0].lengthOfMonth();
-        int totalCells = ((offset + len + 6) / 7) * 7;
+        private void render() {
+            removeAllViews();
+            LocalDate today = LocalDate.now();
+            LocalDate firstTrackedDay = state.abstinenceFirstTrackedDay(item, ZoneId.systemDefault());
+            LinearLayout month = row(activity);
+            month.addView(monthButton("‹", "上个月", shownMonth.minusMonths(1), true), dp(activity, 34), -2);
+            TextView title = text(activity, shownMonth.getYear() + "年" + shownMonth.getMonthValue() + "月", 16, INK, true);
+            title.setGravity(Gravity.CENTER);
+            weight(month, title);
+            month.addView(monthButton("›", "下个月", shownMonth.plusMonths(1), shownMonth.isBefore(YearMonth.from(today))),
+                    dp(activity, 34), -2);
+            addView(month);
+            gap(this, 12);
 
-        int monthRelapseCount = 0;
-        LinearLayout weekRow = null;
-        for (int cell = 0; cell < totalCells; cell++) {
-            if (cell % 7 == 0) {
-                weekRow = row(activity);
-                card.addView(weekRow);
-                gap(card, 4);
+            LinearLayout weekdayRow = row(activity);
+            for (String weekday : new String[]{"一", "二", "三", "四", "五", "六", "日"}) {
+                TextView name = text(activity, weekday, 12, MUTED, false);
+                name.setGravity(Gravity.CENTER);
+                weight(weekdayRow, name);
             }
-            int dayNum = cell - offset + 1;
-            if (dayNum < 1 || dayNum > len) {
-                View blank = new View(activity);
-                weekRow.addView(blank, new LinearLayout.LayoutParams(0, dp(activity, 38), 1f));
-            } else {
-                LocalDate d = calMonth[0].atDay(dayNum);
-                String key = d.toString();
-                boolean future = d.isAfter(today);
-                boolean relapsed = item.relapseDates.contains(key);
-                boolean hasDiary = item.diaryNotes.containsKey(key) || item.diaryTriggers.containsKey(key);
-                boolean isToday = d.equals(today);
-                boolean cleanDay = !future && !relapsed && startDate != null && !d.isBefore(startDate);
-                if (relapsed) monthRelapseCount++;
-                CalendarDayView cellView = new CalendarDayView(
-                        activity, dayNum, relapsed, hasDiary, cleanDay, isToday, future);
-                cellView.setContentDescription(d.getMonthValue() + "月" + dayNum + "日"
-                        + (relapsed ? "，已记录破戒" : (cleanDay ? "，保持清醒" : ""))
-                        + (hasDiary ? "，有日记" : ""));
-                if (!future) {
-                    cellView.setOnClickListener(v -> {
-                        tapHaptic(v);
-                        showDateDiaryDialog(activity, state, item, d, syncData);
-                    });
+            addView(weekdayRow);
+            gap(this, 5);
+
+            LocalDate first = shownMonth.atDay(1);
+            LocalDate firstCell = first.minusDays(first.getDayOfWeek().getValue() - 1L);
+            for (int week = 0; week < 6; week++) {
+                LinearLayout line = row(activity);
+                for (int day = 0; day < 7; day++) {
+                    LocalDate date = firstCell.plusDays(week * 7L + day);
+                    String key = date.toString();
+                    boolean dimmed = !YearMonth.from(date).equals(shownMonth) || date.isAfter(today);
+                    boolean relapse = !dimmed && item.relapseDates.contains(key);
+                    boolean hasDiary = !dimmed && (item.diaryNotes.containsKey(key) || item.diaryTriggers.containsKey(key));
+                    boolean clean = !dimmed && !relapse && firstTrackedDay != null && !date.isBefore(firstTrackedDay);
+                    boolean active = date.equals(selected);
+                    CalendarDayView cell = new CalendarDayView(activity, date.getDayOfMonth(), relapse,
+                            hasDiary, clean, active, dimmed);
+                    if (!dimmed) {
+                        cell.setContentDescription(formatDay(date) + (relapse ? "，已记录破戒" : (clean ? "，坚持" : ""))
+                                + (hasDiary ? "，有日记" : ""));
+                        cell.setSelected(active);
+                        cell.setFocusable(true);
+                        cell.setOnClickListener(v -> {
+                            tapHaptic(v);
+                            select(date);
+                        });
+                    } else {
+                        cell.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+                    }
+                    line.addView(cell, new LayoutParams(0, dp(activity, 43), 1f));
                 }
-                weekRow.addView(cellView, new LinearLayout.LayoutParams(0, dp(activity, 38), 1f));
+                addView(line);
             }
+            gap(this, 10);
+
+            LinearLayout legend = row(activity);
+            String[] labels = {"坚持", "选中", "破戒", "未记录"};
+            int[] colors = {isDark() ? BLUE_SOFT : 0xffadc7f4, BLUE, RED, LINE};
+            for (int i = 0; i < labels.length; i++) {
+                LinearLayout item = row(activity);
+                item.setGravity(Gravity.CENTER);
+                View dot = new View(activity);
+                dot.setBackground(shape(activity, colors[i], 5));
+                item.addView(dot, dp(activity, 7), dp(activity, 7));
+                space(item, 4);
+                item.addView(text(activity, labels[i], 11, MUTED, false));
+                weight(legend, item);
+            }
+            addView(legend);
+            gap(this, 12);
+            divider(this);
+            gap(this, 11);
+
+            String key = selected.toString();
+            String note = item.diaryNotes.getOrDefault(key, "");
+            String trigger = item.diaryTriggers.getOrDefault(key, "");
+            boolean hasRecord = !note.isEmpty() || !trigger.isEmpty() || item.relapseDates.contains(key);
+            String status = !note.isEmpty() ? "已有日记" : hasRecord ? "已有记录" : "暂无日记";
+            LinearLayout summary = row(activity);
+            weight(summary, text(activity, formatDay(selected) + " · " + status, 12, MUTED, false));
+            space(summary, 8);
+            LinearLayout write = dashboardAction(activity, hasRecord ? "编辑日记" : "写日记", R.drawable.ic_edit,
+                    BLUE_SOFT, BLUE, blueStroke(), () -> showDateDiaryDialog(activity, state, item, selected, onChanged));
+            summary.addView(write, -2, -2);
+            addView(summary);
+            if (!note.isEmpty() || !trigger.isEmpty()) {
+                gap(this, 6);
+                TextView preview = text(activity, note.isEmpty() ? "诱因 · " + trigger : note, 13, INK_SUB, false);
+                preview.setMaxLines(2);
+                preview.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                addView(preview, -1, -2);
+            }
+            gap(this, 11);
+            LinearLayout reset = dashboardAction(activity, "记录破戒并重置计时", R.drawable.ic_clock,
+                    isDark() ? 0xffad3242 : 0xffd43643, 0xffffffff, redStroke(),
+                    () -> showRecordRelapseDialog(activity, state, item, () -> {
+                        onSelectedDate.accept(LocalDate.now());
+                        onChanged.run();
+                    }));
+            addView(reset, -1, -2);
+            gap(this, 8);
+            TextView foot = text(activity, "记录本次经历，确认后重新开始计时", 11, MUTED, false);
+            foot.setGravity(Gravity.CENTER);
+            addView(foot, -1, -2);
         }
-        gap(card, 4);
-        LinearLayout foot = row(activity);
-        foot.addView(text(activity, "点击日期记录复盘 · 本月破戒 " + monthRelapseCount + " 天", 11, MUTED, false));
-        card.addView(foot);
-        return card;
+
+        private TextView monthButton(String arrow, String description, YearMonth month, boolean enabled) {
+            TextView button = pillButton(activity, arrow, SURFACE_SUBTLE, enabled ? INK_SUB : MUTED, 11, 34);
+            button.setContentDescription(description);
+            button.setTextSize(20);
+            button.setPadding(0, 0, 0, 0);
+            button.setEnabled(enabled);
+            button.setOnClickListener(v -> {
+                if (!enabled) return;
+                tapHaptic(v);
+                LocalDate today = LocalDate.now();
+                select(month.equals(YearMonth.from(today)) ? today : month.atDay(Math.min(selected.getDayOfMonth(), month.lengthOfMonth())));
+            });
+            return button;
+        }
+
+        private void select(LocalDate date) {
+            selected = date;
+            shownMonth = YearMonth.from(date);
+            onSelectedDate.accept(date);
+            render();
+        }
+    }
+
+    private static String formatDay(LocalDate date) {
+        return date.getMonthValue() + "月" + date.getDayOfMonth() + "日";
     }
 
     private static LinearLayout buildMilestonesCard(Context context, FocusState.Abstinence item, long elapsed) {
@@ -1333,84 +1269,38 @@ final class AbstinenceUi {
         }
     }
 
-    static final class AbstinenceRingView extends View {
+    private static final class GoalRing extends View {
         private float progress;
-        private int pct;
-        private int lastW = -1;
-        private SweepGradient sweep;
-        private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint capPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF oval = new RectF();
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF arc = new RectF();
 
-        AbstinenceRingView(Context context, float progress, int pct) {
+        GoalRing(Context context) {
             super(context);
-            this.progress = Math.max(0f, Math.min(1f, progress));
-            this.pct = Math.max(0, Math.min(100, pct));
-
-            trackPaint.setStyle(Paint.Style.STROKE);
-            trackPaint.setColor(0x36ffffff);
-
-            arcPaint.setStyle(Paint.Style.STROKE);
-            arcPaint.setStrokeCap(Paint.Cap.ROUND);
-
-            textPaint.setColor(ON_ACCENT);
-            textPaint.setTextAlign(Paint.Align.CENTER);
-            textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-
-            capPaint.setColor(0xd0e2efff);
-            capPaint.setTextAlign(Paint.Align.CENTER);
+            setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
         }
 
-        void update(float progress, int pct) {
-            float clamped = Math.max(0f, Math.min(1f, progress));
-            int clampedPct = Math.max(0, Math.min(100, pct));
-            if (Math.abs(clamped - this.progress) >= 0.002f || clampedPct != this.pct) {
-                this.progress = clamped;
-                this.pct = clampedPct;
+        void update(float value) {
+            if (progress != value) {
+                progress = value;
                 invalidate();
             }
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
-            float w = getWidth();
-            float h = getHeight();
-            float size = Math.min(w, h);
-            if (size <= 0f) return;
-
-            float stroke = Math.max(4f, size * 0.105f);
-            trackPaint.setStrokeWidth(stroke);
-            arcPaint.setStrokeWidth(stroke);
-            float pad = stroke * 0.65f;
-            float cx = w * 0.5f;
-            float cy = h * 0.5f;
-            float r = size * 0.5f - pad;
-            oval.set(cx - r, cy - r, cx + r, cy + r);
-
-            if ((int) w != lastW || sweep == null) {
-                lastW = (int) w;
-                sweep = new SweepGradient(cx, cy,
-                        new int[]{heroMintColor(), 0xffffffff, 0xff9ec5ff, heroMintColor()},
-                        new float[]{0f, 0.45f, 0.8f, 1f});
-                arcPaint.setShader(sweep);
+            float size = Math.min(getWidth(), getHeight());
+            float stroke = size * .055f;
+            float pad = stroke * .5f + 1;
+            arc.set(pad, pad, getWidth() - pad, getHeight() - pad);
+            paint.setStrokeWidth(stroke);
+            paint.setColor(isDark() ? LINE : 0xffe4ebf7);
+            canvas.drawOval(arc, paint);
+            if (progress > 0f) {
+                paint.setColor(BLUE);
+                canvas.drawArc(arc, -90f, 360f * progress, false, paint);
             }
-
-            canvas.drawArc(oval, 0f, 360f, false, trackPaint);
-            float sweepDeg = progress > 0f ? Math.max(8f, 360f * progress) : 0f;
-            if (sweepDeg > 0f) {
-                canvas.save();
-                canvas.rotate(-90f, cx, cy);
-                canvas.drawArc(oval, 0f, sweepDeg, false, arcPaint);
-                canvas.restore();
-            }
-
-            textPaint.setTextSize(size * 0.24f);
-            capPaint.setTextSize(size * 0.125f);
-            float numY = cy + textPaint.getTextSize() * 0.18f;
-            canvas.drawText(pct + "%", cx, numY, textPaint);
-            canvas.drawText("本阶进度", cx, numY + capPaint.getTextSize() * 1.15f, capPaint);
         }
     }
 
@@ -1516,7 +1406,7 @@ final class AbstinenceUi {
         private final boolean relapsed;
         private final boolean hasDiary;
         private final boolean cleanDay;
-        private final boolean isToday;
+        private final boolean selected;
         private final boolean future;
         private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1526,13 +1416,13 @@ final class AbstinenceUi {
         private final RectF rect = new RectF();
 
         CalendarDayView(Context context, int dayNum, boolean relapsed, boolean hasDiary,
-                        boolean cleanDay, boolean isToday, boolean future) {
+                        boolean cleanDay, boolean selected, boolean future) {
             super(context);
             this.dayNum = dayNum;
             this.relapsed = relapsed;
             this.hasDiary = hasDiary;
             this.cleanDay = cleanDay;
-            this.isToday = isToday;
+            this.selected = selected;
             this.future = future;
         }
 
@@ -1550,7 +1440,10 @@ final class AbstinenceUi {
             rect.set(left, top, left + side, top + side);
 
             fillPaint.setStyle(Paint.Style.FILL);
-            if (relapsed) {
+            if (selected) {
+                fillPaint.setColor(BLUE);
+                canvas.drawRoundRect(rect, rad, rad, fillPaint);
+            } else if (relapsed) {
                 fillPaint.setColor(RED_SOFT);
                 canvas.drawRoundRect(rect, rad, rad, fillPaint);
             } else if (cleanDay) {
@@ -1558,18 +1451,19 @@ final class AbstinenceUi {
                 canvas.drawRoundRect(rect, rad, rad, fillPaint);
             }
 
-            if (isToday || relapsed) {
+            if (relapsed && !selected) {
                 strokePaint.setStyle(Paint.Style.STROKE);
                 strokePaint.setStrokeWidth(Math.max(1.5f, side * 0.045f));
-                strokePaint.setColor(relapsed ? RED : BLUE);
+                strokePaint.setColor(RED);
                 canvas.drawRoundRect(rect, rad, rad, strokePaint);
             }
 
             textPaint.setTextSize(side * 0.40f);
             textPaint.setTextAlign(Paint.Align.CENTER);
             textPaint.setTypeface(Typeface.create(Typeface.DEFAULT,
-                    (isToday || relapsed || cleanDay) ? Typeface.BOLD : Typeface.NORMAL));
-            textPaint.setColor(future ? LINE : (relapsed ? RED : (cleanDay ? BLUE : INK)));
+                    (selected || relapsed || cleanDay) ? Typeface.BOLD : Typeface.NORMAL));
+            textPaint.setColor(selected ? ON_ACCENT : future ? (isDark() ? MUTED : 0xffaeb9c7)
+                    : relapsed ? RED : cleanDay ? BLUE : INK);
             float textY = h * 0.5f + textPaint.getTextSize() * 0.34f;
             canvas.drawText(String.valueOf(dayNum), w * 0.5f, textY, textPaint);
 
@@ -1590,8 +1484,8 @@ final class AbstinenceUi {
                 canvas.drawLine(bx + arm, by - arm, bx - arm, by + arm, crossPaint);
             }
 
-            if (hasDiary) {
-                fillPaint.setColor(relapsed ? RED : CYAN);
+            if (selected || hasDiary) {
+                fillPaint.setColor(selected ? ON_ACCENT : relapsed ? RED : CYAN);
                 canvas.drawCircle(w * 0.5f, top + side - side * 0.13f, Math.max(2f, side * 0.065f), fillPaint);
             }
         }

@@ -83,6 +83,17 @@ final class UpdateRulesCheck {
         var previous = GitHubUpdates.parseGiteeReleasesPage(giteePage, "v1.6.7");
         if (!"b".repeat(64).equals(previous.assets().get(0).sha()))
             throw new AssertionError("Gitee web release must resolve the requested tag");
+        var githubOnly = new GitHubUpdates.Release("v1.6.9", "", List.of());
+        if (GitHubUpdates.latestUpdate("1.6.8", () -> domestic, () -> githubOnly) != githubOnly)
+            throw new AssertionError("An equal Gitee version must not hide a GitHub-only update");
+        if (GitHubUpdates.latestUpdate("1.6.8", () -> domestic, () -> {
+            throw new IOException("GitHub unavailable");
+        }) != domestic)
+            throw new AssertionError("An equal Gitee version still confirms current if GitHub is unavailable");
+        if (GitHubUpdates.latestUpdate("1.6.7", () -> domestic, () -> {
+            throw new AssertionError("Gitee already has a newer version");
+        }) != domestic)
+            throw new AssertionError("An available Gitee update remains preferred");
         try {
             GitHubUpdates.parseGiteeReleasesPage(giteePage.replace(
                     "/releases/download/v1.6.8/FocusGarden-v1.6.8.apk", "/archive/refs/tags/v1.6.8.zip"), null);
