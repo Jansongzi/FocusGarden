@@ -134,6 +134,7 @@ final class AbstinenceUi {
         private final TextView progress;
         private final TextView longest;
         private final TextView saving;
+        private final View guideGoalCard;
 
         Dashboard(MainActivity activity, FocusState state, FocusState.Abstinence item, LocalDate date,
                   Consumer<LocalDate> onSelectedDate, Runnable onChanged) {
@@ -236,6 +237,7 @@ final class AbstinenceUi {
             weight(actions, dashboardAction(activity, "日记与趋势", R.drawable.ic_timeline, BLUE_SOFT, BLUE, blueStroke(),
                     () -> showDiaryAndTrends(activity, state, item, true, onChanged)));
             goal.addView(actions);
+            guideGoalCard = goal;
             addView(goal);
             gap(this, 10);
 
@@ -249,6 +251,10 @@ final class AbstinenceUi {
             addView(dashboardLink(activity, "查看全部日记", "回顾记录与情绪变化", R.drawable.ic_timeline,
                     () -> showDiaryAndTrends(activity, state, item, false, onChanged)));
             update(System.currentTimeMillis());
+        }
+
+        View guideTarget() {
+            return guideGoalCard;
         }
 
         void update(long now) {

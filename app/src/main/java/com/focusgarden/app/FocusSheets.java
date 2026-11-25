@@ -3,6 +3,7 @@ package com.focusgarden.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.TimePickerDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -997,7 +998,7 @@ final class FocusSheets {
         TextView heroTitle = text(activity, "连续早睡 " + state.earlySleepStreak(today) + " 天", 18, ON_ACCENT, true);
         heroText.addView(heroTitle);
         gap(heroText, 4);
-        TextView heroSub = text(activity, clock(state.sleepStart) + " – " + clock(state.sleepEnd) + " · 夜间锁机", 12, PALE, false);
+        TextView heroSub = text(activity, sleepScheduleLabel(state.sleepStart, state.sleepEnd), 12, PALE, false);
         heroSub.setSingleLine(true);
         heroSub.setEllipsize(android.text.TextUtils.TruncateAt.END);
         heroText.addView(heroSub);
@@ -1049,61 +1050,15 @@ final class FocusSheets {
         body.addView(lockRow);
         gap(body, 12);
 
-        LinearLayout timeRow = row(activity);
-        TextView startBtn = secondaryButton(activity, "入睡 " + clock(state.sleepStart));
-        TextView endBtn = secondaryButton(activity, "起床 " + clock(state.sleepEnd));
-        startBtn.setOnClickListener(v -> pickClock(activity, state.sleepStart, state.sleepEnd, val -> {
-            if (val == state.sleepStart) return;
-            long tNow = System.currentTimeMillis();
-            ZoneId tZone = ZoneId.systemDefault();
-            int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
-                    state.earlySleepRewardMinutes, true);
-            boolean forcePaid = state.isSleepLocked(tNow, tZone);
-            confirmPaidChange(activity, state, "sleep_config", "调整入睡时间",
-                    "入睡时间调整为 " + clock(val) + (state.bedtime ? "（修改时间将判定本轮早睡挑战失败）" : ""),
-                    cost, forcePaid, () -> {
-                        state.sleepStart = val;
-                        if (state.bedtime) {
-                            state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
-                                    "修改了入睡时间", false);
-                        }
-                        startBtn.setText("入睡 " + clock(val));
-                        onChanged.run();
-                        if (state.isSleepLocked(System.currentTimeMillis(), ZoneId.systemDefault())) {
-                            if (sheetRef[0] != null && sheetRef[0].isShowing()) sheetRef[0].dismiss();
-                            return;
-                        }
-                        if (refreshClaim[0] != null) refreshClaim[0].run();
-                    });
-        }));
-        endBtn.setOnClickListener(v -> pickClock(activity, state.sleepEnd, state.sleepStart, val -> {
-            if (val == state.sleepEnd) return;
-            long tNow = System.currentTimeMillis();
-            ZoneId tZone = ZoneId.systemDefault();
-            int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
-                    state.earlySleepRewardMinutes, true);
-            boolean forcePaid = state.isSleepLocked(tNow, tZone);
-            confirmPaidChange(activity, state, "sleep_config", "调整起床时间",
-                    "起床时间调整为 " + clock(val) + (state.bedtime ? "（修改时间将判定本轮早睡挑战失败）" : ""),
-                    cost, forcePaid, () -> {
-                        state.sleepEnd = val;
-                        if (state.bedtime) {
-                            state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
-                                    "修改了起床时间", false);
-                        }
-                        endBtn.setText("起床 " + clock(val));
-                        onChanged.run();
-                        if (state.isSleepLocked(System.currentTimeMillis(), ZoneId.systemDefault())) {
-                            if (sheetRef[0] != null && sheetRef[0].isShowing()) sheetRef[0].dismiss();
-                            return;
-                        }
-                        if (refreshClaim[0] != null) refreshClaim[0].run();
-                    });
-        }));
-        weight(timeRow, startBtn);
-        space(timeRow, 10);
-        weight(timeRow, endBtn);
-        body.addView(timeRow);
+        TextView schedule = sleepScheduleButton(activity, state, () -> {
+            onChanged.run();
+            if (state.isSleepLocked(System.currentTimeMillis(), ZoneId.systemDefault())) {
+                if (sheetRef[0] != null && sheetRef[0].isShowing()) sheetRef[0].dismiss();
+            } else if (refreshClaim[0] != null) {
+                refreshClaim[0].run();
+            }
+        });
+        body.addView(schedule, -1, -2);
         gap(body, 14);
 
         body.addView(text(activity, "早睡挑战奖励", 13, INK_SUB, true));
@@ -1180,7 +1135,7 @@ final class FocusSheets {
             boolean checked = state.earlySleepChecked(today);
             boolean layFlat = state.isLayFlat();
             heroTitle.setText("连续早睡 " + state.earlySleepStreak(today) + " 天");
-            heroSub.setText(clock(state.sleepStart) + " – " + clock(state.sleepEnd) + " · 夜间锁机");
+            heroSub.setText(sleepScheduleLabel(state.sleepStart, state.sleepEnd));
             weekWrap.removeAllViews();
             weekWrap.addView(weekSleepStrip(activity, state, today));
 
@@ -1219,7 +1174,97 @@ final class FocusSheets {
 
         sheetRef[0] = bottomSheet(activity, "早睡挑战", null, body, true,
                 "早睡挑战",
-                "到点全屏锁机，坚持整夜后次日手动领奖；中途退出或改期耗 35 分且判失败。");
+                "设定适合自己的入睡和起床时间。完整经历睡眠锁机时段后可手动领奖。");
+    }
+
+    private static String sleepScheduleLabel(int start, int end) {
+        return clock(start) + " – " + (end < start ? "次日 " : "") + clock(end);
+    }
+
+    static TextView sleepScheduleButton(MainActivity activity, FocusState state, Runnable onChanged) {
+        TextView button = secondaryButton(activity,
+                "编辑作息 · " + sleepScheduleLabel(state.sleepStart, state.sleepEnd));
+        button.setOnClickListener(v -> {
+            tapHaptic(v);
+            showSleepScheduleEditor(activity, state, () -> {
+                button.setText("编辑作息 · " + sleepScheduleLabel(state.sleepStart, state.sleepEnd));
+                onChanged.run();
+            });
+        });
+        return button;
+    }
+
+    private static void showSleepScheduleEditor(MainActivity activity, FocusState state, Runnable onChanged) {
+        int[] times = {state.sleepStart, state.sleepEnd};
+        LinearLayout body = column(activity);
+        TextView start = secondaryButton(activity, "");
+        TextView end = secondaryButton(activity, "");
+        TextView summary = text(activity, "", 13, INK_SUB, false);
+        TextView save = primaryButton(activity, "保存作息");
+        Runnable refresh = () -> {
+            start.setText("入睡 " + clock(times[0]));
+            end.setText("起床 " + clock(times[1]));
+            int minutes = Math.floorMod(times[1] - times[0], 24 * 60);
+            summary.setText(minutes == 0
+                    ? "入睡和起床时间需要不同"
+                    : sleepScheduleLabel(times[0], times[1]) + " · 锁机 "
+                            + duration(minutes * FocusState.MINUTE));
+            save.setEnabled(minutes != 0);
+            save.setAlpha(minutes == 0 ? 0.5f : 1f);
+        };
+        start.setOnClickListener(v -> pickSleepTime(activity, "入睡时间", times[0], time -> {
+            times[0] = time;
+            refresh.run();
+        }));
+        end.setOnClickListener(v -> pickSleepTime(activity, "起床时间", times[1], time -> {
+            times[1] = time;
+            refresh.run();
+        }));
+
+        LinearLayout timeRow = row(activity);
+        weight(timeRow, start);
+        space(timeRow, 10);
+        weight(timeRow, end);
+        body.addView(timeRow);
+        gap(body, 12);
+        body.addView(summary);
+        gap(body, 16);
+        body.addView(save, -1, -2);
+        refresh.run();
+        Dialog sheet = bottomSheet(activity, "编辑作息", "支持白天作息和跨午夜时段。", body);
+        save.setOnClickListener(v -> {
+            if (times[0] == times[1]) return;
+            tapHaptic(v);
+            sheet.dismiss();
+            if (times[0] == state.sleepStart && times[1] == state.sleepEnd) return;
+            Runnable apply = () -> {
+                state.sleepStart = times[0];
+                state.sleepEnd = times[1];
+                if (state.bedtime) {
+                    state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
+                            "修改了作息时段", false);
+                }
+                onChanged.run();
+            };
+            if (!state.bedtime) {
+                apply.run();
+                return;
+            }
+            int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
+                    state.earlySleepRewardMinutes, true);
+            boolean forcePaid = state.isSleepLocked(System.currentTimeMillis(), ZoneId.systemDefault());
+            confirmPaidChange(activity, state, "sleep_config", "调整作息时段",
+                    sleepScheduleLabel(times[0], times[1]) + "（修改时段将判定本轮早睡挑战失败）",
+                    cost, forcePaid, apply);
+        });
+    }
+
+    private static void pickSleepTime(Activity activity, String title, int current, IntConsumer onPicked) {
+        TimePickerDialog picker = new TimePickerDialog(activity,
+                (view, hour, minute) -> onPicked.accept(hour * 60 + minute),
+                current / 60, current % 60, true);
+        picker.setTitle(title);
+        picker.show();
     }
 
     static LinearLayout weekSleepStrip(Context context, FocusState state, LocalDate today) {
@@ -2502,10 +2547,11 @@ final class FocusSheets {
             if (paletteRow.getChildCount() > 0) space(paletteRow, 8);
 
             LinearLayout tile = column(activity);
-            tile.setBackground(touchCard(activity, selected ? BLUE_SOFT : SURFACE_SUBTLE,
-                    (selected || savedBase) ? blueStroke() : BORDER, 14));
+            int tileColor = selected ? BLUE_SOFT : owned ? SURFACE_SUBTLE : BLUE_DISABLED_BG;
+            tile.setBackground(touchCard(activity, tileColor, (selected || savedBase) ? blueStroke() : BORDER, 14));
             tile.setPadding(dp(activity, 9), dp(activity, 10), dp(activity, 9), dp(activity, 10));
-            tile.setContentDescription("主题：" + theme.name());
+            tile.setContentDescription("主题：" + theme.name()
+                    + (owned ? "" : "，未解锁，" + theme.costMinutes() + " 分钟"));
 
             LinearLayout topLine = row(activity);
             TextView nameTv = text(activity, theme.name(), 13, (selected || savedBase) ? BLUE : INK, true);
@@ -2515,6 +2561,9 @@ final class FocusSheets {
             if (selected) {
                 space(topLine, 3);
                 topLine.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 16, 9, 8));
+            } else if (!owned) {
+                space(topLine, 3);
+                topLine.addView(iconBadge(activity, R.drawable.ic_lock, BORDER, INK_SUB, 16, 8, 11));
             }
             tile.addView(topLine);
             gap(tile, 7);
@@ -2524,6 +2573,7 @@ final class FocusSheets {
             for (int cIdx = 0; cIdx < pSwatches.length; cIdx++) {
                 View dot = new View(activity);
                 dot.setBackground(cardBg(activity, pSwatches[cIdx], BORDER, 5));
+                if (!owned) dot.setAlpha(0.65f);
                 swRow.addView(dot, dp(activity, 14), dp(activity, 14));
                 if (cIdx + 1 < pSwatches.length) space(swRow, 4);
             }
@@ -2737,6 +2787,36 @@ final class FocusSheets {
                     } else {
                         onCards.run();
                     }
+                }));
+        gap(body, 10);
+        body.addView(settingRow(activity, R.drawable.ic_gift, BLUE_SOFT, BLUE,
+                "新手引导与权限向导", "重新配置后台权限或重看各页引导", null, () -> {
+                    suppressReturn[0] = true;
+                    if (sheetRef[0] != null) sheetRef[0].dismiss();
+                    Runnable reopen = () -> showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
+                    LinearLayout choices = column(activity);
+                    Dialog[] pickerRef = {null};
+                    boolean[] picked = {false};
+                    choices.addView(settingRow(activity, R.drawable.ic_shield, GREEN_SOFT, GREEN,
+                            "重新配置后台权限", "检查无障碍、悬浮窗、使用量等核心守护权限", null, () -> {
+                                picked[0] = true;
+                                if (pickerRef[0] != null) pickerRef[0].dismiss();
+                                activity.openOnboardingPermissionWizard();
+                            }));
+                    gap(choices, 8);
+                    choices.addView(settingRow(activity, R.drawable.ic_target, BLUE_SOFT, BLUE,
+                            "重置全部新手引导", "回到首页重新看一遍 Q 版聚光灯引导", null, () -> {
+                                picked[0] = true;
+                                if (pickerRef[0] != null) pickerRef[0].dismiss();
+                                activity.replayOnboardingFromStart();
+                            }));
+                    pickerRef[0] = cardDialog(activity, R.drawable.ic_gift, BLUE_SOFT, BLUE,
+                            "新手引导与权限向导",
+                            "需要重看哪部分呢？挑一个就可以立刻开始～",
+                            choices, "返回", null, false, true, null);
+                    pickerRef[0].setOnDismissListener(d -> {
+                        if (!picked[0]) postReturn(activity, reopen);
+                    });
                 }));
 
         sheetRef[0] = bottomSheet(activity, "通用设置", null, body);
@@ -3344,6 +3424,17 @@ final class FocusSheets {
             Toast.makeText(activity, "已生成 20 分钟多源待领奖励（共 3 项正向行为）", Toast.LENGTH_SHORT).show();
         });
         body.addView(seedRedeemBtn, -1, -2);
+        gap(body, 8);
+
+        TextView resetGuidesBtn = secondaryButton(activity, "重置全部新手引导");
+        resetGuidesBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            state.resetAllGuides();
+            FocusStore.get(activity).save();
+            refreshStatus[0].run();
+            Toast.makeText(activity, "已重置全部新手引导，返回页面将重新触发", Toast.LENGTH_SHORT).show();
+        });
+        body.addView(resetGuidesBtn, -1, -2);
 
         refreshStatus[0].run();
         Dialog sheet = bottomSheet(activity, "调试模式", null, body, true,

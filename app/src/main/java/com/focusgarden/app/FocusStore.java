@@ -24,15 +24,24 @@ final class FocusStore {
     private FocusStore(Context context) {
         this.appContext = context.getApplicationContext();
         preferences = appContext.getSharedPreferences("focus_garden", Context.MODE_PRIVATE);
+        boolean needSave = false;
         try {
-            load(new JSONObject(preferences.getString("state", "{}")));
+            needSave = load(new JSONObject(preferences.getString("state", "{}")));
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not read saved state", e);
         }
-        if (state.migrateLegacySober(System.currentTimeMillis(), java.time.ZoneId.systemDefault())) save();
+        if (state.migrateLegacySober(System.currentTimeMillis(), java.time.ZoneId.systemDefault())) needSave = true;
+        if (needSave) save();
     }
 
-    private void load(JSONObject root) throws JSONException {
+    private boolean load(JSONObject root) throws JSONException {
+        boolean isFreshInstall = root.length() == 0 || (!root.has("credit") && root.optLong("firstSeenMs") == 0L);
+        if (isFreshInstall) {
+            state.applyFreshInstallDefaults(System.currentTimeMillis(), java.time.ZoneId.systemDefault());
+            return true;
+        }
+        boolean legacyBeforeOnboarding = !root.has("completedGuides");
+        boolean needSave = false;
         state.creditMs = root.optLong("credit");
         state.creditRemainder = root.optInt("creditRemainder");
         state.vaultMs = root.optLong("vaultMs");
@@ -64,6 +73,9 @@ final class FocusStore {
                 String oid = ownedArr.optString(i);
                 if (!oid.isEmpty()) state.ownedShopItems.add(oid);
             }
+        }
+        if (legacyBeforeOnboarding) {
+            state.ownedShopItems.add(ShopCatalog.DEFAULT_APP_THEME);
         }
         String skin = root.optString("equippedPiggySkin", "default");
         state.equippedPiggySkin = state.isShopItemOwned(skin) ? ShopCatalog.piggySkin(skin).id() : "default";
@@ -113,7 +125,24 @@ final class FocusStore {
         state.habitDailyCapMinutes = root.optInt("habitDailyCapMinutes", 25);
         state.stepDailyCapMinutes = root.optInt("stepDailyCapMinutes", 30);
         state.themeMode = Math.max(0, Math.min(2, root.optInt("themeMode", FocusState.THEME_SYSTEM)));
-        state.setColorTheme(root.optInt("colorTheme", FocusState.PALETTE_BLUE));
+        int defaultPalette = legacyBeforeOnboarding ? FocusState.PALETTE_BLUE : FocusState.PALETTE_SAGE;
+        int savedPalette = root.optInt("colorTheme", defaultPalette);
+        if (!state.setColorTheme(savedPalette)) {
+            state.colorTheme = FocusState.PALETTE_SAGE;
+        }
+        state.completedGuides.clear();
+        if (legacyBeforeOnboarding) {
+            state.markAllGuidesCompleted();
+            needSave = true;
+        } else {
+            JSONArray guidesArr = root.optJSONArray("completedGuides");
+            if (guidesArr != null) {
+                for (int i = 0; i < guidesArr.length(); i++) {
+                    String g = guidesArr.optString(i);
+                    if (!g.isEmpty()) state.completedGuides.add(g);
+                }
+            }
+        }
         JSONArray freeKeys = root.optJSONArray("freeConfigUsedKeys");
         if (freeKeys != null) {
             for (int i = 0; i < freeKeys.length(); i++) {
@@ -488,6 +517,7 @@ final class FocusStore {
             }
             state.totalDisciplineSessions = fallbackSessions;
         }
+        return needSave;
     }
 
     private static Iterator<String> keys(JSONObject o) {
@@ -661,7 +691,8 @@ final class FocusStore {
                     .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
                     .put("heartbeats", new JSONArray(state.heartbeats))
                     .put("hiddenCards", new JSONArray(state.hiddenCards))
-                    .put("expandedRedeemCards", new JSONArray(state.expandedRedeemCards));
+                    .put("expandedRedeemCards", new JSONArray(state.expandedRedeemCards))
+                    .put("completedGuides", new JSONArray(state.completedGuides));
 
             JSONObject rules = new JSONObject();
             for (var entry : state.rules.entrySet()) {

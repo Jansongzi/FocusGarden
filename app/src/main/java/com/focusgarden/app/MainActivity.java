@@ -175,8 +175,21 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private SoberModeUi.Timer soberTimer;
     private SleepLockUi sleepLockUi;
     private FocusSheets.LiveRefresh liveKeepAliveSheet;
+    private FocusSheets.LiveRefresh livePermissionWizard;
+    private FrameLayout windowHost;
+    private OnboardingUi.SpotlightGuideView activeSpotlight;
+    private String activeSpotlightKey;
+    private int activeSpotlightStep;
+    private View homeBudgetCard;
+    private View homeDisciplineCardView;
+    private View redeemVoucherGuideTarget;
+    private View redeemCardsGuideTarget;
+    private View abstinenceGuideTarget;
+    private View insightsGuideTarget;
+    private View rulesGuideTarget;
     private LayFlatAuraView layFlatAuraOverlay;
     private final List<AbstinenceTicker> liveAbstinenceTickers = new ArrayList<>();
+    private final Runnable onboardingTrigger = this::maybeTriggerOnboarding;
 
     private record AbstinenceTicker(FocusState.Abstinence item, TextView clockView) {}
 
@@ -315,12 +328,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing()) {
                 liveKeepAliveSheet.refresh();
             }
+            if (livePermissionWizard != null && livePermissionWizard.isShowing()) {
+                livePermissionWizard.refresh();
+            }
             if (resumed && tab <= 1 && snap.accOk() != lastAccessibilityEnabled) redraw();
         });
         updateSleepLock(now);
         updateSoberTimer(now);
         main.post(clock);
         handleTimerShortcut(getIntent());
+        scheduleOnboardingCheck(120L);
         updatePanel.presentWhenReady();
     }
 
@@ -328,6 +345,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         resumed = false;
         syncLayFlatAura();
         main.removeCallbacks(clock);
+        main.removeCallbacks(onboardingTrigger);
         cancelRedeemAnimations();
         unregisterStepListener();
         super.onPause();
@@ -344,6 +362,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             updateSleepLock(now);
             updateSoberTimer(now);
             handleTimerShortcut(intent);
+            scheduleOnboardingCheck(120L);
         }
     }
 
@@ -353,7 +372,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     boolean canShowAutomaticUpdate() {
-        return isResumedForUpdate() && hasWindowFocus();
+        return isResumedForUpdate() && hasWindowFocus()
+                && !isOnboardingActive() && !hasPendingOnboardingForCurrentScreen();
     }
 
     boolean isResumedForUpdate() {
@@ -361,6 +381,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     @Override protected void onDestroy() {
+        main.removeCallbacks(onboardingTrigger);
+        if (activeSpotlight != null) {
+            activeSpotlight.dismissWithoutFinish();
+            activeSpotlight = null;
+        }
         if (layFlatAuraOverlay != null) layFlatAuraOverlay.release();
         cancelVaultToggleAnimator();
         updatePanel.dismiss();
@@ -377,8 +402,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     @Override public void onBackPressed() {
-        if (tab != 0) backToParent();
-        else super.onBackPressed();
+        if (handleBackPress()) return;
+        super.onBackPressed();
     }
 
     private void backToParent() {
@@ -397,8 +422,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (requestCode == 24) {
             registerStepListener();
             redraw();
-        } else if (requestCode == 12 && liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing()) {
-            liveKeepAliveSheet.refresh();
+        } else if (requestCode == 12) {
+            if (liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing()) liveKeepAliveSheet.refresh();
+            if (livePermissionWizard != null && livePermissionWizard.isShowing()) livePermissionWizard.refresh();
         }
     }
 
@@ -532,7 +558,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override public boolean dispatchTouchEvent(MotionEvent ev) {
         boolean modalOpen = (liveTimerSheet != null && liveTimerSheet.isShowing())
                 || (liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing())
-                || (sleepLockUi != null && sleepLockUi.isShowing());
+                || (sleepLockUi != null && sleepLockUi.isShowing())
+                || isOnboardingActive();
         if (!modalOpen) {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN -> {
@@ -654,6 +681,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemCardSubs.clear();
         displayedVoucherClaimableMin = -1L;
         displayedVoucherEarnedMin = -1L;
+        if (activeSpotlight != null) {
+            activeSpotlightStep = activeSpotlight.currentStepIndex();
+            activeSpotlight.dismissWithoutFinish();
+            activeSpotlight = null;
+        }
+        homeBudgetCard = null;
+        homeDisciplineCardView = null;
+        redeemVoucherGuideTarget = null;
+        redeemCardsGuideTarget = null;
+        abstinenceGuideTarget = null;
+        insightsGuideTarget = null;
+        rulesGuideTarget = null;
         abstinenceDashboard = null;
         liveAbstinenceTickers.clear();
     }
@@ -802,11 +841,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
         } else if (layFlatAuraOverlay.getParent() instanceof android.view.ViewGroup oldParent) {
             oldParent.removeView(layFlatAuraOverlay);
         }
-        FrameLayout windowHost = new FrameLayout(this);
-        windowHost.addView(root, new FrameLayout.LayoutParams(-1, -1));
-        windowHost.addView(layFlatAuraOverlay, new FrameLayout.LayoutParams(-1, -1));
-        setContentView(windowHost);
-        windowHost.requestApplyInsets();
+        FrameLayout host = new FrameLayout(this);
+        host.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        host.addView(layFlatAuraOverlay, new FrameLayout.LayoutParams(-1, -1));
+        windowHost = host;
+        setContentView(host);
+        host.requestApplyInsets();
         getWindow().setBackgroundDrawable(new ColorDrawable(PAPER));
         updateStatusBar(isDark());
         syncLayFlatAura();
@@ -872,12 +912,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private static final class BackNavigation {
         static void update(MainActivity activity) {
             var dispatcher = activity.getOnBackInvokedDispatcher();
-            if (activity.tab != 0 && activity.homeBackCallback == null) {
-                android.window.OnBackInvokedCallback callback = activity::backToParent;
+            boolean needCallback = activity.tab != 0 || activity.activeSpotlight != null;
+            if (needCallback && activity.homeBackCallback == null) {
+                android.window.OnBackInvokedCallback callback = activity::handleBackPress;
                 dispatcher.registerOnBackInvokedCallback(
                         android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
                 activity.homeBackCallback = callback;
-            } else if (activity.tab == 0 && activity.homeBackCallback != null) {
+            } else if (!needCallback && activity.homeBackCallback != null) {
                 dispatcher.unregisterOnBackInvokedCallback(
                         (android.window.OnBackInvokedCallback) activity.homeBackCallback);
                 activity.homeBackCallback = null;
@@ -939,6 +980,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
             case INSIGHTS_PAGE -> insights();
             default -> home();
         }
+        if (resumed && activeSpotlight == null && activeSpotlightKey != null
+                && activeSpotlightKey.equals(currentPageGuideKey())
+                && !state.isGuideCompleted(activeSpotlightKey)) {
+            scheduleOnboardingCheck(80L);
+        }
     }
 
     private int tabPos(int page) {
@@ -948,6 +994,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private void switchTab(int index) {
         if (tab == index) return;
+        activeSpotlightKey = null;
+        activeSpotlightStep = 0;
+        if (activeSpotlight != null) {
+            activeSpotlight.dismissWithoutFinish();
+            activeSpotlight = null;
+        }
         if (index == RULES_PAGE) {
             pendingSlideDir = 0;
             pendingPageTransition = 1;
@@ -961,6 +1013,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         tab = index;
         haptic(navBar, state.hapticFeedback, HapticKind.NAV);
         render();
+        scheduleOnboardingCheck(140L);
     }
 
     private void openRules(boolean fromSettings) {
@@ -1053,7 +1106,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         depositBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "存入 " + state.vaultStepMinutes + " 分");
         depositBtn.setEnabledColors(
                 switch (colorTheme()) {
-                    case FocusState.PALETTE_SAGE -> 0xff6e966a;
+                    case FocusState.PALETTE_SAGE -> 0xff94b48d;
                     case FocusState.PALETTE_SAKURA -> 0xffcb6f8a;
                     case FocusState.PALETTE_INDULGENT -> 0xffd16d16;
                     case FocusState.PALETTE_LAY_FLAT -> 0xff7659ea;
@@ -1066,7 +1119,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_LAY_FLAT -> 0xff4832ae;
                     default -> 0xff0948a8;
                 },
-                ON_ACCENT);
+                isSageTheme() ? 0xff203621 : ON_ACCENT);
         depositBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
                 haptic(depositBtn, state.hapticFeedback, HapticKind.REJECT);
@@ -1214,6 +1267,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 openRules(false);
             });
         });
+        homeBudgetCard = budgetCard;
         content.addView(budgetCard);
         gap(content, 10);
 
@@ -1254,7 +1308,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(content, 10);
 
         // 5. 自律模式卡 (Home permanent entry without redeem button or accordion collapse)
-        content.addView(homeDisciplineCard());
+        homeDisciplineCardView = homeDisciplineCard();
+        content.addView(homeDisciplineCardView);
         gap(content, 12);
 
         if (!lastAccessibilityEnabled) {
@@ -1526,6 +1581,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemVoucherCaptionTv = text(this, "", 12, RedeemUi.voucherSubInk(), false);
         redeemVoucherCaptionTv.setGravity(Gravity.CENTER);
         voucher.addView(redeemVoucherCaptionTv, -1, -2);
+        redeemVoucherGuideTarget = voucher;
         pages.addView(voucher);
         gap(pages, 13);
         pages.addView(redeemStoreCard());
@@ -1546,27 +1602,39 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemCardSubs.clear();
 
         if (!state.hiddenCards.contains("apps")) {
-            pages.addView(homeAppsCard(day));
+            View c = homeAppsCard(day);
+            if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
+            pages.addView(c);
             gap(pages, 10);
         }
         if (!state.hiddenCards.contains("timer")) {
-            pages.addView(homeTimerCard(now, day));
+            View c = homeTimerCard(now, day);
+            if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
+            pages.addView(c);
             gap(pages, 10);
         }
         if (!state.hiddenCards.contains("sleep")) {
-            pages.addView(homeSleepCard(today));
+            View c = homeSleepCard(today);
+            if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
+            pages.addView(c);
             gap(pages, 10);
         }
         if (!state.hiddenCards.contains("todos")) {
-            pages.addView(homeTodoCard(today, day));
+            View c = homeTodoCard(today, day);
+            if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
+            pages.addView(c);
             gap(pages, 10);
         }
         if (!state.hiddenCards.contains("habits")) {
-            pages.addView(homeAbstinenceCard(now));
+            View c = homeAbstinenceCard(now);
+            if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
+            pages.addView(c);
             gap(pages, 10);
         }
         if (!state.hiddenCards.contains("steps")) {
-            pages.addView(homeStepCard(today, day));
+            View c = homeStepCard(today, day);
+            if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
+            pages.addView(c);
             gap(pages, 10);
         }
         syncToggleAllLabel();
@@ -1582,6 +1650,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             FocusSheets.showCardManager(this, state, this::changed);
         });
+        if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = manageBtn;
         pages.addView(manageBtn);
 
         updateHomeLive();
@@ -2799,13 +2868,15 @@ public final class MainActivity extends Activity implements SensorEventListener 
         pages.addView(summary);
         gap(pages, 14);
 
-        pages.addView(segments(new String[]{"学习 " + learningCount, "限制 " + limitedCount},
+        View ruleTabs = segments(new String[]{"学习 " + learningCount, "限制 " + limitedCount},
                 ruleCategory, idx -> {
                     if (idx == ruleCategory) return;
                     haptic(navBar, state.hapticFeedback, HapticKind.NAV);
                     ruleCategory = idx;
                     redraw();
-                }));
+                });
+        rulesGuideTarget = ruleTabs;
+        pages.addView(ruleTabs);
         gap(pages, 12);
 
         FocusState.Category category = ruleCategory == 0
@@ -2872,57 +2943,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         sleep.addView(sleepTop);
         gap(sleep, 12);
 
-        LinearLayout times = row(this);
-        TextView startPill = secondaryButton(this, "开始 " + clock(state.sleepStart));
-        startPill.setSingleLine(true);
-        TextView endPill = secondaryButton(this, "结束 " + clock(state.sleepEnd));
-        endPill.setSingleLine(true);
-        startPill.setOnClickListener(v -> {
-            tapHaptic(v);
-            FocusSheets.pickClock(this, state.sleepStart, state.sleepEnd, val -> {
-                if (val == state.sleepStart) return;
-                long curNow = System.currentTimeMillis();
-                ZoneId curZone = ZoneId.systemDefault();
-                int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
-                        state.earlySleepRewardMinutes, true);
-                boolean forcePaid = state.isSleepLocked(curNow, curZone);
-                FocusSheets.confirmPaidChange(this, state, "sleep_config", "调整睡眠开始时间",
-                        "入睡时间设为 " + clock(val) + (state.bedtime ? "（将使今日早睡挑战失败）" : ""),
-                        cost, forcePaid, () -> {
-                            state.sleepStart = val;
-                            if (state.bedtime) {
-                                state.failEarlySleepByConfigChange(System.currentTimeMillis(),
-                                        ZoneId.systemDefault(), "修改入睡时间", false);
-                            }
-                            changed();
-                        });
-            });
-        });
-        endPill.setOnClickListener(v -> {
-            tapHaptic(v);
-            FocusSheets.pickClock(this, state.sleepEnd, state.sleepStart, val -> {
-                if (val == state.sleepEnd) return;
-                long curNow = System.currentTimeMillis();
-                ZoneId curZone = ZoneId.systemDefault();
-                int cost = state.earlySleepConfigCostMinutes(false, state.earlySleepRewardMinutes,
-                        state.earlySleepRewardMinutes, true);
-                boolean forcePaid = state.isSleepLocked(curNow, curZone);
-                FocusSheets.confirmPaidChange(this, state, "sleep_config", "调整起床时间",
-                        "起床时间设为 " + clock(val) + (state.bedtime ? "（将使今日早睡挑战失败）" : ""),
-                        cost, forcePaid, () -> {
-                            state.sleepEnd = val;
-                            if (state.bedtime) {
-                                state.failEarlySleepByConfigChange(System.currentTimeMillis(),
-                                        ZoneId.systemDefault(), "修改起床时间", false);
-                            }
-                            changed();
-                        });
-            });
-        });
-        weight(times, startPill);
-        space(times, 10);
-        weight(times, endPill);
-        sleep.addView(times);
+        sleep.addView(FocusSheets.sleepScheduleButton(this, state, this::changed), -1, -2);
         pages.addView(sleep);
         gap(pages, 12);
 
@@ -3011,6 +3032,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
             abstinenceDashboard = new AbstinenceUi.Dashboard(this, state, selected, abstinenceDiaryDate,
                     date -> abstinenceDiaryDate = date, this::changed);
+            abstinenceGuideTarget = abstinenceDashboard.guideTarget();
             pages.addView(abstinenceDashboard, -1, -2);
             return;
         }
@@ -3096,6 +3118,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             empty.addView(tplRow);
             if (r == 0) gap(empty, 8);
         }
+        abstinenceGuideTarget = empty;
         pages.addView(empty);
         gap(pages, 14);
     }
@@ -3191,12 +3214,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         pages.addView(head);
         gap(pages, 14);
 
-        pages.addView(segments(new String[]{"数据统计", "时间线"}, insightsMode, idx -> {
+        View insightsTabs = segments(new String[]{"数据统计", "时间线"}, insightsMode, idx -> {
             if (idx == insightsMode) return;
             haptic(navBar, state.hapticFeedback, HapticKind.NAV);
             insightsMode = idx;
             redraw();
-        }));
+        });
+        insightsGuideTarget = insightsTabs;
+        pages.addView(insightsTabs);
         gap(pages, 14);
 
         LocalDate today = FocusState.today();
@@ -3690,5 +3715,216 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    }
+
+    private boolean handleBackPress() {
+        if (activeSpotlight != null) {
+            activeSpotlight.dismiss();
+            return true;
+        }
+        if (tab != 0) {
+            backToParent();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isOnboardingActive() {
+        return (livePermissionWizard != null && livePermissionWizard.isShowing())
+                || activeSpotlight != null;
+    }
+
+    private String currentPageGuideKey() {
+        return switch (tab) {
+            case REDEEM_PAGE -> FocusState.GUIDE_REDEEM;
+            case ABSTINENCE_PAGE -> FocusState.GUIDE_ABSTINENCE;
+            case INSIGHTS_PAGE -> FocusState.GUIDE_INSIGHTS;
+            case RULES_PAGE -> FocusState.GUIDE_RULES;
+            default -> FocusState.GUIDE_HOME;
+        };
+    }
+
+    private boolean hasPendingOnboardingForCurrentScreen() {
+        if (state == null) return false;
+        if (!state.isGuideCompleted(FocusState.GUIDE_PERMS)) return true;
+        return !state.isGuideCompleted(currentPageGuideKey());
+    }
+
+    private void scheduleOnboardingCheck(long delayMs) {
+        main.removeCallbacks(onboardingTrigger);
+        main.postDelayed(onboardingTrigger, Math.max(0L, delayMs));
+    }
+
+    void openOnboardingPermissionWizard() {
+        if (state == null || isFinishing() || isDestroyed()) return;
+        state.completedGuides.remove(FocusState.GUIDE_PERMS);
+        FocusStore.get(this).save();
+        if (activeSpotlight != null) {
+            activeSpotlight.dismissWithoutFinish();
+            activeSpotlight = null;
+        }
+        activeSpotlightKey = null;
+        activeSpotlightStep = 0;
+        scheduleOnboardingCheck(80L);
+    }
+
+    void replayOnboardingFromStart() {
+        if (state == null || isFinishing() || isDestroyed()) return;
+        state.resetAllGuides();
+        state.markGuideCompleted(FocusState.GUIDE_PERMS);
+        FocusStore.get(this).save();
+        activeSpotlightKey = null;
+        activeSpotlightStep = 0;
+        if (activeSpotlight != null) {
+            activeSpotlight.dismissWithoutFinish();
+            activeSpotlight = null;
+        }
+        if (tab != 0) {
+            pendingSlideDir = 0;
+            pendingPageTransition = 0;
+            tab = 0;
+            render();
+        }
+        scheduleOnboardingCheck(140L);
+    }
+
+    private void maybeTriggerOnboarding() {
+        if (!resumed || isFinishing() || isDestroyed() || state == null
+                || isOnboardingActive() || windowHost == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if ((sleepLockUi != null && sleepLockUi.isShowing())
+                || (soberTimer != null && soberTimer.isShowing())
+                || (liveTimerSheet != null && liveTimerSheet.isShowing())
+                || (timerConfirmation != null && timerConfirmation.isShowing())
+                || state.isSleepLocked(now, ZoneId.systemDefault())
+                || state.soberActive(now)) {
+            return;
+        }
+
+        if (!state.isGuideCompleted(FocusState.GUIDE_PERMS)) {
+            livePermissionWizard = OnboardingUi.showPermissionWizard(
+                    this, state, this::launchWallpaperPicker, this::changed,
+                    () -> {
+                        livePermissionWizard = null;
+                        scheduleOnboardingCheck(180L);
+                    });
+            return;
+        }
+
+        String pageKey = currentPageGuideKey();
+        if (state.isGuideCompleted(pageKey)) return;
+
+        List<OnboardingUi.GuideStep> steps = buildGuideStepsForCurrentTab(pageKey);
+        if (steps.isEmpty()) return;
+
+        int initialStep = pageKey.equals(activeSpotlightKey) ? activeSpotlightStep : 0;
+        activeSpotlightKey = pageKey;
+        activeSpotlight = OnboardingUi.SpotlightGuideView.show(windowHost, scroll, steps, initialStep, () -> {
+            activeSpotlight = null;
+            activeSpotlightKey = null;
+            activeSpotlightStep = 0;
+            state.markGuideCompleted(pageKey);
+            FocusStore.get(this).save();
+            if (Build.VERSION.SDK_INT >= 33) BackNavigation.update(this);
+            if (updatePanel != null) updatePanel.presentWhenReady();
+        });
+        if (Build.VERSION.SDK_INT >= 33) BackNavigation.update(this);
+    }
+
+    private List<OnboardingUi.GuideStep> buildGuideStepsForCurrentTab(String pageKey) {
+        List<OnboardingUi.GuideStep> steps = new ArrayList<>();
+        switch (pageKey) {
+            case FocusState.GUIDE_HOME -> {
+                if (homeSignIn != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            homeSignIn,
+                            R.drawable.guide_mascot_gift,
+                            "每天白领摸鱼基金",
+                            "点这里签个到，每天轻松领 10 分钟可用时长！凌晨 04:00 准时刷新，不领白不领哦～",
+                            14, 6));
+                }
+                if (homeBudgetCard != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            homeBudgetCard,
+                            R.drawable.guide_mascot_point,
+                            "先把上头 App 管起来",
+                            "新朋友见面礼 40 分钟已到账啦！点这里加上最容易刷停不下来的娱乐应用，大家共用今日余额，用完就会温柔拦住你～",
+                            20, 4));
+                }
+                if (homeDisciplineCardView != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            homeDisciplineCardView,
+                            R.drawable.guide_mascot_study,
+                            "专注一会儿就赚时间",
+                            "想攒更多自由时间？开启正计时或不能反悔的倒计时就行！默认是贴心的「简单模式 (2:1)」，专注 2 分钟就能换 1 分钟快乐时光～",
+                            20, 4));
+                }
+                View vaultTarget = (!state.vaultCardCollapsed && homeVaultCard != null)
+                        ? homeVaultCard : homePiggyBank;
+                if (vaultTarget != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            vaultTarget,
+                            R.drawable.guide_mascot_clock,
+                            "多余时间喂给小猪储蓄罐",
+                            "今日用不完的时间凌晨会清零，快存进小猪肚子里跨天保留！其他页面点过去时再悄悄教你新玩法哦～",
+                            22, 4));
+                }
+            }
+            case FocusState.GUIDE_REDEEM -> {
+                if (redeemVoucherGuideTarget != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            redeemVoucherGuideTarget,
+                            R.drawable.guide_mascot_cheer,
+                            "攒好的时间来这儿提现！",
+                            "学习应用、自律计时、戒断挑战赚到的时间都会汇成兑换券，点一下大按钮就能全部“咻”进可用余额～",
+                            22, 4));
+                }
+                if (redeemCardsGuideTarget != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            redeemCardsGuideTarget,
+                            R.drawable.guide_mascot_idea,
+                            "轻装上阵，更多玩法按需开",
+                            "先替你开了「应用、自律、戒断」3 张基础卡片；想用早睡、待办或步数，滑到底部点「添加和编辑卡片」随时唤醒它们～",
+                            18, 4));
+                }
+            }
+            case FocusState.GUIDE_ABSTINENCE -> {
+                if (abstinenceGuideTarget != null) {
+                    String msg = state.abstinences.isEmpty()
+                            ? "挑个模板一键开启戒熬夜或戒短视频吧！坚持越久奖励越高，手滑破戒也不清零累计阶段，冲动时还有「冷静一下」陪着你～"
+                            : "圆环里记录着你的每一次坚持！实在忍不住时点「冷静一下」做 60 秒呼吸或 5 分钟小锁机，破戒也不清零总阶段，慢慢变更好～";
+                    steps.add(new OnboardingUi.GuideStep(
+                            abstinenceGuideTarget,
+                            R.drawable.guide_mascot_calm,
+                            "温柔地和坏习惯说拜拜",
+                            msg,
+                            20, 4));
+                }
+            }
+            case FocusState.GUIDE_INSIGHTS -> {
+                if (insightsGuideTarget != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            insightsGuideTarget,
+                            R.drawable.guide_mascot_book,
+                            "你的每次努力都有小本本记着",
+                            "「数据统计」永久珍藏你的专注趋势和 7 日战绩，「时间线」能翻看每一笔时间的赚取与花费，超有成就感！",
+                            15, 5));
+                }
+            }
+            case FocusState.GUIDE_RULES -> {
+                if (rulesGuideTarget != null) {
+                    steps.add(new OnboardingUi.GuideStep(
+                            rulesGuideTarget,
+                            R.drawable.guide_mascot_think,
+                            "正经学习赚时，摸鱼应用设红线",
+                            "「学习」里的应用打开就能自动赚时间，「限制」里的娱乐应用共用今天余额，用完就会被小管家拦住啦～",
+                            15, 5));
+                }
+            }
+            default -> {}
+        }
+        return steps;
     }
 }

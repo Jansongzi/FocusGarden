@@ -24,14 +24,17 @@ final class FocusStateCheck {
         equal(30, FocusState.MODE_SWITCH_COST_MINUTES);
         equal(30, FocusState.DAILY_CAP_CHANGE_COST_MINUTES);
         equal(FocusState.THEME_SYSTEM, state.themeMode);
-        equal(FocusState.PALETTE_BLUE, state.colorTheme);
-        equal(false, state.setColorTheme(FocusState.PALETTE_SAGE));
+        equal(FocusState.PALETTE_SAGE, state.colorTheme);
+        equal(true, state.isShopItemOwned(ShopCatalog.SAGE_APP_THEME));
+        equal(false, state.isShopItemOwned(ShopCatalog.DEFAULT_APP_THEME));
+        equal(false, state.setColorTheme(FocusState.PALETTE_BLUE));
         equal(false, state.setColorTheme(FocusState.PALETTE_SAKURA));
         equal(false, state.setColorTheme(FocusState.PALETTE_INDULGENT));
         equal(false, state.setColorTheme(FocusState.PALETTE_LAY_FLAT));
         equal(false, state.setColorTheme(99));
-        equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
+        equal(true, state.setColorTheme(FocusState.PALETTE_SAGE));
         checkAppThemePurchase(noon);
+        checkFreshInstallAndOnboarding(noon);
         equal(3, FocusState.INDULGENT_UNLOCK_DAYS);
         equal(5, FocusState.MAX_INDULGENT_CARDS);
         equal(2, FocusState.INDULGENT_CARDS_PER_LAY_FLAT);
@@ -589,24 +592,31 @@ final class FocusStateCheck {
 
     private static void checkAppThemePurchase(long noon) {
         FocusState state = new FocusState();
-        var sageTheme = ShopCatalog.findPermanentItem(ShopCatalog.SAGE_APP_THEME);
-        equal(120, sageTheme.costMinutes());
-        state.creditMs = 119 * MINUTE;
-        equal(false, state.buyPermanentShopItem(sageTheme.id(), sageTheme.costMinutes(), sageTheme.name(), noon, UTC));
-        equal(false, state.buyPermanentShopItem(sageTheme.id(), 119, sageTheme.name(), noon, UTC));
-        equal(false, state.isShopItemOwned(sageTheme.id()));
-        state.creditMs += MINUTE;
-        equal(true, state.buyPermanentShopItem(sageTheme.id(), sageTheme.costMinutes(), sageTheme.name(), noon, UTC));
-        equal(0L, state.creditMs);
-        equal(false, state.buyPermanentShopItem(sageTheme.id(), sageTheme.costMinutes(), sageTheme.name(), noon, UTC));
-        equal(true, state.setColorTheme(FocusState.PALETTE_SAGE));
         equal(FocusState.PALETTE_SAGE, state.colorTheme);
+        equal(true, state.isShopItemOwned(ShopCatalog.SAGE_APP_THEME));
+        var sageTheme = ShopCatalog.findPermanentItem(ShopCatalog.SAGE_APP_THEME);
+        equal("青苔留白", sageTheme.name());
+        equal(0, sageTheme.costMinutes());
+
+        var blueTheme = ShopCatalog.findPermanentItem(ShopCatalog.DEFAULT_APP_THEME);
+        equal("晴空蓝", blueTheme.name());
+        equal(60, blueTheme.costMinutes());
+        state.creditMs = 59 * MINUTE;
+        equal(false, state.buyPermanentShopItem(blueTheme.id(), blueTheme.costMinutes(), blueTheme.name(), noon, UTC));
+        equal(false, state.buyPermanentShopItem(blueTheme.id(), 59, blueTheme.name(), noon, UTC));
+        equal(false, state.isShopItemOwned(blueTheme.id()));
+        state.creditMs += MINUTE;
+        equal(true, state.buyPermanentShopItem(blueTheme.id(), blueTheme.costMinutes(), blueTheme.name(), noon, UTC));
+        equal(0L, state.creditMs);
+        equal(false, state.buyPermanentShopItem(blueTheme.id(), blueTheme.costMinutes(), blueTheme.name(), noon, UTC));
+        equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
+        equal(FocusState.PALETTE_BLUE, state.colorTheme);
 
         var sakuraTheme = ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME);
         equal("春日柔粉", sakuraTheme.name());
         equal(120, sakuraTheme.costMinutes());
         equal(false, state.setColorTheme(FocusState.PALETTE_SAKURA));
-        equal(FocusState.PALETTE_SAGE, state.colorTheme);
+        equal(FocusState.PALETTE_BLUE, state.colorTheme);
         state.creditMs = 119 * MINUTE;
         equal(false, state.buyPermanentShopItem(sakuraTheme.id(), sakuraTheme.costMinutes(), sakuraTheme.name(), noon, UTC));
         equal(false, state.buyPermanentShopItem(sakuraTheme.id(), 119, sakuraTheme.name(), noon, UTC));
@@ -620,7 +630,9 @@ final class FocusStateCheck {
         equal(true, state.setColorTheme(FocusState.PALETTE_SAGE));
         equal(FocusState.PALETTE_SAGE, state.colorTheme);
         equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
+        equal(FocusState.PALETTE_BLUE, state.colorTheme);
         equal(true, state.isShopItemOwned(sageTheme.id()));
+        equal(true, state.isShopItemOwned(blueTheme.id()));
         equal(true, state.isShopItemOwned(sakuraTheme.id()));
 
         // Mode-locked non-purchasable auto hot-swap themes (Indulgent Orange & Lay-Flat Purple)
@@ -896,6 +908,24 @@ final class FocusStateCheck {
         equal(true, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
         equal(false, sleep.hasPendingEarlySleepReward(at("2026-11-25T08:05:00Z"), UTC));
         equal(0L, sleep.claimPendingEarlySleep(at("2026-11-25T08:05:00Z"), UTC));
+
+        // Daytime and cross-midnight schedules work with arbitrary minutes.
+        for (boolean overnight : new boolean[]{false, true}) {
+            var custom = new FocusState();
+            custom.sleepStart = overnight ? 23 * 60 + 57 : 8 * 60 + 13;
+            custom.sleepEnd = overnight ? 6 * 60 + 43 : 15 * 60 + 47;
+            long start = at(overnight ? "2026-11-25T23:57:00Z" : "2026-11-25T08:13:00Z");
+            long end = at(overnight ? "2026-11-26T06:43:00Z" : "2026-11-25T15:47:00Z");
+            custom.enableBedtime(start - 1, UTC);
+            equal(end, custom.sleepTargetEndMs);
+            equal(false, custom.isSleepLocked(start - 1, UTC));
+            equal(true, custom.isSleepLocked(start, UTC));
+            equal(BEDTIME, custom.restriction(VIDEO, end - 1, UTC));
+            equal(false, custom.isSleepLocked(end, UTC));
+            equal(false, custom.evaluateEarlySleep(end - 1, UTC));
+            equal(true, custom.evaluateEarlySleep(end, UTC));
+            equal(10 * MINUTE, custom.claimPendingEarlySleep(end, UTC));
+        }
 
         // Enabling bedtime at 06:50 inside an existing sleep window must lock now, but require next full 23:00->07:00 cycle for reward
         var midEnable = new FocusState();
@@ -1358,6 +1388,43 @@ final class FocusStateCheck {
                 rewardDay + 2 * MINUTE, UTC);
         equal(true, backfill.rewardClaimed);
         equal(0L, ac.claimAbstinence("backfill", at("2026-11-27T10:00:00Z"), UTC));
+    }
+
+    private static void checkFreshInstallAndOnboarding(long noon) {
+        FocusState fresh = new FocusState();
+        fresh.applyFreshInstallDefaults(noon, UTC);
+        equal(FocusState.RateMode.EASY, fresh.rateMode);
+        equal(FocusState.RateMode.EASY, fresh.previousMode);
+        equal(50, fresh.learningPercent);
+        equal(50, fresh.focusPercent);
+        equal(50, fresh.offlinePercent);
+        equal(40L * MINUTE, fresh.creditMs);
+        equal("2026-11-22", fresh.lastResetDate);
+        equal(FocusState.PALETTE_SAGE, fresh.colorTheme);
+        equal(true, fresh.isShopItemOwned(ShopCatalog.SAGE_APP_THEME));
+        equal(false, fresh.isShopItemOwned(ShopCatalog.DEFAULT_APP_THEME));
+
+        equal(true, fresh.hiddenCards.contains("sleep"));
+        equal(true, fresh.hiddenCards.contains("todos"));
+        equal(true, fresh.hiddenCards.contains("steps"));
+        equal(false, fresh.hiddenCards.contains("apps"));
+        equal(false, fresh.hiddenCards.contains("timer"));
+        equal(false, fresh.hiddenCards.contains("habits"));
+
+        equal(0, fresh.completedGuides.size());
+        equal(false, fresh.isGuideCompleted(FocusState.GUIDE_HOME));
+        fresh.markGuideCompleted(FocusState.GUIDE_HOME);
+        equal(true, fresh.isGuideCompleted(FocusState.GUIDE_HOME));
+        fresh.markAllGuidesCompleted();
+        equal(FocusState.ALL_GUIDE_KEYS.size(), fresh.completedGuides.size());
+        fresh.resetAllGuides();
+        equal(0, fresh.completedGuides.size());
+
+        // Same-day reset check preserves initial 40m credit; crossing 04:00 resets it as normal
+        equal(false, fresh.syncResetDay(noon + 60_000L, UTC));
+        equal(40L * MINUTE, fresh.creditMs);
+        equal(true, fresh.syncResetDay(at("2026-11-23T04:05:00Z"), UTC));
+        equal(0L, fresh.creditMs);
     }
 
     private static long at(String instant) {

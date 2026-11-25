@@ -72,10 +72,10 @@ final class ShopCatalog {
     static final String SAGE_APP_THEME = "app_theme_sage";
     static final String SAKURA_APP_THEME = "app_theme_sakura";
     private static final List<AppTheme> APP_THEMES = List.of(
-            new AppTheme(DEFAULT_APP_THEME, FocusState.PALETTE_BLUE, "晴空蓝", "经典清爽", 0,
-                    new int[]{0xff1a6bff, 0xff1153d6, 0xffeaf2ff, 0xfff3f5f9}),
-            new AppTheme(SAGE_APP_THEME, FocusState.PALETTE_SAGE, "青苔留白", "森系暖白", 120,
+            new AppTheme(SAGE_APP_THEME, FocusState.PALETTE_SAGE, "青苔留白", "森系暖白", 0,
                     new int[]{0xff7fa47b, 0xff4e754d, 0xffdfebcb, 0xfff9f6ed}),
+            new AppTheme(DEFAULT_APP_THEME, FocusState.PALETTE_BLUE, "晴空蓝", "经典清爽", 60,
+                    new int[]{0xff1a6bff, 0xff1153d6, 0xffeaf2ff, 0xfff3f5f9}),
             new AppTheme(SAKURA_APP_THEME, FocusState.PALETTE_SAKURA, "春日柔粉", "樱花配色", 120,
                     new int[]{0xffd67b96, 0xffa64d69, 0xfff8dce6, 0xfffffbf8}));
 

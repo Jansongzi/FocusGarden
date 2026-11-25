@@ -19,6 +19,7 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -1684,11 +1685,11 @@ pill.setSingleLine(true);
             }
 
             if (tab == TAB_ALL || tab == TAB_APPEARANCE) {
-                ShelfItem sage = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAGE_APP_THEME),
+                ShelfItem blueTheme = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.DEFAULT_APP_THEME),
                         ShopIllustrationView.Kind.THEME, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
                 ShelfItem sakura = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME),
                         ShopIllustrationView.Kind.THEME, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                addShelfSection(activity, shelfContentWrap, "应用主题", sage, sakura);
+                addShelfSection(activity, shelfContentWrap, "应用主题", blueTheme, sakura);
             }
 
             // Piggy Bank Collection Shelves
@@ -1786,7 +1787,21 @@ pill.setSingleLine(true);
             win.setWindowAnimations(R.style.Animation_FocusGarden_BottomSheet);
         }
 
+        final OnboardingUi.SpotlightGuideView[] shopGuideRef = {null};
+        dialog.setOnKeyListener((d, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP
+                    && shopGuideRef[0] != null) {
+                shopGuideRef[0].dismiss();
+                return true;
+            }
+            return false;
+        });
+
         dialog.setOnDismissListener(d -> {
+            if (shopGuideRef[0] != null) {
+                shopGuideRef[0].dismissWithoutFinish();
+                shopGuideRef[0] = null;
+            }
             if (balanceAnimator[0] != null) {
                 balanceAnimator[0].cancel();
                 balanceAnimator[0] = null;
@@ -1802,6 +1817,30 @@ pill.setSingleLine(true);
             }
         });
         dialog.show();
+        if (!state.isGuideCompleted(FocusState.GUIDE_SHOP)) {
+            overlayHost.post(() -> {
+                if (!dialog.isShowing() || state.isGuideCompleted(FocusState.GUIDE_SHOP)) return;
+                List<OnboardingUi.GuideStep> steps = List.of(
+                        new OnboardingUi.GuideStep(
+                                navRow,
+                                R.drawable.guide_mascot_gift,
+                                "时光杂货铺开张啦！",
+                                "攒下的时间不仅能用来玩手机，还能在这里兑换扩容卡、晴空蓝/樱花粉主题、可爱小猪皮肤，或者写下喝奶茶、看电影的现实心愿哦～",
+                                16, 6),
+                        new OnboardingUi.GuideStep(
+                                bagBtnWrap,
+                                R.drawable.guide_mascot_bag,
+                                "宝贝全都收在背包里",
+                                "买到的道具、皮肤和兑出来的心愿券都在右上角小背包里，随时点进来使用、换装或核销心愿～",
+                                14, 6)
+                );
+                shopGuideRef[0] = OnboardingUi.SpotlightGuideView.show(overlayHost, scroller, steps, () -> {
+                    shopGuideRef[0] = null;
+                    state.markGuideCompleted(FocusState.GUIDE_SHOP);
+                    FocusStore.get(activity).save();
+                });
+            });
+        }
         return dialog;
     }
 

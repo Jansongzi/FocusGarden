@@ -27,6 +27,7 @@ final class FocusState {
     static final int EARLY_SLEEP_POST_WINDOW_MIN = 240;
     static final int RESET_HOUR = 4;
     static final int INITIAL_VAULT_MINUTES = 15;
+    static final int INITIAL_CREDIT_MINUTES = 40;
     static final int VAULT_EXPANSION_STEP_MINUTES = 15;
     static final int MAX_VAULT_MINUTES = 120;
     static final long MAX_VAULT_MS = MAX_VAULT_MINUTES * MINUTE;
@@ -56,6 +57,16 @@ final class FocusState {
     static final long ABSTINENCE_BACKDATE_GRACE_MS = 5L * MINUTE;
     static final int ABSTINENCE_CONFIG_CHANGE_COST_MINUTES = 15;
     static final int MAX_ABSTINENCE_RUNS = 40;
+
+    static final String GUIDE_PERMS = "perm_setup";
+    static final String GUIDE_HOME = "home";
+    static final String GUIDE_REDEEM = "redeem";
+    static final String GUIDE_ABSTINENCE = "abstinence";
+    static final String GUIDE_INSIGHTS = "insights";
+    static final String GUIDE_RULES = "rules";
+    static final String GUIDE_SHOP = "shop";
+    static final List<String> ALL_GUIDE_KEYS = List.of(
+            GUIDE_PERMS, GUIDE_HOME, GUIDE_REDEEM, GUIDE_ABSTINENCE, GUIDE_INSIGHTS, GUIDE_RULES, GUIDE_SHOP);
 
     enum Category { LEARNING, LIMITED }
     enum Restriction { NONE, FOCUS, BEDTIME, BUDGET, SOBER }
@@ -330,6 +341,7 @@ final class FocusState {
     final TreeSet<Long> heartbeats = new TreeSet<>();
     final Set<String> hiddenCards = new LinkedHashSet<>();
     final Set<String> expandedRedeemCards = new LinkedHashSet<>();
+    final Set<String> completedGuides = new LinkedHashSet<>();
 
     long creditMs;
     DisciplineCategory stopwatchCategory = DisciplineCategory.UNCLASSIFIED;
@@ -377,7 +389,7 @@ final class FocusState {
     int habitDailyCapMinutes = 25;
     int stepDailyCapMinutes = 30;
     int themeMode = THEME_SYSTEM;
-    int colorTheme = PALETTE_BLUE;
+    int colorTheme = PALETTE_SAGE;
     final Set<String> freeConfigUsedKeys = new LinkedHashSet<>();
 
     int presetWork = 25;
@@ -535,6 +547,42 @@ final class FocusState {
         ensureBuiltInBlockAppearances(true);
         seedDefaultRewardsIfNeeded();
         syncLegacyPercents();
+    }
+
+    void applyFreshInstallDefaults(long now, ZoneId zone) {
+        rateMode = RateMode.EASY;
+        previousMode = RateMode.EASY;
+        syncLegacyPercents();
+        creditMs = INITIAL_CREDIT_MINUTES * MINUTE;
+        String todayStr = date(now, zone);
+        lastResetDate = todayStr;
+        colorTheme = PALETTE_SAGE;
+        hiddenCards.clear();
+        hiddenCards.add("sleep");
+        hiddenCards.add("todos");
+        hiddenCards.add("steps");
+        completedGuides.clear();
+        if (firstSeenMs == 0L) firstSeenMs = now;
+        seedDefaultRewardsIfNeeded();
+        logEvent(todayStr, now, "INFO", "初次见面欢迎礼",
+                "初始赠送 " + INITIAL_CREDIT_MINUTES + " 分钟今日可用时长（简单模式 2:1）",
+                INITIAL_CREDIT_MINUTES * MINUTE);
+    }
+
+    boolean isGuideCompleted(String key) {
+        return key != null && completedGuides.contains(key);
+    }
+
+    void markGuideCompleted(String key) {
+        if (key != null && !key.isEmpty()) completedGuides.add(key);
+    }
+
+    void markAllGuidesCompleted() {
+        completedGuides.addAll(ALL_GUIDE_KEYS);
+    }
+
+    void resetAllGuides() {
+        completedGuides.clear();
     }
 
     void ensureBuiltInBlockAppearances(boolean enableMissingBuiltIns) {
@@ -1437,7 +1485,7 @@ final class FocusState {
     }
 
     boolean isShopItemOwned(String id) {
-        return "default".equals(id) || ShopCatalog.DEFAULT_APP_THEME.equals(id) || ownedShopItems.contains(id);
+        return "default".equals(id) || ShopCatalog.SAGE_APP_THEME.equals(id) || ownedShopItems.contains(id);
     }
 
     boolean buyPermanentShopItem(String id, int costMinutes, String title, long now, ZoneId zone) {
