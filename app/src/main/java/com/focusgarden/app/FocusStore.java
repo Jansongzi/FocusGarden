@@ -130,10 +130,12 @@ final class FocusStore {
         state.restMinutes = root.optInt("restMinutes");
         state.roundsLeft = root.optInt("roundsLeft");
         state.inBreak = root.optBoolean("inBreak");
+        state.countdownCategory = FocusState.DisciplineCategory.stored(root.optString("countdownCategory"));
 
         state.offlineStartMs = root.optLong("offlineStartMs");
         state.offlineAccumulatedMs = root.optLong("offlineAccumulatedMs");
         state.offlineUnredeemedMs = root.optLong("offlineUnredeemedMs");
+        state.stopwatchCategory = FocusState.DisciplineCategory.stored(root.optString("stopwatchCategory"));
 
         state.soberUntil = root.optLong("soberUntil");
         state.soberPausedMs = Math.max(0L, root.optLong("soberPausedMs"));
@@ -186,7 +188,6 @@ final class FocusStore {
         state.freeHabitSlotUsed = root.optBoolean("freeHabitSlotUsed", false);
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
-        state.blockTheme = root.optInt("blockTheme", 0);
         loadBlockAppearances(root);
 
         JSONArray earlySleep = root.optJSONArray("earlySleepDays");
@@ -402,6 +403,16 @@ final class FocusStore {
             day.limitedMs = row.optLong("limited");
             day.focusMs = row.optLong("focus");
             day.offlineMs = row.optLong("offline");
+            day.signedIn = row.optBoolean("signedIn");
+            JSONObject categoryMs = row.optJSONObject("disciplineCategoryMs");
+            for (Iterator<String> c = keys(categoryMs); c.hasNext();) {
+                String key = c.next();
+                FocusState.DisciplineCategory category = FocusState.DisciplineCategory.stored(key);
+                long duration = categoryMs.optLong(key);
+                if (category != FocusState.DisciplineCategory.UNCLASSIFIED && duration > 0) {
+                    day.disciplineCategoryMs.put(category, duration);
+                }
+            }
             day.earnedMs = row.optLong("earned");
             day.spentMs = row.optLong("spent");
             day.checkIns = row.optInt("checkIns");
@@ -470,9 +481,19 @@ final class FocusStore {
             String id = FocusState.DEFAULT_BLOCK_APPEARANCE;
             state.blockAppearances.put(id, FocusState.BlockAppearance.defaults(id, root.optString("blockMessage", "")));
         }
-        state.rotateBlockAppearances = root.optBoolean("rotateBlockAppearances");
-        state.selectedBlockAppearance = root.optString("selectedBlockAppearance", FocusState.DEFAULT_BLOCK_APPEARANCE);
-        state.selectedBlockAppearance = state.selectedBlockAppearance().id();
+        state.enabledBlockAppearances.clear();
+        JSONArray enabled = root.optJSONArray("enabledBlockAppearances");
+        if (enabled != null) {
+            for (int i = 0; i < enabled.length(); i++) state.setBlockAppearanceEnabled(enabled.optString(i), true);
+        } else if (root.optBoolean("rotateBlockAppearances")) {
+            state.enabledBlockAppearances.addAll(state.blockAppearances.keySet());
+        } else {
+            state.setBlockAppearanceEnabled(root.optString("selectedBlockAppearance",
+                    FocusState.DEFAULT_BLOCK_APPEARANCE), true);
+        }
+        if (state.enabledBlockAppearances.isEmpty()) {
+            state.enabledBlockAppearances.add(state.blockAppearances.keySet().iterator().next());
+        }
         state.lastBlockAppearance = root.optString("lastBlockAppearance", "");
     }
 
@@ -546,9 +567,11 @@ final class FocusStore {
                     .put("restMinutes", state.restMinutes)
                     .put("roundsLeft", state.roundsLeft)
                     .put("inBreak", state.inBreak)
+                    .put("countdownCategory", state.countdownCategory.name())
                     .put("offlineStartMs", state.offlineStartMs)
                     .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
                     .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
+                    .put("stopwatchCategory", state.stopwatchCategory.name())
                     .put("soberUntil", state.soberUntil)
                     .put("soberPausedMs", state.soberPausedMs)
                     .put("soberVaultPaid", state.soberVaultPaid)
@@ -571,10 +594,8 @@ final class FocusStore {
                     .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
                     .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
-                    .put("blockTheme", state.blockTheme)
                     .put("blockAppearances", blockAppearances)
-                    .put("rotateBlockAppearances", state.rotateBlockAppearances)
-                    .put("selectedBlockAppearance", state.selectedBlockAppearance)
+                    .put("enabledBlockAppearances", new JSONArray(state.enabledBlockAppearances))
                     .put("lastBlockAppearance", state.lastBlockAppearance)
                     .put("earlySleepDays", new JSONArray(state.earlySleepDays))
                     .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
@@ -691,11 +712,17 @@ final class FocusStore {
                             .put("detail", ev.detail())
                             .put("delta", ev.deltaMs()));
                 }
+                JSONObject categoryMs = new JSONObject();
+                for (var category : day.disciplineCategoryMs.entrySet()) {
+                    categoryMs.put(category.getKey().name(), category.getValue());
+                }
                 days.put(entry.getKey(), new JSONObject()
                         .put("learning", day.learningMs)
                         .put("limited", day.limitedMs)
                         .put("focus", day.focusMs)
                         .put("offline", day.offlineMs)
+                        .put("signedIn", day.signedIn)
+                        .put("disciplineCategoryMs", categoryMs)
                         .put("earned", day.earnedMs)
                         .put("spent", day.spentMs)
                         .put("checkIns", day.checkIns)

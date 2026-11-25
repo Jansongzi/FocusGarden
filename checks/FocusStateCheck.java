@@ -516,32 +516,78 @@ final class FocusStateCheck {
         equal(2, strip[47]);
 
         checkBlockAppearances();
-        System.out.println("PASS: economy, strict locks, and restriction appearance rotation");
+        checkSignInAndDisciplineReports(noon);
+        System.out.println("PASS: economy, daily sign-in, discipline categories, strict locks and restriction appearance rotation");
+    }
+
+    private static void checkSignInAndDisciplineReports(long noon) {
+        var state = new FocusState();
+        LocalDate day = FocusState.logicDate(noon, UTC);
+        state.syncResetDay(noon, UTC);
+        equal(0L, state.creditMs);
+        equal(true, state.signIn(noon, UTC));
+        equal(false, state.signIn(noon + MINUTE, UTC));
+        equal(10 * MINUTE, state.creditMs);
+        equal(true, state.isSignedIn(day));
+        equal(0L, state.day(day.toString()).exchangeEarnedMinutes());
+        long boundary = FocusState.nextResetMs(noon, UTC);
+        equal(false, state.signIn(boundary - 1, UTC));
+        state.syncResetDay(boundary, UTC);
+        equal(0L, state.creditMs);
+        equal(false, state.isSignedIn(day.plusDays(1)));
+        equal(true, state.signIn(boundary, UTC));
+        equal(10 * MINUTE, state.creditMs);
+        equal(true, state.isSignedIn(day));
+
+        var durations = new FocusState();
+        durations.day(day.minusDays(1).toString()).offlineMs = 4 * MINUTE;
+        durations.startOffline(noon, FocusState.DisciplineCategory.WORK);
+        durations.pauseOffline(noon + 2 * MINUTE);
+        durations.startOffline(noon + 5 * MINUTE);
+        var running = durations.disciplineReport(day, day, noon + 12 * MINUTE, UTC);
+        equal(9 * MINUTE, running.totalMs());
+        equal(1, running.activeDays());
+        equal(9 * MINUTE, running.categoryMs().get(FocusState.DisciplineCategory.WORK));
+        equal(3 * MINUTE, durations.claimOffline(noon + 12 * MINUTE, UTC));
+        equal(3 * MINUTE, durations.stopOffline(noon + 15 * MINUTE, UTC));
+        durations.start(2, 0, 1, noon + 16 * MINUTE, FocusState.DisciplineCategory.VOCABULARY);
+        equal(FocusState.Transition.FINISHED, durations.advance(noon + 18 * MINUTE, UTC));
+
+        var today = durations.disciplineReport(day, day, noon + 18 * MINUTE, UTC);
+        equal(14 * MINUTE, today.totalMs());
+        equal(12 * MINUTE, today.categoryMs().get(FocusState.DisciplineCategory.WORK));
+        equal(2 * MINUTE, today.categoryMs().get(FocusState.DisciplineCategory.VOCABULARY));
+        var custom = durations.disciplineReport(day.minusDays(1), day, noon + 18 * MINUTE, UTC);
+        equal(18 * MINUTE, custom.totalMs());
+        equal(4 * MINUTE, custom.categoryMs().get(FocusState.DisciplineCategory.UNCLASSIFIED));
     }
 
     private static void checkBlockAppearances() {
         FocusState state = new FocusState();
         String first = FocusState.DEFAULT_BLOCK_APPEARANCE;
         String second = "11111111-1111-1111-1111-111111111111";
+        String third = "22222222-2222-2222-2222-222222222222";
         var configured = new FocusState.BlockAppearance(second, true, 10, 230, 80, "Take a break");
         equal(30, configured.squarePercent());
         equal(175, configured.fullZoom());
         equal(48, configured.textSize());
         equal(first, state.nextBlockAppearance().id());
         state.blockAppearances.put(second, configured);
-        state.selectedBlockAppearance = second;
-        equal(configured, state.nextBlockAppearance());
-        state.rotateBlockAppearances = true;
+        state.blockAppearances.put(third, FocusState.BlockAppearance.defaults(third, ""));
+        equal(false, state.setBlockAppearanceEnabled(first, false));
         equal(first, state.nextBlockAppearance().id());
+        equal(true, state.setBlockAppearanceEnabled(second, true));
         state.lastBlockAppearance = first;
         equal(configured, state.nextBlockAppearance());
         equal(first, state.lastBlockAppearance);
         state.lastBlockAppearance = second;
         equal(first, state.nextBlockAppearance().id());
-        state.blockAppearances.remove(second);
+        equal(true, state.setBlockAppearanceEnabled(first, false));
+        equal(configured, state.nextBlockAppearance());
+        equal(true, state.removeBlockAppearance(second));
         equal(first, state.nextBlockAppearance().id());
-        state.rotateBlockAppearances = false;
-        equal(first, state.nextBlockAppearance().id());
+        equal(java.util.Set.of(first), state.enabledBlockAppearances);
+        equal(false, state.setBlockAppearanceEnabled(second, true));
         equal(false, FocusState.BlockAppearance.validId("../escape"));
     }
 

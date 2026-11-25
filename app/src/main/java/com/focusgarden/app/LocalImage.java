@@ -18,8 +18,14 @@ final class LocalImage {
     private LocalImage() {}
 
     static Bitmap load(AtomicFile image) {
+        return load(image, 1);
+    }
+
+    static Bitmap load(AtomicFile image, int sampleSize) {
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sampleSize;
         try (InputStream input = open(image)) {
-            return BitmapFactory.decodeStream(input);
+            return BitmapFactory.decodeStream(input, null, options);
         } catch (IOException e) {
             return null;
         }

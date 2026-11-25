@@ -245,17 +245,20 @@ final class RedeemUi {
         private final TextView labelView;
         private final int depthPx;
         private final int radiusDp;
-        private final boolean showGiftIcon;
         private Mode currentMode;
         private String currentLabel = "";
         private Runnable onPressAction;
 
         Pressable3DButton(Context context, int bodyHeightDp, int radiusDp, int textSp,
                           int hPadDp, boolean showGiftIcon) {
+            this(context, bodyHeightDp, radiusDp, textSp, hPadDp, showGiftIcon ? R.drawable.ic_gift : 0);
+        }
+
+        Pressable3DButton(Context context, int bodyHeightDp, int radiusDp, int textSp,
+                          int hPadDp, int iconRes) {
             super(context);
             this.depthPx = dp(context, 4);
             this.radiusDp = radiusDp;
-            this.showGiftIcon = showGiftIcon;
 
             int bodyPx = dp(context, bodyHeightDp);
             baseView = new View(context);
@@ -268,8 +271,8 @@ final class RedeemUi {
             faceBox.setGravity(Gravity.CENTER);
             faceBox.setPadding(dp(context, hPadDp), 0, dp(context, hPadDp), 0);
 
-            if (showGiftIcon) {
-                iconView = iconView(context, R.drawable.ic_gift, 17, goldInk());
+            if (iconRes != 0) {
+                iconView = iconView(context, iconRes, 17, goldInk());
                 LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(context, 17), dp(context, 17));
                 iconLp.rightMargin = dp(context, 7);
                 faceBox.addView(iconView, iconLp);
@@ -290,6 +293,17 @@ final class RedeemUi {
 
         void setActionListener(Runnable action) {
             this.onPressAction = action;
+        }
+
+        void setIcon(int iconRes) {
+            if (iconView != null) iconView.setImageResource(iconRes);
+        }
+
+        void setEnabledColors(int face, int base, int ink) {
+            baseView.setBackground(shape(getContext(), base, radiusDp));
+            faceBox.setBackground(shape(getContext(), face, radiusDp));
+            labelView.setTextColor(ink);
+            if (iconView != null) iconView.setColorFilter(ink);
         }
 
         void applyState(Mode mode, String label) {
@@ -327,9 +341,8 @@ final class RedeemUi {
                 }
                 case BLUE_ENABLED -> {
                     baseView.setVisibility(VISIBLE);
-                    baseView.setBackground(shape(getContext(), blueBase(), radiusDp));
-                    faceBox.setBackground(shape(getContext(), blueFace(), radiusDp));
-                    labelView.setTextColor(blueInk());
+                    setEnabledColors(blueFace(), blueBase(), blueInk());
+                    if (iconView != null) iconView.setVisibility(VISIBLE);
                 }
                 case BLUE_DISABLED -> {
                     baseView.setVisibility(INVISIBLE);
@@ -380,6 +393,10 @@ final class RedeemUi {
             if (!isEnabled()) return false;
             if (onPressAction != null) onPressAction.run();
             return true;
+        }
+
+        @Override public CharSequence getAccessibilityClassName() {
+            return android.widget.Button.class.getName();
         }
     }
 

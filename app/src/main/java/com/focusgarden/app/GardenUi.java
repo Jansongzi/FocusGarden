@@ -28,6 +28,7 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewOutlineProvider;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
@@ -316,19 +317,6 @@ final class GardenUi {
         return pillButton(context, title, RED_SOFT, RED, 14, 44);
     }
 
-    static TextView redeemPill(Context context, String label, boolean active) {
-        TextView v = text(context, label, 13, active ? ON_ACCENT : BLUE_DISABLED_TEXT, true);
-        v.setSingleLine(true);
-        v.setGravity(Gravity.CENTER);
-        v.setMinWidth(dp(context, 96));
-        v.setMinHeight(dp(context, 42));
-        v.setPadding(dp(context, 14), dp(context, 6), dp(context, 14), dp(context, 6));
-        v.setBackground(active
-                ? new RippleDrawable(ColorStateList.valueOf(0x30ffffff), shape(context, BLUE, 12), null)
-                : shape(context, BLUE_DISABLED_BG, 12));
-        return v;
-    }
-
     static ImageView iconView(Context context, int drawableRes, int sizeDp, int tint) {
         ImageView view = new ImageView(context);
         view.setImageResource(drawableRes);
@@ -469,55 +457,13 @@ final class GardenUi {
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(CARD);
         float r = dp(activity, 24);
-        bg.setCornerRadii(fromRight
-                ? new float[]{r, r, 0, 0, 0, 0, r, r}
-                : new float[]{r, r, r, r, 0, 0, 0, 0});
+        if (!fromRight) bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
         sheet.setBackground(bg);
-
-        FrameLayout grip = new FrameLayout(activity);
-        grip.setContentDescription(fromRight ? "向右拖动关闭面板" : "向下拖动关闭面板");
-        grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        View handle = new View(activity);
-        handle.setBackground(shape(activity, darkTheme ? 0xff3a4860 : 0xffd5dde9, 3));
-        grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, fromRight ? 4 : 42),
-                dp(activity, fromRight ? 18 : 4), Gravity.CENTER));
-        sheet.addView(grip, -1, dp(activity, 34));
-        int touchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
-        grip.setOnTouchListener(new View.OnTouchListener() {
-            private float down;
-
-            @Override public boolean onTouch(View view, MotionEvent event) {
-                float position = fromRight ? event.getRawX() : event.getRawY();
-                switch (event.getActionMasked()) {
-                    case MotionEvent.ACTION_DOWN -> {
-                        sheet.animate().cancel();
-                        down = position - (fromRight ? sheet.getTranslationX() : sheet.getTranslationY());
-                    }
-                    case MotionEvent.ACTION_MOVE -> {
-                        float distance = Math.max(0f, position - down - touchSlop);
-                        if (fromRight) sheet.setTranslationX(distance);
-                        else sheet.setTranslationY(distance);
-                    }
-                    case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        float distance = fromRight ? sheet.getTranslationX() : sheet.getTranslationY();
-                        int size = fromRight ? sheet.getWidth() : sheet.getHeight();
-                        if (event.getActionMasked() == MotionEvent.ACTION_UP
-                                && distance >= Math.min(dp(activity, 96), size * 0.2f)) {
-                            dialog.dismiss();
-                        } else {
-                            sheet.animate().translationX(0f).translationY(0f).setDuration(180)
-                                    .setInterpolator(new DecelerateInterpolator()).start();
-                        }
-                    }
-                    default -> {}
-                }
-                return true;
-            }
-        });
+        if (!fromRight) addBottomSheetGrip(activity, dialog, sheet);
 
         // Header
         LinearLayout head = row(activity);
-        head.setPadding(dp(activity, 20), dp(activity, 2), dp(activity, 20), dp(activity, 12));
+        head.setPadding(dp(activity, 20), dp(activity, fromRight ? 16 : 2), dp(activity, 20), dp(activity, 12));
         if (leadingAction != null) {
             head.addView(leadingAction);
             space(head, 10);
@@ -571,6 +517,34 @@ final class GardenUi {
                 win.setGravity(Gravity.RIGHT);
                 win.setLayout(Math.min(dp(activity, 420), Math.round(width * 0.88f)),
                         WindowManager.LayoutParams.MATCH_PARENT);
+                win.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                win.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                win.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+                if (Build.VERSION.SDK_INT >= 29) {
+                    win.setStatusBarContrastEnforced(false);
+                    win.setNavigationBarContrastEnforced(false);
+                }
+                if (Build.VERSION.SDK_INT >= 30) {
+                    win.setDecorFitsSystemWindows(false);
+                    WindowManager.LayoutParams attrs = win.getAttributes();
+                    attrs.setFitInsetsTypes(0);
+                    attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+                    win.setAttributes(attrs);
+                } else {
+                    win.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
+                    win.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+                }
+                sheet.setOnApplyWindowInsetsListener((view, insets) -> {
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        var edge = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                        sheet.setPadding(edge.left, edge.top, edge.right, edge.bottom);
+                    } else {
+                        sheet.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+                    }
+                    return insets;
+                });
             } else {
                 int height = viewport.getHeight();
                 if (height <= 0) height = activity.getResources().getDisplayMetrics().heightPixels;
@@ -585,7 +559,47 @@ final class GardenUi {
                     ? R.style.Animation_FocusGarden_RightSheet : R.style.Animation_FocusGarden_BottomSheet);
         }
         dialog.show();
+        if (fromRight) {
+            applySystemBars(win, darkTheme);
+            sheet.requestApplyInsets();
+        }
         return dialog;
+    }
+
+    private static void addBottomSheetGrip(Activity activity, Dialog dialog, LinearLayout sheet) {
+        FrameLayout grip = new FrameLayout(activity);
+        grip.setContentDescription("向下拖动关闭面板");
+        grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        View handle = new View(activity);
+        handle.setBackground(shape(activity, darkTheme ? 0xff3a4860 : 0xffd5dde9, 3));
+        grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, 42), dp(activity, 4), Gravity.CENTER));
+        sheet.addView(grip, -1, dp(activity, 34));
+        int touchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
+        grip.setOnTouchListener(new View.OnTouchListener() {
+            private float down;
+
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN -> {
+                        sheet.animate().cancel();
+                        down = event.getRawY() - sheet.getTranslationY();
+                    }
+                    case MotionEvent.ACTION_MOVE ->
+                            sheet.setTranslationY(Math.max(0f, event.getRawY() - down - touchSlop));
+                    case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        if (event.getActionMasked() == MotionEvent.ACTION_UP
+                                && sheet.getTranslationY() >= Math.min(dp(activity, 96), sheet.getHeight() * 0.2f)) {
+                            dialog.dismiss();
+                        } else {
+                            sheet.animate().translationY(0f).setDuration(180)
+                                    .setInterpolator(new DecelerateInterpolator()).start();
+                        }
+                    }
+                    default -> {}
+                }
+                return true;
+            }
+        });
     }
 
     static Dialog cardDialog(Activity activity, int iconRes, int badgeBg, int badgeTint,

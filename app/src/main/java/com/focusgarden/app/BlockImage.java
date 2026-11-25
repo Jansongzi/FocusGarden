@@ -24,6 +24,10 @@ final class BlockImage {
         return LocalImage.load(file(context, id));
     }
 
+    static Bitmap loadThumbnail(Context context, String id) {
+        return LocalImage.load(file(context, id), 4);
+    }
+
     static void clear(Context context, String id) {
         LocalImage.clear(file(context, id));
     }

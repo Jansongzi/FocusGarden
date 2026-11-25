@@ -6,42 +6,36 @@ import android.content.res.ColorStateList;
 import android.os.Build;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.TextUtils;
+import android.view.Gravity;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.CheckBox;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.IntConsumer;
 import java.util.function.Supplier;
 
 import static com.focusgarden.app.GardenUi.*;
 
 final class BlockAppearanceSettings {
+    private static final Executor IMAGE_IO = Executors.newSingleThreadExecutor();
+
     private BlockAppearanceSettings() {}
 
     static void show(MainActivity activity, FocusState state, Runnable onChanged) {
         LinearLayout body = column(activity);
-        LinearLayout rotateRow = row(activity);
-        weight(rotateRow, titleWithInfo(activity, "轮换显示", 15, INK,
-                "轮换显示", "开启后每次拦截按列表顺序切换界面。"));
-        SwitchView rotation = new SwitchView(activity, state.rotateBlockAppearances);
-        rotation.setContentDescription("轮换显示");
-        rotation.setOnToggleListener(enabled -> {
-            state.rotateBlockAppearances = enabled;
-            state.lastBlockAppearance = "";
-            onChanged.run();
-        });
-        rotateRow.addView(rotation);
-        rotateRow.setOnClickListener(view -> rotation.performClick());
-        body.addView(rotateRow);
-        gap(body, 14);
-
         LinearLayout list = column(activity);
         body.addView(list);
         Runnable refreshList = new Runnable() {
@@ -51,35 +45,50 @@ final class BlockAppearanceSettings {
                 for (var appearance : state.blockAppearances.values()) {
                     String title = "界面 " + ++number;
                     String id = appearance.id();
-                    boolean selected = id.equals(state.selectedBlockAppearance);
                     LinearLayout entry = row(activity);
                     entry.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
-                    entry.setBackground(touchCard(activity, SURFACE_SUBTLE, BORDER, 14));
+                    entry.addView(thumbnail(activity, appearance), dp(activity, 60), dp(activity, 84));
+                    space(entry, 12);
                     LinearLayout copy = column(activity);
                     copy.addView(text(activity, title, 15, INK, true));
-                    String layout = appearance.fullImage() ? "全屏图片" : "正方形大图";
-                    TextView sub = text(activity, layout + " · " + appearance.textSize() + " sp", 12, INK_SUB, false);
-                    copy.addView(sub);
+                    copy.addView(text(activity, appearance.fullImage() ? "全屏图片" : "正方形大图",
+                            12, INK_SUB, false));
                     if (!appearance.text().isEmpty()) {
                         TextView sample = text(activity, appearance.text(), 12, INK_SUB, false);
+                        sample.setMaxLines(2);
+                        sample.setEllipsize(TextUtils.TruncateAt.END);
                         copy.addView(sample);
                     }
                     weight(entry, copy);
-                    TextView choose = pillButton(activity, selected ? "默认" : "设为默认",
-                            selected ? BLUE_SOFT : CARD, BLUE, 12, 42);
-                    choose.setEnabled(!selected);
+                    CheckBox choose = new CheckBox(activity);
+                    choose.setContentDescription(title + "，加入轮换");
+                    choose.setMinWidth(dp(activity, 48));
+                    choose.setMinHeight(dp(activity, 48));
+                    choose.setButtonTintList(new ColorStateList(
+                            new int[][]{{android.R.attr.state_checked}, {}}, new int[]{BLUE, MUTED}));
+                    Runnable applySelection = () -> {
+                        boolean checked = state.enabledBlockAppearances.contains(id);
+                        choose.setChecked(checked);
+                        entry.setBackground(touchCard(activity, checked ? BLUE_SOFT : SURFACE_SUBTLE,
+                                checked ? blueStroke() : BORDER, 14));
+                    };
                     choose.setOnClickListener(v -> {
-                        state.selectedBlockAppearance = id;
-                        onChanged.run();
-                        run();
+                        tapHaptic(v);
+                        if (state.setBlockAppearanceEnabled(id, choose.isChecked())) onChanged.run();
+                        else Toast.makeText(activity, "至少保留一个界面", Toast.LENGTH_SHORT).show();
+                        applySelection.run();
                     });
+                    applySelection.run();
                     entry.addView(choose, -2, -2);
                     list.addView(entry, -1, -2);
                     gap(list, 8);
-                    entry.setOnClickListener(v -> edit(activity, state, appearance, title, () -> {
-                        onChanged.run();
-                        run();
-                    }));
+                    entry.setOnClickListener(v -> {
+                        tapHaptic(v);
+                        edit(activity, state, appearance, title, () -> {
+                            onChanged.run();
+                            run();
+                        });
+                    });
                 }
             }
         };
@@ -98,7 +107,32 @@ final class BlockAppearanceSettings {
         });
         gap(body, 6);
         body.addView(add, -1, -2);
-        bottomSheet(activity, "自定义拦截提示", null, body);
+        bottomSheet(activity, "自定义拦截提示页", "勾选即生效，每次触发拦截时轮换。点击卡片编辑。", body);
+    }
+
+    private static View thumbnail(MainActivity activity, FocusState.BlockAppearance appearance) {
+        FrameLayout frame = new FrameLayout(activity);
+        frame.setBackground(shape(activity, 0xff10352c, 10));
+        frame.setClipToOutline(true);
+        frame.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        ImageView photo = new ImageView(activity);
+        boolean full = appearance.fullImage();
+        photo.setScaleType(full ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.FIT_CENTER);
+        photo.setImageResource(BlockScreen.builtInImage(full, FocusState.Restriction.BUDGET));
+        int square = dp(activity, 60 * appearance.squarePercent() / 100);
+        frame.addView(photo, new FrameLayout.LayoutParams(full ? -1 : square, full ? -1 : square, Gravity.CENTER));
+        Context app = activity.getApplicationContext();
+        if (BlockImage.hasCustom(app, appearance.id())) IMAGE_IO.execute(() -> {
+            var bitmap = BlockImage.loadThumbnail(app, appearance.id());
+            if (bitmap == null) return;
+            activity.runOnUiThread(() -> {
+                if (frame.isAttachedToWindow()) {
+                    photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    photo.setImageBitmap(bitmap);
+                } else bitmap.recycle();
+            });
+        });
+        return frame;
     }
 
     private static void edit(MainActivity activity, FocusState state, FocusState.BlockAppearance appearance,
@@ -135,25 +169,18 @@ final class BlockAppearanceSettings {
         gap(body, 14);
 
         TextView photo = secondaryButton(activity, "");
-        TextView reset = secondaryButton(activity, "恢复内置图片");
         Runnable refreshPhoto = () -> {
-            boolean custom = BlockImage.hasCustom(activity, id);
-            photo.setText(custom ? "更换自定义图片" : "选择自定义图片");
+            photo.setText(BlockImage.hasCustom(activity, id) ? "更换自定义图片" : "选择自定义图片");
             photo.setEnabled(true);
-            reset.setEnabled(true);
-            reset.setVisibility(custom ? View.VISIBLE : View.GONE);
         };
         photo.setOnClickListener(v -> {
-            if (activity.pickBlockImage(id, refreshPhoto)) {
-                photo.setEnabled(false);
-                reset.setEnabled(false);
-            }
+            photo.setEnabled(false);
+            if (!activity.pickBlockImage(id, () -> {
+                refreshPhoto.run();
+                onChanged.run();
+            })) photo.setEnabled(true);
         });
-        reset.setOnClickListener(v -> activity.resetBlockImage(id, refreshPhoto));
         body.addView(photo, -1, -2);
-        LinearLayout.LayoutParams resetLp = new LinearLayout.LayoutParams(-1, -2);
-        resetLp.topMargin = dp(activity, 8);
-        body.addView(reset, resetLp);
         refreshPhoto.run();
         gap(body, 16);
 
@@ -173,7 +200,7 @@ final class BlockAppearanceSettings {
         gap(body, 12);
         LinearLayout actions = row(activity);
         TextView preview = secondaryButton(activity, "预览");
-        preview.setOnClickListener(v -> preview(activity, draft.get(), state.blockTheme));
+        preview.setOnClickListener(v -> preview(activity, draft.get()));
         weight(actions, preview);
         space(actions, 8);
         TextView save = primaryButton(activity, "保存界面");
@@ -198,9 +225,7 @@ final class BlockAppearanceSettings {
             confirmDialog(activity, R.drawable.ic_close, RED_SOFT, RED,
                     "删除这个拦截界面？", "会同时移除此界面的自定义图片和文字。",
                     "取消", "删除", true, () -> {
-                        if (state.blockAppearances.size() <= 1) return;
-                        state.blockAppearances.remove(id);
-                        state.selectedBlockAppearance = state.selectedBlockAppearance().id();
+                        if (!state.removeBlockAppearance(id)) return;
                         BlockImage.clear(activity, id);
                         onChanged.run();
                         sheet.dismiss();
@@ -232,11 +257,11 @@ final class BlockAppearanceSettings {
         return control;
     }
 
-    private static void preview(MainActivity activity, FocusState.BlockAppearance appearance, int theme) {
+    private static void preview(MainActivity activity, FocusState.BlockAppearance appearance) {
         Dialog dialog = new Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         BlockScreen screen = new BlockScreen(activity, appearance, "关闭预览", dialog::dismiss);
-        screen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), theme, FocusState.Restriction.BUDGET));
+        screen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), FocusState.Restriction.BUDGET));
         screen.setStatus("可用时间已耗尽");
         Window window = dialog.getWindow();
         if (Build.VERSION.SDK_INT >= 30) window.setDecorFitsSystemWindows(false);

@@ -225,7 +225,7 @@ final class AbstinenceUi {
             gap(goal, 11);
 
             LinearLayout actions = row(activity);
-            weight(actions, dashboardAction(activity, "冷静一下", R.drawable.ic_shield, RED_SOFT, RED, redStroke(),
+            weight(actions, dashboardAction(activity, "冷静一下", R.drawable.ic_shield, BLUE, ON_ACCENT, blueStroke(),
                     () -> showUrgeRescueDialog(activity, state, item, onChanged)));
             space(actions, 9);
             weight(actions, dashboardAction(activity, "日记与趋势", R.drawable.ic_timeline, BLUE_SOFT, BLUE, blueStroke(),
@@ -821,6 +821,17 @@ final class AbstinenceUi {
                 preview.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 addView(preview, -1, -2);
             }
+            if (item.relapseDates.contains(key) || selected.isBefore(today)) {
+                TextView review = pillButton(activity, "管理当天破戒记录", SURFACE_SUBTLE, INK_SUB, 10, 36);
+                review.setOnClickListener(v -> {
+                    tapHaptic(v);
+                    showRelapseDiaryDialog(activity, state, item, selected, onChanged);
+                });
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
+                params.gravity = Gravity.END;
+                params.topMargin = dp(activity, 8);
+                addView(review, params);
+            }
             gap(this, 11);
             LinearLayout reset = dashboardAction(activity, "记录破戒并重置计时", R.drawable.ic_clock,
                     isDark() ? 0xffad3242 : 0xffd43643, 0xffffffff, redStroke(),
@@ -1109,6 +1120,25 @@ final class AbstinenceUi {
     private static void showDateDiaryDialog(MainActivity activity, FocusState state,
                                             FocusState.Abstinence item, LocalDate date, Runnable onSaved) {
         String key = date.toString();
+        LinearLayout body = column(activity);
+        EditText noteInput = styledInput(activity, "记下当天的心情、进展或收获",
+                item.diaryNotes.getOrDefault(key, ""), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        noteInput.setSingleLine(false);
+        noteInput.setMinLines(3);
+        noteInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(120)});
+        body.addView(noteInput, -1, -2);
+        cardDialog(activity, R.drawable.ic_edit, BLUE_SOFT, BLUE, formatDay(date) + " · 戒断日记",
+                null, body, "取消", "保存", false, true, () -> {
+                    state.setAbstinenceCalendarRecord(item.id, date, item.relapseDates.contains(key),
+                            noteInput.getText().toString().trim(), item.diaryTriggers.getOrDefault(key, ""),
+                            System.currentTimeMillis(), ZoneId.systemDefault());
+                    onSaved.run();
+                });
+    }
+
+    private static void showRelapseDiaryDialog(MainActivity activity, FocusState state,
+                                               FocusState.Abstinence item, LocalDate date, Runnable onSaved) {
+        String key = date.toString();
         boolean initRelapsed = item.relapseDates.contains(key);
         boolean[] relapsed = {initRelapsed};
         String[] chosenTrigger = {item.diaryTriggers.getOrDefault(key, "")};
@@ -1153,7 +1183,7 @@ final class AbstinenceUi {
                 : "随时补充情绪与复盘笔记。";
 
         cardDialog(activity, R.drawable.ic_edit, BLUE_SOFT, BLUE,
-                date.getMonthValue() + "月" + date.getDayOfMonth() + "日 · 复发日记",
+                formatDay(date) + " · 管理破戒记录",
                 subNote, body, "取消", "保存", false, true, () -> {
                     state.setAbstinenceCalendarRecord(item.id, date, relapsed[0],
                             noteInput.getText().toString().trim(), chosenTrigger[0],

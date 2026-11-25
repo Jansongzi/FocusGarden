@@ -19,7 +19,9 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -248,7 +250,9 @@ final class FocusSheets {
                 boolean canClaim = activeOffline && state.canClaimOffline(now);
                 FocusState.Day day = state.days.get(FocusState.today().toString());
                 long today = (day == null ? 0 : day.offlineMs) + elapsed;
-                MainActivity.setTextIfChanged(phase, paused ? "自律正计时 · 已暂停" : "自律正计时");
+                String category = activeOffline && state.stopwatchCategory != FocusState.DisciplineCategory.UNCLASSIFIED
+                        ? " · " + state.stopwatchCategory.label : "";
+                MainActivity.setTextIfChanged(phase, "自律正计时" + category + (paused ? " · 已暂停" : ""));
                 MainActivity.setTextIfChanged(clock, countdown(elapsed));
                 MainActivity.setTextIfChanged(reward, canClaim ? "可兑换 +" + duration(claimable) : "累计满 5 分钟后可兑换");
                 MainActivity.setTextIfChanged(detail, "今日累计自律 " + duration(today));
@@ -258,7 +262,10 @@ final class FocusSheets {
                 if (canClaim) MainActivity.setTextIfChanged(claimOfflineBtn, "立即兑换 +" + shortMinutes(claimable) + " 分钟");
             } else {
                 long remaining = activeCountdown ? state.remaining(now) : state.presetWork * FocusState.MINUTE;
-                MainActivity.setTextIfChanged(phase, activeCountdown && state.inBreak ? "自律休息计时" : "自律倒计时");
+                String category = activeCountdown && state.countdownCategory != FocusState.DisciplineCategory.UNCLASSIFIED
+                        ? " · " + state.countdownCategory.label : "";
+                MainActivity.setTextIfChanged(phase, (activeCountdown && state.inBreak ? "自律休息计时" : "自律倒计时")
+                        + category);
                 MainActivity.setTextIfChanged(clock, countdown(remaining));
                 MainActivity.setTextIfChanged(reward, activeCountdown ? "完成后自动结算"
                         : "完成预计可得 " + duration(state.convertByMode(state.presetWork * FocusState.MINUTE)));
@@ -2530,37 +2537,8 @@ final class FocusSheets {
         body.addView(barRow);
         gap(body, 14);
 
-        body.addView(text(activity, "应用拦截页视觉风格", 13, INK_SUB, true));
-        gap(body, 8);
-        String[] themes = {"活泼新芽", "沉稳新芽", "留白池塘"};
-        LinearLayout themeWrap = column(activity);
-        Runnable[] rebuildThemes = new Runnable[1];
-        rebuildThemes[0] = () -> {
-            themeWrap.removeAllViews();
-            for (int i = 0; i < themes.length; i++) {
-                int idx = i;
-                boolean active = state.blockTheme == idx;
-                LinearLayout card = row(activity);
-                card.setBackground(touchCard(activity, active ? BLUE_SOFT : SURFACE_SUBTLE,
-                        active ? BLUE : BORDER, 14));
-                card.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
-                weight(card, text(activity, themes[idx], 15, active ? BLUE : INK, true));
-                if (active) card.addView(iconView(activity, R.drawable.ic_check, 18, BLUE));
-                card.setOnClickListener(v -> {
-                    tapHaptic(v);
-                    state.blockTheme = idx;
-                    onChanged.run();
-                    rebuildThemes[0].run();
-                });
-                themeWrap.addView(card);
-                if (i + 1 < themes.length) gap(themeWrap, 8);
-            }
-        };
-        rebuildThemes[0].run();
-        body.addView(themeWrap);
-        gap(body, 8);
         body.addView(settingRow(activity, R.drawable.ic_edit, BLUE_SOFT, BLUE,
-                "自定义拦截提示", null, null,
+                "自定义拦截提示页", null, null,
                 () -> BlockAppearanceSettings.show(activity, state, onChanged)));
         gap(body, 16);
 
@@ -2876,18 +2854,16 @@ final class FocusSheets {
                 }));
         gap(body, 8);
 
-        body.addView(settingRow(activity, R.drawable.ic_shield, RED_SOFT, RED,
-                "调试模式", null, "开发", () -> {
-                    if (sheetRef[0] != null) sheetRef[0].dismiss();
-                    onDebug.run();
-                }));
-        gap(body, 8);
-
-        body.addView(settingRow(activity, R.drawable.ic_feedback, GREEN_SOFT, GREEN,
+        View feedback = settingRow(activity, R.drawable.ic_feedback, GREEN_SOFT, GREEN,
                 "反馈与交流", null, null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onFeedback.run();
-                }));
+                });
+        installDebugHold(feedback, () -> showDebugPassword(activity, () -> {
+            if (sheetRef[0] != null) sheetRef[0].dismiss();
+            onDebug.run();
+        }));
+        body.addView(feedback);
         gap(body, 8);
 
         String ver = GitHubUpdates.installed(activity).versionName;
@@ -2909,8 +2885,60 @@ final class FocusSheets {
         });
     }
 
-    static void showDebugSheet(MainActivity activity, FocusState state, Runnable onChanged) {
-        showDebugSheet(activity, state, onChanged, null);
+    private static void installDebugHold(View feedback, Runnable onHeld) {
+        int touchSlop = ViewConfiguration.get(feedback.getContext()).getScaledTouchSlop();
+        feedback.setOnTouchListener(new View.OnTouchListener() {
+            private float downX;
+            private float downY;
+            private boolean triggered;
+            private final Runnable hold = () -> {
+                if (!feedback.isAttachedToWindow()) return;
+                triggered = true;
+                feedback.setPressed(false);
+                tapHaptic(feedback);
+                onHeld.run();
+            };
+
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN -> {
+                        triggered = false;
+                        downX = event.getX();
+                        downY = event.getY();
+                        feedback.postDelayed(hold, 5000L);
+                    }
+                    case MotionEvent.ACTION_MOVE -> {
+                        if (Math.abs(event.getX() - downX) > touchSlop
+                                || Math.abs(event.getY() - downY) > touchSlop) feedback.removeCallbacks(hold);
+                    }
+                    case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN ->
+                            feedback.removeCallbacks(hold);
+                    default -> {}
+                }
+                return triggered;
+            }
+        });
+    }
+
+    private static void showDebugPassword(Activity activity, Runnable onAuthorized) {
+        LinearLayout form = column(activity);
+        EditText password = styledInput(activity, "调试密码", "",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        form.addView(password, -1, -2);
+        gap(form, 12);
+        TextView enter = primaryButton(activity, "进入调试模式");
+        form.addView(enter, -1, -2);
+        Dialog dialog = cardDialog(activity, R.drawable.ic_shield, BLUE_SOFT, BLUE,
+                "输入调试密码", null, form, "取消", null, false, true, null);
+        enter.setOnClickListener(v -> {
+            tapHaptic(v);
+            if (!"ciallo".contentEquals(password.getText())) {
+                password.setError("密码不正确");
+                return;
+            }
+            dialog.dismiss();
+            onAuthorized.run();
+        });
     }
 
     static void showDebugSheet(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {

@@ -897,7 +897,7 @@ public final class FocusService extends AccessibilityService {
 
         FocusState state = store.state;
         if (continuing) {
-            blockScreen.setBuiltInImage(BlockScreen.builtInImage(blockScreen.isFullImage(), state.blockTheme, reason));
+            blockScreen.setBuiltInImage(BlockScreen.builtInImage(blockScreen.isFullImage(), reason));
             return;
         }
 
@@ -915,9 +915,9 @@ public final class FocusService extends AccessibilityService {
                     if (performGlobalAction(GLOBAL_ACTION_HOME)) requestWindowRefresh();
                 };
         blockScreen = new BlockScreen(this, appearance, buttonLabel, primaryAction);
-        blockScreen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), state.blockTheme, reason));
+        blockScreen.setBuiltInImage(BlockScreen.builtInImage(appearance.fullImage(), reason));
         attachOverlay(blockScreen);
-        if (overlay != null && state.rotateBlockAppearances && !appearance.id().equals(state.lastBlockAppearance)) {
+        if (overlay != null && !appearance.id().equals(state.lastBlockAppearance)) {
             state.lastBlockAppearance = appearance.id();
             store.save();
         }

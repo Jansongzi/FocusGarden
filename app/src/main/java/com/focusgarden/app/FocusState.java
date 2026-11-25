@@ -7,6 +7,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.TreeSet;
 
 final class FocusState {
     static final long MINUTE = 60_000L;
+    static final int DAILY_SIGN_IN_MINUTES = 10;
     static final long MIN_OFFLINE_CLAIM_MS = 5 * MINUTE;
     static final long TODO_MATURE_MS = 10 * MINUTE;
     static final long HABIT_MATURE_MS = 10 * MINUTE;
@@ -271,8 +273,34 @@ final class FocusState {
         }
     }
 
+    enum DisciplineCategory {
+        STUDY("学习", "🎓"), WORK("工作", "💻"), EXERCISE("运动", "🏃"),
+        FITNESS("健身", "🏋️"), VOCABULARY("记单词", "📖"), UNCLASSIFIED("未分类", "");
+
+        final String label;
+        final String icon;
+
+        DisciplineCategory(String label, String icon) {
+            this.label = label;
+            this.icon = icon;
+        }
+
+        static DisciplineCategory stored(String key) {
+            try {
+                return valueOf(key);
+            } catch (IllegalArgumentException e) {
+                return UNCLASSIFIED;
+            }
+        }
+    }
+
+    record DisciplineReport(long totalMs, long learningMs, long earnedMs, int activeDays,
+                            Map<DisciplineCategory, Long> categoryMs) {}
+
     static final class Day {
         final Map<String, Long> usage = new LinkedHashMap<>();
+        final Map<DisciplineCategory, Long> disciplineCategoryMs = new EnumMap<>(DisciplineCategory.class);
+        boolean signedIn;
         long learningMs;
         long limitedMs;
         long focusMs;
@@ -291,6 +319,10 @@ final class FocusState {
         long rewardSpentMs;
         long configSpentMs;
         final List<Event> events = new ArrayList<>();
+
+        long exchangeEarnedMinutes() {
+            return Math.max(0L, earnedMs / MINUTE - (signedIn ? DAILY_SIGN_IN_MINUTES : 0));
+        }
     }
 
     final Map<String, Rule> rules = new LinkedHashMap<>();
@@ -306,6 +338,8 @@ final class FocusState {
     final Set<String> expandedRedeemCards = new LinkedHashSet<>();
 
     long creditMs;
+    DisciplineCategory stopwatchCategory = DisciplineCategory.UNCLASSIFIED;
+    DisciplineCategory countdownCategory = DisciplineCategory.UNCLASSIFIED;
     int creditRemainder;
     long vaultMs;
     int vaultStepMinutes = 10;
@@ -390,7 +424,6 @@ final class FocusState {
     boolean freeHabitSlotUsed;
 
     boolean timeAwarenessBar = true;
-    int blockTheme = 0;
     static final String DEFAULT_BLOCK_APPEARANCE = "default";
     record BlockAppearance(String id, boolean fullImage, int squarePercent, int fullZoom, int textSize, String text) {
         BlockAppearance {
@@ -410,29 +443,40 @@ final class FocusState {
     }
 
     final Map<String, BlockAppearance> blockAppearances = new LinkedHashMap<>();
-    String selectedBlockAppearance = DEFAULT_BLOCK_APPEARANCE;
+    final Set<String> enabledBlockAppearances = new LinkedHashSet<>();
     String lastBlockAppearance = "";
-    boolean rotateBlockAppearances;
 
     FocusState() {
         blockAppearances.put(DEFAULT_BLOCK_APPEARANCE, BlockAppearance.defaults(DEFAULT_BLOCK_APPEARANCE, ""));
+        enabledBlockAppearances.add(DEFAULT_BLOCK_APPEARANCE);
         seedDefaultRewardsIfNeeded();
         syncLegacyPercents();
     }
 
-    BlockAppearance selectedBlockAppearance() {
-        BlockAppearance selected = blockAppearances.get(selectedBlockAppearance);
-        return selected != null ? selected : blockAppearances.values().iterator().next();
+    boolean setBlockAppearanceEnabled(String id, boolean enabled) {
+        if (!blockAppearances.containsKey(id)) return false;
+        if (enabled) return enabledBlockAppearances.add(id);
+        return enabledBlockAppearances.size() > 1 && enabledBlockAppearances.remove(id);
+    }
+
+    boolean removeBlockAppearance(String id) {
+        if (blockAppearances.size() <= 1 || blockAppearances.remove(id) == null) return false;
+        enabledBlockAppearances.remove(id);
+        if (enabledBlockAppearances.isEmpty()) enabledBlockAppearances.add(blockAppearances.keySet().iterator().next());
+        if (id.equals(lastBlockAppearance)) lastBlockAppearance = "";
+        return true;
     }
 
     BlockAppearance nextBlockAppearance() {
-        if (!rotateBlockAppearances) return selectedBlockAppearance();
+        BlockAppearance first = null;
         boolean next = false;
         for (BlockAppearance appearance : blockAppearances.values()) {
+            if (!enabledBlockAppearances.contains(appearance.id())) continue;
+            if (first == null) first = appearance;
             if (next) return appearance;
             next = appearance.id().equals(lastBlockAppearance);
         }
-        return blockAppearances.values().iterator().next();
+        return first == null ? blockAppearances.values().iterator().next() : first;
     }
 
     void syncLegacyPercents() {
@@ -526,6 +570,23 @@ final class FocusState {
 
     Day day(String date) {
         return days.computeIfAbsent(date, ignored -> new Day());
+    }
+
+    boolean isSignedIn(LocalDate logicDay) {
+        Day stats = days.get(logicDay.toString());
+        return stats != null && stats.signedIn;
+    }
+
+    synchronized boolean signIn(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        String date = date(now, zone);
+        Day stats = day(date);
+        if (stats.signedIn) return false;
+        stats.signedIn = true;
+        long gain = DAILY_SIGN_IN_MINUTES * MINUTE;
+        grant(stats, gain);
+        logEvent(date, now, "SIGN_IN", "每日签到", "领取 " + DAILY_SIGN_IN_MINUTES + " 分钟可用时长", gain);
+        return true;
     }
 
     long used(String pkg, String date) {
@@ -1333,6 +1394,11 @@ final class FocusState {
     }
 
     void startOffline(long now) {
+        startOffline(now, DisciplineCategory.UNCLASSIFIED);
+    }
+
+    void startOffline(long now, DisciplineCategory category) {
+        if (!offlineActive()) stopwatchCategory = category;
         if (offlineStartMs == 0L) offlineStartMs = now;
     }
 
@@ -1350,7 +1416,9 @@ final class FocusState {
         offlineAccumulatedMs = 0L;
         if (elapsed <= 0L) return 0L;
         String d = date(now, zone);
-        day(d).offlineMs += elapsed;
+        Day stats = day(d);
+        stats.offlineMs += elapsed;
+        recordDisciplineCategory(stats, stopwatchCategory, elapsed);
         offlineUnredeemedMs += elapsed;
         if (elapsed >= MINUTE) {
             totalDisciplineSessions++;
@@ -1382,7 +1450,9 @@ final class FocusState {
         if (granted <= 0L) return 0L;
         String d = date(now, zone);
         if (live > 0L) {
-            day(d).offlineMs += live;
+            Day stats = day(d);
+            stats.offlineMs += live;
+            recordDisciplineCategory(stats, stopwatchCategory, live);
             offlineUnredeemedMs += live;
             if (offlineStartMs > 0L) offlineStartMs = now;
             offlineAccumulatedMs = 0L;
@@ -2192,6 +2262,41 @@ final class FocusState {
         return total;
     }
 
+    private static void recordDisciplineCategory(Day stats, DisciplineCategory category, long elapsed) {
+        if (category != DisciplineCategory.UNCLASSIFIED) stats.disciplineCategoryMs.merge(category, elapsed, Long::sum);
+    }
+
+    DisciplineReport disciplineReport(LocalDate start, LocalDate end, long now, ZoneId zone) {
+        String first = start.toString();
+        String last = end.toString();
+        LocalDate today = logicDate(now, zone);
+        long total = 0L;
+        long learning = 0L;
+        long earned = 0L;
+        int activeDays = 0;
+        Map<DisciplineCategory, Long> categories = new EnumMap<>(DisciplineCategory.class);
+        for (var entry : days.entrySet()) {
+            if (entry.getKey().compareTo(first) < 0 || entry.getKey().compareTo(last) > 0) continue;
+            Day stats = entry.getValue();
+            total += stats.focusMs + stats.offlineMs;
+            learning += stats.learningMs;
+            earned += stats.earnedMs;
+            if (stats.focusMs + stats.offlineMs + stats.learningMs > 0) activeDays++;
+            stats.disciplineCategoryMs.forEach((category, time) -> categories.merge(category, time, Long::sum));
+        }
+        long live = offlineElapsed(now);
+        if (live > 0 && !today.isBefore(start) && !today.isAfter(end)) {
+            total += live;
+            if (stopwatchCategory != DisciplineCategory.UNCLASSIFIED) categories.merge(stopwatchCategory, live, Long::sum);
+            Day stats = days.get(today.toString());
+            if (stats == null || stats.focusMs + stats.offlineMs + stats.learningMs == 0) activeDays++;
+        }
+        long classified = 0;
+        for (long time : categories.values()) classified += time;
+        if (total > classified) categories.put(DisciplineCategory.UNCLASSIFIED, total - classified);
+        return new DisciplineReport(total, learning, earned, activeDays, categories);
+    }
+
     long lifetimeLearningMs() {
         long total = 0L;
         for (Day d : days.values()) total += d.learningMs;
@@ -2430,7 +2535,12 @@ final class FocusState {
     }
 
     void start(int minutes, int rest, int rounds, long now) {
+        start(minutes, rest, rounds, now, DisciplineCategory.UNCLASSIFIED);
+    }
+
+    void start(int minutes, int rest, int rounds, long now, DisciplineCategory category) {
         if (active()) return;
+        countdownCategory = category;
         workMinutes = minutes;
         restMinutes = rest;
         roundsLeft = rounds;
@@ -2474,6 +2584,7 @@ final class FocusState {
                 String d = date(completedAt, zone);
                 Day stats = day(d);
                 stats.focusMs += phaseDuration;
+                recordDisciplineCategory(stats, countdownCategory, phaseDuration);
                 totalDisciplineSessions++;
                 long earned = earnByMode(stats, phaseDuration);
                 stats.focusEarnedMs += earned;

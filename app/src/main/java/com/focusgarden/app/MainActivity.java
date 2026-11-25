@@ -82,6 +82,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private int ruleCategory;
     private int dayOffset;
     private int insightsMode;
+    private DisciplineInsights.Period disciplinePeriod = DisciplineInsights.Period.WEEK;
+    private DisciplineInsights.Range customDisciplineRange;
     private int timerTabMode; // 0 = 自律正计时, 1 = 自律倒计时
     private int topInset;
     private boolean resumed;
@@ -127,15 +129,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private TextView homeTimerTabDown;
     private LinearLayout homeTimerPresetRow;
     private TextView[] homeTimerPresetChips;
-    private TextView homeTimerStartLabel;
-    private LinearLayout homeTimerPrimaryBtn;
-    private ImageView homeTimerPrimaryIcon;
-    private TextView homeTimerPrimaryLabel;
-    private LinearLayout homeTimerStopBtn;
-    private TextView homeOfflineRedeemBtn;
-    private LinearLayout homeTimerRedeemRow;
+    private RedeemUi.Pressable3DButton homeTimerStartBtn;
+    private RedeemUi.Pressable3DButton homeTimerPrimaryBtn;
     private TextView homeTimerRedeemHint;
-    private TextView homeTimerCountdownBtn;
+    private RedeemUi.Pressable3DButton homeTimerCountdownBtn;
     private LinearLayout homeTimerIdleRow;
     private LinearLayout homeTimerStopWatchRunRow;
     private LinearLayout homeTimerCountdownRunRow;
@@ -160,6 +157,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private LocalDate abstinenceDiaryDate;
     private String abstinenceDiaryProject;
     private String lastLogicDate = "";
+    private int lastDisciplineSessions;
     private boolean lastAccessibilityEnabled;
     private Dialog timerConfirmation;
     private String requestedBlockImage;
@@ -168,7 +166,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Runnable timerBackgroundChanged;
     private boolean timerBackgroundBusy;
     private Boolean lastSoberBadgeActive;
-    private Boolean lastOfflineCanClaim;
     private Boolean lastStopwatchRunning;
     private Boolean lastHomeTimerActive;
     private FocusSheets.LiveRefresh liveTimerSheet;
@@ -178,22 +175,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private FocusSheets.LiveRefresh liveKeepAliveSheet;
     private final List<AbstinenceTicker> liveAbstinenceTickers = new ArrayList<>();
 
-    private static final class AbstinenceTicker {
-        final FocusState.Abstinence item;
-        final TextView clockView;
-        final TextView actionBtn;
-        boolean lastReached;
-        boolean lastCanClaim;
-
-        AbstinenceTicker(FocusState.Abstinence item, TextView clockView, TextView actionBtn,
-                         boolean reached, boolean canClaim) {
-            this.item = item;
-            this.clockView = clockView;
-            this.actionBtn = actionBtn;
-            this.lastReached = reached;
-            this.lastCanClaim = canClaim;
-        }
-    }
+    private record AbstinenceTicker(FocusState.Abstinence item, TextView clockView) {}
 
     private SensorManager sensorManager;
     private boolean stepListenerActive;
@@ -203,7 +185,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             long now = System.currentTimeMillis();
             TimerReceiver.advance(MainActivity.this, now);
             String logicToday = FocusState.date(now, ZoneId.systemDefault());
-            if (!logicToday.equals(lastLogicDate)) {
+            if (!logicToday.equals(lastLogicDate)
+                    || (tab == INSIGHTS_PAGE && insightsMode == 0
+                    && lastDisciplineSessions != state.totalDisciplineSessions)) {
                 redraw();
             } else {
                 updateHomeLive();
@@ -247,6 +231,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
             ruleCategory = saved.getInt("ruleCategory");
             dayOffset = saved.getInt("dayOffset");
             insightsMode = saved.getInt("insightsMode");
+            int savedPeriod = saved.getInt("disciplinePeriod", disciplinePeriod.ordinal());
+            disciplinePeriod = DisciplineInsights.Period.values()[savedPeriod];
+            if (saved.containsKey("disciplineFrom")) {
+                customDisciplineRange = new DisciplineInsights.Range(
+                        LocalDate.ofEpochDay(saved.getLong("disciplineFrom")), LocalDate.ofEpochDay(saved.getLong("disciplineTo")));
+            }
             setTimerTabMode(saved.getInt("timerTabMode", 0));
             requestedBlockImage = saved.getString("requestedBlockImage");
             selectedAbstinenceId = saved.getString("selectedAbstinenceId");
@@ -278,6 +268,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         out.putInt("ruleCategory", ruleCategory);
         out.putInt("dayOffset", dayOffset);
         out.putInt("insightsMode", insightsMode);
+        out.putInt("disciplinePeriod", disciplinePeriod.ordinal());
+        if (customDisciplineRange != null) {
+            out.putLong("disciplineFrom", customDisciplineRange.start().toEpochDay());
+            out.putLong("disciplineTo", customDisciplineRange.end().toEpochDay());
+        }
         out.putInt("timerTabMode", timerTabMode);
         out.putString("requestedBlockImage", requestedBlockImage);
         out.putString("selectedAbstinenceId", selectedAbstinenceId);
@@ -497,15 +492,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
     }
 
-    void resetBlockImage(String id, Runnable onChanged) {
-        if (blockImageBusy()) {
-            toast("正在载入图片");
-            return;
-        }
-        BlockImage.clear(this, id);
-        onChanged.run();
-    }
-
     boolean blockImageBusy() {
         return requestedBlockImage != null || loadingBlockImage != null;
     }
@@ -609,7 +595,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeSoberSub = null;
         homeSoberSwitch = null;
         lastSoberBadgeActive = null;
-        lastOfflineCanClaim = null;
         lastStopwatchRunning = null;
         lastHomeTimerActive = null;
         homeTimerHeadIcon = null;
@@ -624,13 +609,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerTabDown = null;
         homeTimerPresetRow = null;
         homeTimerPresetChips = null;
-        homeTimerStartLabel = null;
+        homeTimerStartBtn = null;
         homeTimerPrimaryBtn = null;
-        homeTimerPrimaryIcon = null;
-        homeTimerPrimaryLabel = null;
-        homeTimerStopBtn = null;
-        homeOfflineRedeemBtn = null;
-        homeTimerRedeemRow = null;
         homeTimerRedeemHint = null;
         homeTimerCountdownBtn = null;
         homeTimerIdleRow = null;
@@ -899,6 +879,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
         }
         lastLogicDate = FocusState.today().toString();
+        lastDisciplineSessions = state.totalDisciplineSessions;
         lastAccessibilityEnabled = KeepAliveManager.cachedStatus(this).accOk();
         switch (tab) {
             case RULES_PAGE -> rules();
@@ -1401,8 +1382,26 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
         });
-        redeemHeader.addView(redeemHeaderTimerPill);
-        space(redeemHeader, 8);
+        boolean signedIn = state.isSignedIn(today);
+        TextView signIn = pillButton(this, signedIn ? "✓ 已签到" : "签到",
+                signedIn ? SURFACE_SUBTLE : BLUE, signedIn ? INK_SUB : ON_ACCENT, 12, 34);
+        signIn.setTextSize(12);
+        signIn.setBackground(touchCard(this, signedIn ? SURFACE_SUBTLE : BLUE,
+                signedIn ? BORDER : blueStroke(), 12));
+        signIn.setOnClickListener(v -> {
+            long tappedAt = System.currentTimeMillis();
+            TimerReceiver.advance(this, tappedAt);
+            if (state.signIn(tappedAt, ZoneId.systemDefault())) {
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                changed();
+                toast("签到成功，已领取 10 分钟可用时长");
+            } else {
+                tapHaptic(v);
+                CheckInUi.show(this, state);
+            }
+        });
+        redeemHeader.addView(signIn);
+        space(redeemHeader, 6);
 
         boolean layFlat = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgent = state.rateMode == FocusState.RateMode.INDULGENT;
@@ -1420,12 +1419,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 12, pillTint, true);
         ratePillTv.setSingleLine(true);
         ratePill.addView(ratePillTv);
+        ratePill.setMinimumHeight(dp(this, 34));
         ratePill.setOnClickListener(v -> {
             tapHaptic(v);
             FocusSheets.showRateSettings(this, state, this::changed);
         });
         redeemHeader.addView(ratePill);
         pages.addView(redeemHeader);
+        LinearLayout.LayoutParams timerPillParams = new LinearLayout.LayoutParams(-2, -2);
+        timerPillParams.gravity = Gravity.END;
+        timerPillParams.topMargin = dp(this, 8);
+        pages.addView(redeemHeaderTimerPill, timerPillParams);
         gap(pages, 10);
 
         // Top Time Voucher card (#E6EEFC in light mode, ticket cutouts + dashed line + gold 3D button)
@@ -1440,7 +1444,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout numRow = row(this);
         numRow.setGravity(Gravity.BOTTOM);
         long claimableMin = summary.totalMs() / FocusState.MINUTE;
-        long earnedMin = day.earnedMs / FocusState.MINUTE;
+        long earnedMin = day.exchangeEarnedMinutes();
         displayedVoucherClaimableMin = claimableMin;
         displayedVoucherEarnedMin = earnedMin;
 
@@ -1592,7 +1596,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         ZoneId zone = ZoneId.systemDefault();
         FocusState.RedeemSummary before = state.redeemSummary(now, zone);
         long beforeClaimableMin = before.totalMs() / FocusState.MINUTE;
-        long beforeEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).earnedMs / FocusState.MINUTE;
+        long beforeEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).exchangeEarnedMinutes();
 
         FocusState.ClaimAllResult result = state.claimAllRedeemable(now, zone);
         if (result.totalMs() <= 0L) {
@@ -1627,7 +1631,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         ZoneId zone = ZoneId.systemDefault();
         FocusState.RedeemSummary before = state.redeemSummary(now, zone);
         long beforeClaimableMin = before.totalMs() / FocusState.MINUTE;
-        long beforeEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).earnedMs / FocusState.MINUTE;
+        long beforeEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).exchangeEarnedMinutes();
 
         long gained = claimer.apply(now, zone);
         if (gained <= 0L) {
@@ -1653,7 +1657,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         ZoneId zone = ZoneId.systemDefault();
         FocusState.RedeemSummary after = state.redeemSummary(now, zone);
         long afterClaimableMin = after.totalMs() / FocusState.MINUTE;
-        long afterEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).earnedMs / FocusState.MINUTE;
+        long afterEarnedMin = state.day(FocusState.logicDate(now, zone).toString()).exchangeEarnedMinutes();
         long gainedMin = Math.max(1L, gainedMs / FocusState.MINUTE);
 
         redeemClaimInFlight = true;
@@ -1901,7 +1905,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         return card;
     }
 
-    private void buildDisciplineControls(LinearLayout body, boolean includeRedeemRow) {
+    private void buildDisciplineControls(LinearLayout body, boolean showRedeemHint) {
         homeTimerSub = text(this, "", 12, MUTED, false);
         LinearLayout.LayoutParams timerSubLp = new LinearLayout.LayoutParams(-2, -2);
         timerSubLp.topMargin = dp(this, 3);
@@ -1982,22 +1986,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeTimerSetup.addView(homeTimerPresetRow, presetLp);
 
         LinearLayout startBar = row(this);
-        LinearLayout startBtn = row(this);
-        startBtn.setGravity(Gravity.CENTER);
-        startBtn.setMinimumHeight(dp(this, 44));
-        startBtn.setPadding(dp(this, 14), 0, dp(this, 14), 0);
-        startBtn.setBackground(touch(this, BLUE, 12));
-        startBtn.addView(iconView(this, R.drawable.ic_play, 14, ON_ACCENT));
-        space(startBtn, 6);
-        homeTimerStartLabel = text(this, "开启自律正计时", 14, ON_ACCENT, true);
-        homeTimerStartLabel.setSingleLine(true);
-        homeTimerStartLabel.setIncludeFontPadding(false);
-        startBtn.addView(homeTimerStartLabel);
-        startBtn.setOnClickListener(v -> {
-            tapHaptic(v);
+        homeTimerStartBtn = new RedeemUi.Pressable3DButton(this, 40, 12, 14, 8, R.drawable.ic_play);
+        homeTimerStartBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "开启自律正计时");
+        homeTimerStartBtn.setActionListener(() -> {
+            tapHaptic(homeTimerStartBtn);
             confirmDisciplineStart(timerTabMode, this::openStartedTimer);
         });
-        weight(startBar, startBtn);
+        weight(startBar, homeTimerStartBtn);
         space(startBar, 8);
 
         FrameLayout expandBtn = iconBadge(this, R.drawable.ic_expand, BLUE_SOFT, BLUE, 44, 18, 12);
@@ -2013,41 +2008,24 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         // Running controls for 正计时
         homeTimerStopWatchRunRow = row(this);
-        homeTimerPrimaryBtn = row(this);
-        homeTimerPrimaryBtn.setGravity(Gravity.CENTER);
-        homeTimerPrimaryBtn.setMinimumHeight(dp(this, 44));
-        homeTimerPrimaryBtn.setPadding(dp(this, 12), 0, dp(this, 12), 0);
-        homeTimerPrimaryBtn.setBackground(touch(this, BLUE, 12));
-        homeTimerPrimaryIcon = iconView(this, R.drawable.ic_pause, 14, ON_ACCENT);
-        homeTimerPrimaryBtn.addView(homeTimerPrimaryIcon);
-        space(homeTimerPrimaryBtn, 6);
-        homeTimerPrimaryLabel = text(this, "", 14, ON_ACCENT, true);
-        homeTimerPrimaryLabel.setIncludeFontPadding(false);
-        homeTimerPrimaryLabel.setFontFeatureSettings("tnum");
-        homeTimerPrimaryBtn.addView(homeTimerPrimaryLabel);
-        homeTimerPrimaryBtn.setOnClickListener(v -> {
+        homeTimerPrimaryBtn = new RedeemUi.Pressable3DButton(this, 40, 12, 14, 8, R.drawable.ic_pause);
+        homeTimerPrimaryBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "自律中");
+        homeTimerPrimaryBtn.setActionListener(() -> {
             if (!state.offlineActive()) return;
-            haptic(v, state.hapticFeedback, HapticKind.NAV);
+            haptic(homeTimerPrimaryBtn, state.hapticFeedback, HapticKind.NAV);
             long t = System.currentTimeMillis();
             if (state.offlineRunning()) state.pauseOffline(t);
             else state.startOffline(t);
             changed();
         });
 
-        homeTimerStopBtn = row(this);
-        homeTimerStopBtn.setGravity(Gravity.CENTER);
-        homeTimerStopBtn.setMinimumHeight(dp(this, 44));
-        homeTimerStopBtn.setPadding(dp(this, 12), 0, dp(this, 12), 0);
-        homeTimerStopBtn.setBackground(touch(this, RED, 12));
-        homeTimerStopBtn.addView(iconView(this, R.drawable.ic_stop, 13, ON_ACCENT));
-        space(homeTimerStopBtn, 6);
-        TextView stopLabel = text(this, "停止", 14, ON_ACCENT, true);
-        stopLabel.setIncludeFontPadding(false);
-        homeTimerStopBtn.addView(stopLabel);
-        homeTimerStopBtn.setOnClickListener(v -> {
+        RedeemUi.Pressable3DButton stopBtn = new RedeemUi.Pressable3DButton(this, 40, 12, 14, 8, R.drawable.ic_stop);
+        stopBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "停止");
+        stopBtn.setEnabledColors(RED, 0xff912c3d, ON_ACCENT);
+        stopBtn.setActionListener(() -> {
             if (!state.offlineActive()) return;
             long elapsed = state.stopOffline(System.currentTimeMillis(), ZoneId.systemDefault());
-            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            haptic(stopBtn, state.hapticFeedback, HapticKind.CONFIRM);
             changed();
             if (elapsed >= FocusState.MIN_OFFLINE_CLAIM_MS) {
                 toast("自律正计时已结算 " + duration(elapsed));
@@ -2057,14 +2035,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         });
         homeTimerStopWatchRunRow.addView(homeTimerPrimaryBtn, new LinearLayout.LayoutParams(0, -2, 1.45f));
         space(homeTimerStopWatchRunRow, 8);
-        homeTimerStopWatchRunRow.addView(homeTimerStopBtn, new LinearLayout.LayoutParams(0, -2, 0.90f));
+        homeTimerStopWatchRunRow.addView(stopBtn, new LinearLayout.LayoutParams(0, -2, 0.90f));
 
         // Running controls for 倒计时 (locked: cannot stop early)
         homeTimerCountdownRunRow = row(this);
-        homeTimerCountdownBtn = pillButton(this, "", BLUE_SOFT, BLUE, 12, 44);
-        homeTimerCountdownBtn.setBackground(touchCard(this, BLUE_SOFT, blueStroke(), 12));
-        homeTimerCountdownBtn.setOnClickListener(v -> {
-            tapHaptic(v);
+        homeTimerCountdownBtn = new RedeemUi.Pressable3DButton(this, 40, 12, 13, 8, R.drawable.ic_timer);
+        homeTimerCountdownBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "进入全屏");
+        homeTimerCountdownBtn.setActionListener(() -> {
+            tapHaptic(homeTimerCountdownBtn);
             liveTimerSheet = FocusSheets.showFocusTimer(this, state, this::changed);
         });
         homeTimerCountdownRunRow.addView(homeTimerCountdownBtn, -1, -2);
@@ -2072,41 +2050,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         controls.addView(homeTimerStopWatchRunRow);
         controls.addView(homeTimerCountdownRunRow);
         body.addView(controls);
-
-        if (includeRedeemRow) {
-            homeOfflineRedeemBtn = redeemPill(this, "+0 分钟", false);
-            homeOfflineRedeemBtn.setOnClickListener(v -> {
-                if (state.active() || (!state.offlineActive() && timerTabMode == 1)) return;
-                if (state.isLayFlat()) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
-                    return;
-                }
-                long curNow = System.currentTimeMillis();
-                if (!state.canClaimOffline(curNow)) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    toast("累计自律需满 5 分钟且可兑换满 1 分钟才可领取");
-                    return;
-                }
-                long gained = state.claimOffline(curNow, ZoneId.systemDefault());
-                if (gained > 0L) {
-                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                    changed();
-                    toast("已兑换 +" + duration(gained));
-                } else {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                }
-            });
-
-            homeTimerRedeemRow = row(this);
-            homeTimerRedeemRow.setGravity(Gravity.CENTER_VERTICAL);
+        if (showRedeemHint) {
+            gap(body, 10);
             homeTimerRedeemHint = text(this, "", 12, MUTED, false);
-            weight(homeTimerRedeemRow, homeTimerRedeemHint);
-            space(homeTimerRedeemRow, 8);
-            homeTimerRedeemRow.addView(homeOfflineRedeemBtn);
-            LinearLayout.LayoutParams redeemLp = new LinearLayout.LayoutParams(-1, -2);
-            redeemLp.topMargin = dp(this, 10);
-            body.addView(homeTimerRedeemRow, redeemLp);
+            body.addView(homeTimerRedeemHint);
         }
     }
 
@@ -2124,18 +2071,71 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (state.active() || state.offlineActive() || state.soberActive(System.currentTimeMillis())) return;
         int minutes = state.presetWork;
         String action = mode == 0 ? "开启自律正计时" : "开启 " + minutes + " 分钟自律倒计时";
-        timerConfirmation = confirmDialog(this, R.drawable.ic_phone_lock, BLUE_SOFT, BLUE, action + "？",
-                "开始后，仅已设为正向学习的应用可继续使用。\n\n" + disciplineStopHint(mode) + "。",
-                "取消", "确认开始", false, () -> {
-                    long now = System.currentTimeMillis();
-                    TimerReceiver.advance(this, now);
-                    if (state.active() || state.offlineActive() || state.soberActive(now)) return;
-                    setTimerTabMode(mode);
-                    if (mode == 0) state.startOffline(now);
-                    else state.start(minutes, 0, 1, now);
-                    changed();
-                    onStarted.run();
-                });
+        LinearLayout sheetBody = column(this);
+        ScrollView scroller = new ScrollView(this);
+        scroller.setVerticalScrollBarEnabled(false);
+        LinearLayout options = column(this);
+        scroller.addView(options, -1, -2);
+        sheetBody.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        FocusState.DisciplineCategory[] categories = FocusState.DisciplineCategory.values();
+        FocusState.DisciplineCategory[] chosen = {FocusState.DisciplineCategory.STUDY};
+        Map<FocusState.DisciplineCategory, TextView> chips = new LinkedHashMap<>();
+        Runnable updateSelection = () -> chips.forEach((category, chip) -> {
+            boolean selected = category == chosen[0];
+            chip.setSelected(selected);
+            chip.setTextColor(selected ? BLUE : INK);
+            chip.setBackground(touchCard(this, selected ? BLUE_SOFT : SURFACE_SUBTLE,
+                    selected ? BLUE : BORDER, 13));
+        });
+        LinearLayout chipRow = null;
+        int index = 0;
+        for (var category : categories) {
+            if (category == FocusState.DisciplineCategory.UNCLASSIFIED) continue;
+            if (index % 2 == 0) {
+                if (index > 0) gap(options, 8);
+                chipRow = row(this);
+                options.addView(chipRow, -1, -2);
+            } else {
+                space(chipRow, 8);
+            }
+            index++;
+            TextView chip = pillButton(this, category.icon + " " + category.label, SURFACE_SUBTLE, INK, 13, 49);
+            chip.setContentDescription(category.label);
+            chip.setOnClickListener(v -> {
+                tapHaptic(v);
+                chosen[0] = category;
+                updateSelection.run();
+            });
+            chips.put(category, chip);
+            weight(chipRow, chip);
+        }
+        if (index % 2 != 0) {
+            space(chipRow, 8);
+            weight(chipRow, new View(this));
+        }
+        updateSelection.run();
+
+        TextView start = primaryButton(this, "确认开始");
+        gap(sheetBody, 10);
+        sheetBody.addView(start, -1, -2);
+        start.setOnClickListener(v -> {
+            long now = System.currentTimeMillis();
+            TimerReceiver.advance(this, now);
+            if (state.active() || state.offlineActive() || state.soberActive(now)) {
+                timerConfirmation.dismiss();
+                return;
+            }
+            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            timerConfirmation.dismiss();
+            setTimerTabMode(mode);
+            if (mode == 0) state.startOffline(now, chosen[0]);
+            else state.start(minutes, 0, 1, now, chosen[0]);
+            changed();
+            onStarted.run();
+        });
+        timerConfirmation = bottomSheet(this, "选择计时分类",
+                action + " · " + disciplineStopHint(mode) + "。计时期间仅可使用已设为正向学习的应用。", sheetBody, false);
         timerConfirmation.setOnDismissListener(dialog -> {
             if (timerConfirmation == dialog) timerConfirmation = null;
         });
@@ -2174,8 +2174,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             custom.setBackground(customActive ? shape(this, BLUE_SOFT, 10) : touchCard(this, SURFACE_SUBTLE, BORDER, 10));
             custom.setTextColor(customActive ? BLUE : INK_SUB);
         }
-        if (homeTimerStartLabel != null) {
-            setTextIfChanged(homeTimerStartLabel, effectiveMode == 0 ? "开启自律正计时" : "开启自律倒计时");
+        if (homeTimerStartBtn != null) {
+            homeTimerStartBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED,
+                    effectiveMode == 0 ? "开启自律正计时" : "开启自律倒计时");
         }
     }
 
@@ -2216,10 +2217,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
         weight(content, titles);
         space(content, 8);
 
-        TextView enterBtn = pillButton(this, hasChest ? "去开箱" : "进入商店",
-                hasChest ? AMBER_SOFT : 0xffa6bddc, hasChest ? AMBER : 0xfff8f5ec, 11, 34);
-        enterBtn.setSingleLine(true);
-        content.addView(enterBtn);
+        RedeemUi.Pressable3DButton enterBtn = new RedeemUi.Pressable3DButton(this, 31, 11, 13, 10, false);
+        enterBtn.applyState(hasChest ? RedeemUi.Pressable3DButton.Mode.GOLD_ENABLED
+                : RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, hasChest ? "去开箱" : "进入商店");
+        if (!hasChest) enterBtn.setEnabledColors(0xffa6bddc, 0xff718eb7, 0xfff8f5ec);
+        content.addView(enterBtn, -2, -2);
         card.addView(content, -1, -2);
 
         View.OnClickListener openShop = v -> {
@@ -2227,7 +2229,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             TimeShopUi.showTimeShopSheet(this, state, this::changed);
         };
         card.setOnClickListener(openShop);
-        enterBtn.setOnClickListener(openShop);
+        enterBtn.setActionListener(() -> openShop.onClick(enterBtn));
         return card;
     }
 
@@ -2262,7 +2264,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         body.addView(FocusSheets.weekSleepStrip(this, state, today));
         gap(body, 10);
 
-        LinearLayout bottom = row(this);
         LinearLayout sleepBtn = row(this);
         sleepBtn.setGravity(Gravity.CENTER);
         sleepBtn.setMinimumHeight(dp(this, 38));
@@ -2275,38 +2276,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             FocusSheets.showEarlySleep(this, state, this::changed);
         });
-        weight(bottom, sleepBtn);
-        space(bottom, 8);
-
-        boolean layFlat = state.isLayFlat();
-        String statusLabel = layFlat && pendingReward ? "今日暂停"
-                : pendingReward ? "领取 +" + state.earlySleepRewardMinutes + " 分钟"
-                : failed ? "已失败"
-                : done ? "今日已领"
-                : state.bedtime ? "已开夜间锁"
-                : "去开启";
-        boolean actionReady = (pendingReward && !layFlat) || (!state.bedtime && !failed && !done);
-        TextView claim = redeemPill(this, statusLabel, actionReady);
-        claim.setOnClickListener(v -> {
-            if (pendingReward) {
-                if (state.isLayFlat()) {
-                    haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                    toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
-                    return;
-                }
-                long gained = state.claimPendingEarlySleep(System.currentTimeMillis(), ZoneId.systemDefault());
-                if (gained > 0L) {
-                    haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                    changed();
-                    toast("早睡奖励已领取，+" + duration(gained));
-                }
-                return;
-            }
-            tapHaptic(v);
-            FocusSheets.showEarlySleep(this, state, this::changed);
-        });
-        bottom.addView(claim);
-        body.addView(bottom);
+        body.addView(sleepBtn, -1, -2);
 
         return wrapRedeemAccordionCard("sleep", R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
                 "早睡挑战", sub, btnRef[0], body, null);
@@ -2314,9 +2284,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private LinearLayout homeTodoCard(LocalDate today, FocusState.Day day) {
         long now = System.currentTimeMillis();
-        boolean layFlat = state.isLayFlat();
         int pendingCount = state.pendingTodoCount();
-        long pendingReward = state.pendingTodoRewardMs(now, today);
 
         TextView sub = text(this, pendingCount == 0 ? "暂无待完成任务" : pendingCount + " 项待完成任务",
                 12, MUTED, false);
@@ -2334,10 +2302,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         body.addView(topInfo);
 
         int shown = 0;
-        boolean hasWaitingDone = false;
         for (var entry : state.todos.entrySet()) {
             FocusState.Todo todo = entry.getValue();
-            if (todo.done && !todo.claimed && !state.todoMature(todo, now)) hasWaitingDone = true;
             if (shown >= 2 || todo.claimed) continue;
             if (shown == 0) gap(body, 10);
             String id = entry.getKey();
@@ -2368,7 +2334,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
         gap(body, shown == 0 ? 12 : 4);
 
-        LinearLayout bottom = row(this);
         TextView viewAll = pillButton(this, "全部 / 添加", SURFACE_SUBTLE, INK, 12, 38);
         viewAll.setSingleLine(true);
         viewAll.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
@@ -2376,37 +2341,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             FocusSheets.showTodos(this, state, this::changed);
         });
-        weight(bottom, viewAll);
-        space(bottom, 8);
-
-        boolean finalWaiting = hasWaitingDone;
-        TextView redeem = redeemPill(this, layFlat ? "今日暂停" : "+" + shortMinutes(pendingReward) + " 分钟",
-                !layFlat && pendingReward > 0);
-        redeem.setOnClickListener(v -> {
-            if (state.isLayFlat()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
-                return;
-            }
-            long curNow = System.currentTimeMillis();
-            long gained = state.claimTodos(curNow, ZoneId.systemDefault());
-            if (gained > 0) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
-                toast("待办奖励已领取，+" + duration(gained));
-            } else if (finalWaiting) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("新建待办需经过 10 分钟冷静期才可领取");
-            } else if (state.remainingTodoCapMs(today) <= 0L) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("今日待办已达 " + state.todoDailyCapMinutes + " 分钟上限");
-            } else {
-                tapHaptic(v);
-                FocusSheets.showTodos(this, state, this::changed);
-            }
-        });
-        bottom.addView(redeem);
-        body.addView(bottom);
+        body.addView(viewAll, -1, -2);
 
         return wrapRedeemAccordionCard("todos", R.drawable.ic_todo, AMBER_SOFT, AMBER,
                 "待办", sub, btnRef[0], body, null);
@@ -2414,7 +2349,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private LinearLayout homeAbstinenceCard(long now) {
         int total = state.abstinences.size();
-        boolean layFlat = state.isLayFlat();
         FocusState.Abstinence primaryAbs = null;
         List<FocusState.Abstinence> preview = new ArrayList<>();
         for (FocusState.Abstinence a : state.abstinences.values()) {
@@ -2445,10 +2379,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             for (int i = 0; i < preview.size(); i++) {
                 FocusState.Abstinence a = preview.get(i);
                 long elapsed = state.abstinenceElapsedMs(a, now);
-                boolean canClaim = state.canClaimAbstinence(a, now);
                 boolean reached = state.abstinenceReached(a, now);
-                long guardRem = state.abstinenceGuardRemainingMs(a, now);
-                long capLeftMs = state.remainingHabitCapMs(FocusState.logicDate(now, ZoneId.systemDefault()));
 
                 LinearLayout rowBox = row(this);
                 rowBox.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
@@ -2462,33 +2393,12 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 clockTv.setFontFeatureSettings("tnum");
                 infoCol.addView(clockTv);
                 weight(rowBox, infoCol);
-                space(rowBox, 8);
-
-                String actText = (canClaim && layFlat) ? "今日暂停"
-                        : (guardRem > 0L && reached) ? "护盾"
-                        : (canClaim && capLeftMs <= 0L) ? "明日可领"
-                        : canClaim ? "领 +" + Math.min(a.rewardMinutes, (int) (capLeftMs / FocusState.MINUTE)) + "分"
-                        : reached ? "进阶"
-                        : "+" + a.rewardMinutes + " 分";
-                int actBg = (canClaim && !layFlat && capLeftMs > 0L) ? BLUE
-                        : (canClaim && layFlat) ? PURPLE_SOFT
-                        : (guardRem > 0L && reached) ? AMBER_SOFT
-                        : (canClaim && capLeftMs <= 0L) ? CARD
-                        : reached ? GREEN_SOFT : CARD;
-                int actInk = (canClaim && !layFlat && capLeftMs > 0L) ? ON_ACCENT
-                        : (canClaim && layFlat) ? PURPLE
-                        : (guardRem > 0L && reached) ? AMBER
-                        : (canClaim && capLeftMs <= 0L) ? MUTED
-                        : reached ? GREEN : INK_SUB;
-                TextView actBtn = pillButton(this, actText, actBg, actInk, 10, 32);
-                actBtn.setOnClickListener(v -> handleAbstinencePrimaryAction(v, a));
-                rowBox.addView(actBtn);
                 rowBox.setOnClickListener(v -> {
                     tapHaptic(v);
                     selectedAbstinenceId = a.id;
                     switchTab(ABSTINENCE_PAGE);
                 });
-                liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv, actBtn, reached, canClaim));
+                liveAbstinenceTickers.add(new AbstinenceTicker(a, clockTv));
                 body.addView(rowBox);
                 if (i + 1 < preview.size()) gap(body, 8);
             }
@@ -2507,9 +2417,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private LinearLayout homeStepCard(LocalDate today, FocusState.Day day) {
         int units = state.claimableStepUnits(today);
-        int claimableMins = units * state.stepRewardMinutes;
         int rem = state.pendingStepsRemainder(today);
-        boolean layFlat = state.isLayFlat();
         boolean capped = state.remainingStepCapMs(today) < state.stepRewardMinutes * FocusState.MINUTE;
 
         TextView sub = text(this, "今日步行 " + String.format(Locale.US, "%,d", day.steps) + " 步",
@@ -2530,7 +2438,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         body.addView(topInfo);
         gap(body, 12);
 
-        LinearLayout bottom = row(this);
         LinearLayout left = column(this);
         left.addView(text(this, "今日共步行", 12, MUTED, false));
         LinearLayout stepVal = row(this);
@@ -2542,34 +2449,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             tapHaptic(v);
             liveStepsSheet = FocusSheets.showStepEditor(this, state, this::changed);
         });
-        weight(bottom, left);
-        space(bottom, 8);
-
-        TextView redeem = redeemPill(this, layFlat ? "今日暂停" : capped ? "已达上限" : "+" + claimableMins + " 分钟",
-                !layFlat && !capped && units > 0);
-        redeem.setOnClickListener(v -> {
-            if (state.isLayFlat()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
-                return;
-            }
-            if (capped) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("今日步数兑换已达 " + state.stepDailyCapMinutes + " 分钟上限");
-                return;
-            }
-            long gained = state.claimSteps(System.currentTimeMillis(), ZoneId.systemDefault());
-            if (gained > 0) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
-                toast("步数兑换成功，+" + duration(gained));
-            } else {
-                tapHaptic(v);
-                liveStepsSheet = FocusSheets.showStepEditor(this, state, this::changed);
-            }
-        });
-        bottom.addView(redeem);
-        body.addView(bottom);
+        body.addView(left, -1, -2);
 
         return wrapRedeemAccordionCard("steps", R.drawable.ic_steps, CYAN_SOFT, CYAN,
                 "步数", sub, btnRef[0], body, null);
@@ -2635,40 +2515,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
         }
 
-        long habitCapLeft = state.remainingHabitCapMs(today);
         if (abstinenceDashboard != null) abstinenceDashboard.update(now);
-
-        for (AbstinenceTicker t : liveAbstinenceTickers) {
-            long elapsed = state.abstinenceElapsedMs(t.item, now);
-            boolean reached = state.abstinenceReached(t.item, now);
-            boolean canClaim = state.canClaimAbstinence(t.item, now);
-            long guardRem = state.abstinenceGuardRemainingMs(t.item, now);
-            boolean stateChanged = reached != t.lastReached || canClaim != t.lastCanClaim;
-            setTextIfChanged(t.clockView, formatAbstinenceElapsed(elapsed) + " / "
-                    + FocusSheets.formatAbstinenceTarget(t.item.targetHours));
-            String lbl = (canClaim && layFlat) ? "今日暂停"
-                    : (guardRem > 0L && reached) ? "护盾"
-                    : (canClaim && habitCapLeft <= 0L) ? "明日可领"
-                    : canClaim ? "领 +" + Math.min(t.item.rewardMinutes, (int) (habitCapLeft / FocusState.MINUTE)) + "分"
-                    : reached ? "进阶"
-                    : "+" + t.item.rewardMinutes + " 分";
-            setTextIfChanged(t.actionBtn, lbl);
-            if ((stateChanged || guardRem > 0L) && t.actionBtn != null) {
-                int bg = (canClaim && !layFlat && habitCapLeft > 0L) ? BLUE
-                        : (canClaim && layFlat) ? PURPLE_SOFT
-                        : (guardRem > 0L && reached) ? AMBER_SOFT
-                        : (canClaim && habitCapLeft <= 0L) ? CARD
-                        : reached ? GREEN_SOFT : CARD;
-                int fg = (canClaim && !layFlat && habitCapLeft > 0L) ? ON_ACCENT
-                        : (canClaim && layFlat) ? PURPLE
-                        : (guardRem > 0L && reached) ? AMBER
-                        : (canClaim && habitCapLeft <= 0L) ? MUTED
-                        : reached ? GREEN : INK_SUB;
-                t.actionBtn.setTextColor(fg);
-                t.actionBtn.setBackground(touch(this, bg, 10));
-                t.lastReached = reached;
-                t.lastCanClaim = canClaim;
-            }
+        for (AbstinenceTicker ticker : liveAbstinenceTickers) {
+            setTextIfChanged(ticker.clockView(), formatAbstinenceElapsed(state.abstinenceElapsedMs(ticker.item(), now))
+                    + " / " + FocusSheets.formatAbstinenceTarget(ticker.item().targetHours));
         }
 
         if (homeTimerIdleRow != null && homeTimerStopWatchRunRow != null && homeTimerCountdownRunRow != null) {
@@ -2695,12 +2545,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 }
                 boolean running = state.offlineRunning();
                 if (!Boolean.valueOf(running).equals(lastStopwatchRunning)) {
-                    if (homeTimerPrimaryIcon != null) {
-                        homeTimerPrimaryIcon.setImageResource(running ? R.drawable.ic_pause : R.drawable.ic_play);
-                    }
+                    homeTimerPrimaryBtn.setIcon(running ? R.drawable.ic_pause : R.drawable.ic_play);
                     lastStopwatchRunning = running;
                 }
-                setTextIfChanged(homeTimerPrimaryLabel, running
+                homeTimerPrimaryBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, running
                         ? countdown(elapsed) + " 自律中"
                         : countdown(elapsed) + " 继续自律");
                 setTextIfChanged(homeTimerSub, "今日共自律 " + duration((day == null ? 0L : day.offlineMs) + elapsed));
@@ -2725,7 +2573,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 if (homeTimerEarnedLabel != null) {
                     setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
                 }
-                setTextIfChanged(homeTimerCountdownBtn, "自律倒计时还剩 " + countdown(rem) + " · 进入全屏");
+                homeTimerCountdownBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "自律倒计时还剩 " + countdown(rem) + " · 进入全屏");
                 setTextIfChanged(homeTimerSub, "倒计时进行中 · 结束后自动结算");
                 if (homeTimerSub.getVisibility() != View.VISIBLE) homeTimerSub.setVisibility(View.VISIBLE);
                 if (homeTimerCollapsedSub != null) {
@@ -2783,25 +2631,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     }
                 }
             }
-            boolean countdownMode = !activeStopwatch && (activeCountdown || timerTabMode == 1);
-            boolean canClaim = !countdownMode && !layFlat && state.canClaimOffline(now);
-            long claimable = canClaim ? state.claimableOfflineMs(now) : 0L;
-            if (homeTimerRedeemRow != null) {
-                homeTimerRedeemRow.setVisibility(countdownMode ? View.GONE : View.VISIBLE);
-            }
             if (homeTimerRedeemHint != null) {
+                boolean countdownMode = !activeStopwatch && (activeCountdown || timerTabMode == 1);
+                homeTimerRedeemHint.setVisibility(countdownMode ? View.GONE : View.VISIBLE);
                 setTextIfChanged(homeTimerRedeemHint, layFlat ? "躺平中暂停兑换"
-                        : canClaim ? "已满 5 分钟，可立即领取" : "满 5 分钟可随时兑换");
-            }
-            if (homeOfflineRedeemBtn != null) {
-                setTextIfChanged(homeOfflineRedeemBtn, layFlat ? "暂停" : "+" + shortMinutes(claimable) + " 分钟");
-                if (!Boolean.valueOf(canClaim).equals(lastOfflineCanClaim)) {
-                    homeOfflineRedeemBtn.setBackground(canClaim
-                            ? touch(this, BLUE, 12) : shape(this, BLUE_DISABLED_BG, 12));
-                    homeOfflineRedeemBtn.setTextColor(canClaim ? ON_ACCENT : BLUE_DISABLED_TEXT);
-                    lastOfflineCanClaim = canClaim;
-                }
-                homeOfflineRedeemBtn.setEnabled(!countdownMode);
+                        : state.canClaimOffline(now) ? "已满 5 分钟，可立即领取" : "满 5 分钟可兑换");
             }
         }
 
@@ -2820,7 +2654,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (redeemVoucherAmountTv != null && !redeemClaimInFlight) {
             FocusState.RedeemSummary s = state.redeemSummary(now, zone);
             long claimableMin = s.totalMs() / FocusState.MINUTE;
-            long earnedMin = (day == null ? 0L : day.earnedMs) / FocusState.MINUTE;
+            long earnedMin = day == null ? 0L : day.exchangeEarnedMinutes();
             if (claimableMin != displayedVoucherClaimableMin) {
                 displayedVoucherClaimableMin = claimableMin;
                 setTextIfChanged(redeemVoucherAmountTv, String.valueOf(claimableMin));
@@ -3197,7 +3031,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(heroCopy, 6);
         heroCopy.addView(text(this, "迈出改变的第一步", 24, ON_ACCENT, true));
         gap(heroCopy, 6);
-        heroCopy.addView(text(this, "冲动救急 · 复发日记 · 渐进里程碑", 13, 0xd8ffffff, false));
+        heroCopy.addView(text(this, "冲动救急 · 戒断日记 · 渐进里程碑", 13, 0xd8ffffff, false));
         weight(heroRow, heroCopy);
         space(heroRow, 12);
         heroRow.addView(new AbstinenceUi.SproutStageView(this, true, 0L), dp(this, 64), dp(this, 64));
@@ -3300,50 +3134,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         gap(body, 8);
     }
 
-    private void handleAbstinencePrimaryAction(View v, FocusState.Abstinence a) {
-        long curNow = System.currentTimeMillis();
-        ZoneId zone = ZoneId.systemDefault();
-        long guardRem = state.abstinenceGuardRemainingMs(a, curNow);
-        if (state.abstinenceReached(a, curNow) && guardRem > 0L) {
-            haptic(v, state.hapticFeedback, HapticKind.REJECT);
-            toast("防回溯护盾生效中，还剩 " + AbstinenceUi.formatSummaryDuration(guardRem));
-            return;
-        }
-        if (state.canClaimAbstinence(a, curNow)) {
-            if (state.isLayFlat()) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("躺平模式当日无法兑换时间，明日 04:00 后恢复");
-                return;
-            }
-            if (state.remainingHabitCapMs(FocusState.logicDate(curNow, zone)) <= 0L) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                toast("今日戒断奖励已达 " + state.habitDailyCapMinutes + " 分钟上限，明日 04:00 后可领");
-                return;
-            }
-            long granted = state.claimAbstinence(a.id, curNow, zone);
-            if (granted > 0L) {
-                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-                changed();
-                toast("戒断达标！已领取 +" + shortMinutes(granted) + " 分钟可用时间");
-            }
-            return;
-        }
-        if (state.abstinenceReached(a, curNow)) {
-            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
-            int curHours = a.targetHours;
-            int nextStage = FocusState.nextAbstinenceStageHours(curHours);
-            int updated = state.advanceAbstinenceStage(a.id, curNow, zone);
-            changed();
-            toast(nextStage > curHours
-                    ? "已保留连胜，进阶至 " + FocusSheets.formatAbstinenceTarget(updated) + " 阶段！"
-                    : "已开启新一轮「" + a.name + "」");
-            return;
-        }
-        haptic(v, state.hapticFeedback, HapticKind.REJECT);
-        long remMs = Math.max(0L, state.abstinenceTargetMs(a) - state.abstinenceElapsedMs(a, curNow));
-        toast("距离本次目标还需坚持 " + formatAbstinenceCompact(remMs));
-    }
-
     private static String formatAbstinenceElapsed(long elapsedMs) {
         long totalSec = Math.max(0L, elapsedMs / 1000L);
         long days = totalSec / 86400L;
@@ -3401,46 +3191,17 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private void insightsStats(LocalDate today, LocalDate selected, FocusState.Day selectedDay) {
         long now = System.currentTimeMillis();
-        LinearLayout permanent = surfaceCard();
-        LinearLayout permHead = row(this);
-        weight(permHead, titleWithInfo(this, "自律统计", 17, INK,
-                "自律统计",
-                "永久记录历史自律总时长、次数与连签，不随每日重置清除。"));
-        TextView permBadge = text(this, "本机永久保留", 11, GREEN, true);
-        permBadge.setBackground(shape(this, GREEN_SOFT, 8));
-        permBadge.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
-        permHead.addView(permBadge);
-        permanent.addView(permHead);
-        gap(permanent, 12);
-
-        LinearLayout pRow1 = row(this);
-        pRow1.addView(metricTile("累计自律总时长", duration(state.lifetimeDisciplineMs(now)), BLUE_SOFT, BLUE),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        space(pRow1, 10);
-        pRow1.addView(metricTile("累计完成次数", state.totalDisciplineSessions + " 次", GREEN_SOFT, GREEN),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        permanent.addView(pRow1);
-        gap(permanent, 10);
-
-        LinearLayout pRow2 = row(this);
-        pRow2.addView(metricTile("本月自律时长", duration(state.monthDisciplineMs(today, now)), PURPLE_SOFT, PURPLE),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        space(pRow2, 10);
-        pRow2.addView(metricTile("连续达标 / 最高",
-                state.currentDisciplinedStreak(today) + " 天 / " + state.bestDisciplinedStreak() + " 天",
-                AMBER_SOFT, AMBER),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        permanent.addView(pRow2);
-        gap(permanent, 10);
-
-        LinearLayout permFoot = row(this);
-        permFoot.setBackground(shape(this, SURFACE_SUBTLE, 10));
-        permFoot.setPadding(dp(this, 12), dp(this, 8), dp(this, 12), dp(this, 8));
-        weight(permFoot, text(this, "活跃天数 " + state.activeDisciplineDaysCount()
-                + " 天 · 累计学习 " + duration(state.lifetimeLearningMs()), 12, INK_SUB, false));
-        permFoot.addView(text(this, "共获 " + duration(state.lifetimeEarnedMs()), 12, BLUE, true));
-        permanent.addView(permFoot);
-        pages.addView(permanent);
+        LinearLayout summary = surfaceCard();
+        DisciplineInsights.populate(this, summary, state, today, now, disciplinePeriod, customDisciplineRange, period -> {
+            if (disciplinePeriod == period) return;
+            disciplinePeriod = period;
+            redraw();
+        }, () -> DisciplineInsights.chooseDates(this, today, customDisciplineRange, range -> {
+            customDisciplineRange = range;
+            disciplinePeriod = DisciplineInsights.Period.CUSTOM;
+            redraw();
+        }));
+        pages.addView(summary);
         gap(pages, 12);
 
         LinearLayout week = surfaceCard();
@@ -3605,6 +3366,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 FocusState.Event ev = selectedDay.events.get(i);
                 int accent = switch (ev.type()) {
                     case "FOCUS", "OFFLINE" -> BLUE;
+                    case "SIGN_IN" -> GREEN;
                     case "HABIT" -> GREEN;
                     case "SLEEP", "DEBUG" -> PURPLE;
                     case "SOBER", "RESET" -> CYAN;
@@ -3614,6 +3376,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 };
                 int soft = switch (ev.type()) {
                     case "FOCUS", "OFFLINE" -> BLUE_SOFT;
+                    case "SIGN_IN" -> GREEN_SOFT;
                     case "HABIT" -> GREEN_SOFT;
                     case "SLEEP", "DEBUG" -> PURPLE_SOFT;
                     case "SOBER", "RESET" -> CYAN_SOFT;

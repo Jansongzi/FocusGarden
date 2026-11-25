@@ -160,11 +160,11 @@ final class BlockScreen extends FrameLayout {
         }
     }
 
-    static int builtInImage(boolean full, int theme, FocusState.Restriction reason) {
-        if (full || theme == 2) return R.drawable.pond_at_dusk;
+    static int builtInImage(boolean full, FocusState.Restriction reason) {
+        if (full) return R.drawable.pond_at_dusk;
         return switch (reason) {
             case BEDTIME -> R.drawable.mascot_sleep;
-            case BUDGET -> theme == 1 ? R.drawable.mascot_calm : R.drawable.mascot_alert;
+            case BUDGET -> R.drawable.mascot_alert;
             default -> R.drawable.mascot_strong;
         };
     }
