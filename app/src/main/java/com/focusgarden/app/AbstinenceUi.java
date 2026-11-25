@@ -92,19 +92,19 @@ final class AbstinenceUi {
     }
 
     static int heroTopColor() {
-        return isDark() ? 0xff2466db : 0xff2576ff;
+        return heroStart();
     }
 
     static int heroBottomColor() {
-        return isDark() ? 0xff163b8a : BLUE_DARK;
+        return heroEnd();
     }
 
     static int heroSubColor() {
-        return 0xffcbe2ff;
+        return heroSub();
     }
 
     static int heroMintColor() {
-        return 0xff5eead4;
+        return heroAccent();
     }
 
     static String formatSummaryDuration(long ms) {
@@ -791,7 +791,7 @@ final class AbstinenceUi {
 
             LinearLayout legend = row(activity);
             String[] labels = {"坚持", "选中", "破戒", "未记录"};
-            int[] colors = {isDark() ? BLUE_SOFT : 0xffadc7f4, BLUE, RED, LINE};
+            int[] colors = {isDark() ? BLUE_SOFT : (isSageTheme() ? 0xffa7c4a1 : isSakuraTheme() ? 0xffe6a8bc : 0xffadc7f4), BLUE, RED, LINE};
             for (int i = 0; i < labels.length; i++) {
                 LinearLayout item = row(activity);
                 item.setGravity(Gravity.CENTER);
@@ -1242,7 +1242,9 @@ final class AbstinenceUi {
             canvas.drawCircle(cx, h * 0.5f, Math.min(w, h) * 0.48f, paint);
 
             // Soil mound
-            paint.setColor(onBlue ? 0x66ffffff : (isDark() ? 0xff4b6080 : 0xff9ec2f7));
+            paint.setColor(onBlue ? 0x66ffffff : (isDark()
+                    ? (isSageTheme() ? 0xff4e684c : isSakuraTheme() ? 0xff6e4856 : 0xff4b6080)
+                    : (isSageTheme() ? 0xff9bb996 : isSakuraTheme() ? 0xffd99db0 : 0xff9ec2f7)));
             oval.set(cx - w * 0.24f, base - h * 0.08f, cx + w * 0.24f, base + h * 0.09f);
             canvas.drawOval(oval, paint);
 
@@ -1330,7 +1332,7 @@ final class AbstinenceUi {
             float pad = stroke * .5f + 1;
             arc.set(pad, pad, getWidth() - pad, getHeight() - pad);
             paint.setStrokeWidth(stroke);
-            paint.setColor(isDark() ? LINE : 0xffe4ebf7);
+            paint.setColor(isDark() ? LINE : (isSageTheme() ? 0xffdfebcb : isSakuraTheme() ? 0xfff8dce6 : 0xffe4ebf7));
             canvas.drawOval(arc, paint);
             if (progress > 0f) {
                 paint.setColor(BLUE);
@@ -1497,7 +1499,8 @@ final class AbstinenceUi {
             textPaint.setTextAlign(Paint.Align.CENTER);
             textPaint.setTypeface(Typeface.create(Typeface.DEFAULT,
                     (selected || relapsed || cleanDay) ? Typeface.BOLD : Typeface.NORMAL));
-            textPaint.setColor(selected ? ON_ACCENT : future ? (isDark() ? MUTED : 0xffaeb9c7)
+            textPaint.setColor(selected ? ON_ACCENT : future ? (isDark() ? MUTED
+                    : (isSageTheme() ? 0xffa7b5a5 : isSakuraTheme() ? 0xffbca5ae : 0xffaeb9c7))
                     : relapsed ? RED : cleanDay ? BLUE : INK);
             float textY = h * 0.5f + textPaint.getTextSize() * 0.34f;
             canvas.drawText(String.valueOf(dayNum), w * 0.5f, textY, textPaint);

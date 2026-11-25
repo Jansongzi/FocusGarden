@@ -24,6 +24,12 @@ final class FocusStateCheck {
         equal(30, FocusState.MODE_SWITCH_COST_MINUTES);
         equal(30, FocusState.DAILY_CAP_CHANGE_COST_MINUTES);
         equal(FocusState.THEME_SYSTEM, state.themeMode);
+        equal(FocusState.PALETTE_BLUE, state.colorTheme);
+        equal(false, state.setColorTheme(FocusState.PALETTE_SAGE));
+        equal(false, state.setColorTheme(FocusState.PALETTE_SAKURA));
+        equal(false, state.setColorTheme(99));
+        equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
+        checkAppThemePurchase(noon);
         equal(3, FocusState.INDULGENT_UNLOCK_DAYS);
         equal(5, FocusState.MAX_INDULGENT_CARDS);
         equal(2, FocusState.INDULGENT_CARDS_PER_LAY_FLAT);
@@ -577,6 +583,43 @@ final class FocusStateCheck {
         durations.start(1, 0, 1, noon + 21 * MINUTE, renamed);
         equal(FocusState.Transition.FINISHED, durations.advance(noon + 22 * MINUTE, UTC));
         equal(2 * MINUTE, durations.disciplineReport(day, day, noon + 22 * MINUTE, UTC).categoryMs().get(renamed));
+    }
+
+    private static void checkAppThemePurchase(long noon) {
+        FocusState state = new FocusState();
+        var sageTheme = ShopCatalog.findPermanentItem(ShopCatalog.SAGE_APP_THEME);
+        equal(120, sageTheme.costMinutes());
+        state.creditMs = 119 * MINUTE;
+        equal(false, state.buyPermanentShopItem(sageTheme.id(), sageTheme.costMinutes(), sageTheme.name(), noon, UTC));
+        equal(false, state.buyPermanentShopItem(sageTheme.id(), 119, sageTheme.name(), noon, UTC));
+        equal(false, state.isShopItemOwned(sageTheme.id()));
+        state.creditMs += MINUTE;
+        equal(true, state.buyPermanentShopItem(sageTheme.id(), sageTheme.costMinutes(), sageTheme.name(), noon, UTC));
+        equal(0L, state.creditMs);
+        equal(false, state.buyPermanentShopItem(sageTheme.id(), sageTheme.costMinutes(), sageTheme.name(), noon, UTC));
+        equal(true, state.setColorTheme(FocusState.PALETTE_SAGE));
+        equal(FocusState.PALETTE_SAGE, state.colorTheme);
+
+        var sakuraTheme = ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME);
+        equal("春日柔粉", sakuraTheme.name());
+        equal(120, sakuraTheme.costMinutes());
+        equal(false, state.setColorTheme(FocusState.PALETTE_SAKURA));
+        equal(FocusState.PALETTE_SAGE, state.colorTheme);
+        state.creditMs = 119 * MINUTE;
+        equal(false, state.buyPermanentShopItem(sakuraTheme.id(), sakuraTheme.costMinutes(), sakuraTheme.name(), noon, UTC));
+        equal(false, state.buyPermanentShopItem(sakuraTheme.id(), 119, sakuraTheme.name(), noon, UTC));
+        equal(false, state.isShopItemOwned(sakuraTheme.id()));
+        state.creditMs += MINUTE;
+        equal(true, state.buyPermanentShopItem(sakuraTheme.id(), sakuraTheme.costMinutes(), sakuraTheme.name(), noon, UTC));
+        equal(0L, state.creditMs);
+        equal(false, state.buyPermanentShopItem(sakuraTheme.id(), sakuraTheme.costMinutes(), sakuraTheme.name(), noon, UTC));
+        equal(true, state.setColorTheme(FocusState.PALETTE_SAKURA));
+        equal(FocusState.PALETTE_SAKURA, state.colorTheme);
+        equal(true, state.setColorTheme(FocusState.PALETTE_SAGE));
+        equal(FocusState.PALETTE_SAGE, state.colorTheme);
+        equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
+        equal(true, state.isShopItemOwned(sageTheme.id()));
+        equal(true, state.isShopItemOwned(sakuraTheme.id()));
     }
 
     private static void checkBlockAppearances() {

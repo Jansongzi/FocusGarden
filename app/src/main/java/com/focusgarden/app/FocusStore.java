@@ -113,6 +113,7 @@ final class FocusStore {
         state.habitDailyCapMinutes = root.optInt("habitDailyCapMinutes", 25);
         state.stepDailyCapMinutes = root.optInt("stepDailyCapMinutes", 30);
         state.themeMode = Math.max(0, Math.min(2, root.optInt("themeMode", FocusState.THEME_SYSTEM)));
+        state.setColorTheme(root.optInt("colorTheme", FocusState.PALETTE_BLUE));
         JSONArray freeKeys = root.optJSONArray("freeConfigUsedKeys");
         if (freeKeys != null) {
             for (int i = 0; i < freeKeys.length(); i++) {
@@ -604,6 +605,7 @@ final class FocusStore {
                     .put("habitDailyCapMinutes", state.habitDailyCapMinutes)
                     .put("stepDailyCapMinutes", state.stepDailyCapMinutes)
                     .put("themeMode", state.themeMode)
+                    .put("colorTheme", state.colorTheme)
                     .put("freeConfigUsedKeys", new JSONArray(state.freeConfigUsedKeys))
                     .put("presetWork", state.presetWork)
                     .put("pomodoroWork", state.pomodoroWork)

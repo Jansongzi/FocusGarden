@@ -20,7 +20,8 @@ final class ShopCatalog {
         LAY_FLAT_CRAFT,
         PIGGY_SKIN,
         LIQUID_THEME,
-        REDEEM_EFFECT
+        REDEEM_EFFECT,
+        APP_THEME
     }
 
     record PiggySkinPalette(
@@ -64,6 +65,30 @@ final class ShopCatalog {
             String name,
             String subtitle,
             int costMinutes) {}
+
+    record AppTheme(String id, int palette, String name, String subtitle, int costMinutes, int[] swatches) {}
+
+    static final String DEFAULT_APP_THEME = "app_theme_blue";
+    static final String SAGE_APP_THEME = "app_theme_sage";
+    static final String SAKURA_APP_THEME = "app_theme_sakura";
+    private static final List<AppTheme> APP_THEMES = List.of(
+            new AppTheme(DEFAULT_APP_THEME, FocusState.PALETTE_BLUE, "晴空蓝", "经典清爽", 0,
+                    new int[]{0xff1a6bff, 0xff1153d6, 0xffeaf2ff, 0xfff3f5f9}),
+            new AppTheme(SAGE_APP_THEME, FocusState.PALETTE_SAGE, "青苔留白", "森系暖白", 120,
+                    new int[]{0xff7fa47b, 0xff4e754d, 0xffdfebcb, 0xfff9f6ed}),
+            new AppTheme(SAKURA_APP_THEME, FocusState.PALETTE_SAKURA, "春日柔粉", "樱花配色", 120,
+                    new int[]{0xffd67b96, 0xffa64d69, 0xfff8dce6, 0xfffffbf8}));
+
+    static List<AppTheme> appThemes() {
+        return APP_THEMES;
+    }
+
+    static AppTheme appTheme(String id) {
+        for (AppTheme theme : APP_THEMES) {
+            if (theme.id().equals(id)) return theme;
+        }
+        return null;
+    }
 
     record WishStyle(
             int index,
@@ -233,6 +258,8 @@ final class ShopCatalog {
 
     static PermanentEntry findPermanentItem(String id) {
         if (id == null) return null;
+        AppTheme theme = appTheme(id);
+        if (theme != null) return new PermanentEntry(id, ItemType.APP_THEME, theme.name(), theme.subtitle(), theme.costMinutes());
         for (PiggySkinPalette s : PIGGY_SKINS) {
             if (s.id().equals(id)) {
                 return new PermanentEntry(s.id(), ItemType.PIGGY_SKIN, s.name(), s.subtitle(), s.costMinutes());

@@ -65,29 +65,101 @@ final class TimeShopUi {
     private TimeShopUi() {}
 
     static final class ShopColors {
-        static int pageBg() { return isDark() ? 0xff141210 : 0xfffaf7f1; }
-        static int interiorBg() { return isDark() ? 0xff1c1915 : 0xfffffcf6; }
-        static int interiorBorder() { return isDark() ? 0xff302921 : 0xffefe6d7; }
-        static int barBg() { return isDark() ? 0xff201c17 : 0xfffffcf6; }
-        static int barBorder() { return isDark() ? 0xff332c24 : 0xffefe8dc; }
-        static int pillBg() { return isDark() ? 0xff231e19 : 0xfffffcf6; }
-        static int pillBorder() { return isDark() ? 0xff373028 : 0xffebe2d4; }
+        static int pageBg() {
+            if (isSageTheme()) return isDark() ? 0xff101510 : 0xfff2f6ed;
+            if (isSakuraTheme()) return isDark() ? 0xff161013 : 0xfffaf1f4;
+            return isDark() ? 0xff141210 : 0xfffaf7f1;
+        }
+        static int interiorBg() {
+            if (isSageTheme()) return isDark() ? 0xff182018 : 0xfff9f6ed;
+            if (isSakuraTheme()) return isDark() ? 0xff21181c : 0xfffffbf8;
+            return isDark() ? 0xff1c1915 : 0xfffffcf6;
+        }
+        static int interiorBorder() {
+            if (isSageTheme()) return isDark() ? 0xff2c3a2b : 0xffdfebcb;
+            if (isSakuraTheme()) return isDark() ? 0xff3d2d34 : 0xfff8dce6;
+            return isDark() ? 0xff302921 : 0xffefe6d7;
+        }
+        static int barBg() {
+            if (isSageTheme()) return isDark() ? 0xff1c251c : 0xfff9f6ed;
+            if (isSakuraTheme()) return isDark() ? 0xff261c21 : 0xfffffbf8;
+            return isDark() ? 0xff201c17 : 0xfffffcf6;
+        }
+        static int barBorder() {
+            if (isSageTheme()) return isDark() ? 0xff2e3d2d : 0xffdfebcb;
+            if (isSakuraTheme()) return isDark() ? 0xff402f37 : 0xfff3d4df;
+            return isDark() ? 0xff332c24 : 0xffefe8dc;
+        }
+        static int pillBg() {
+            if (isSageTheme()) return isDark() ? 0xff1c251c : 0xfff9f6ed;
+            if (isSakuraTheme()) return isDark() ? 0xff261c21 : 0xfffffbf8;
+            return isDark() ? 0xff231e19 : 0xfffffcf6;
+        }
+        static int pillBorder() {
+            if (isSageTheme()) return isDark() ? 0xff2e3d2d : 0xffdfebcb;
+            if (isSakuraTheme()) return isDark() ? 0xff402f37 : 0xfff3d4df;
+            return isDark() ? 0xff373028 : 0xffebe2d4;
+        }
         static int woodTop() { return isDark() ? 0xff5d4c3b : 0xffe8d6b9; }
         static int woodFace() { return isDark() ? 0xff4b3e30 : 0xffd9c4a4; }
         static int woodEdge() { return isDark() ? 0xff372c21 : 0xffc3a982; }
         static int woodGrain() { return isDark() ? 0x33251d15 : 0x389d7d52; }
-        static int awningBlue() { return isDark() ? 0xff3d5478 : 0xffabc4e6; }
-        static int awningCream() { return isDark() ? 0xff29241e : 0xfffaf6ee; }
+        static int awningBlue() {
+            if (isSageTheme()) return isDark() ? 0xff4e754d : 0xff7fa47b;
+            if (isSakuraTheme()) return isDark() ? 0xff9e506a : 0xffe49cb1;
+            return isDark() ? 0xff3d5478 : 0xffabc4e6;
+        }
+        static int awningCream() {
+            if (isSageTheme()) return isDark() ? 0xff212b21 : 0xfff9f6ed;
+            if (isSakuraTheme()) return isDark() ? 0xff2b2025 : 0xfffffbf8;
+            return isDark() ? 0xff29241e : 0xfffaf6ee;
+        }
         static int awningTrim() { return isDark() ? 0x44000000 : 0x2279664d; }
-        static int ink() { return isDark() ? 0xfff3efe8 : 0xff393d46; }
-        static int warmInk() { return isDark() ? 0xffdfc9aa : 0xff79664d; }
-        static int muted() { return isDark() ? 0xff9c9182 : 0xffa39885; }
-        static int navSelectedBg() { return isDark() ? 0xff1c2f50 : 0xffe6effd; }
-        static int navSelectedInk() { return isDark() ? 0xff6ea4ff : 0xff3278f6; }
-        static int blue() { return 0xff3278f6; }
-        static int disabledBg() { return isDark() ? 0xff28231d : 0xffedeae4; }
-        static int disabledInk() { return isDark() ? 0xff7e7467 : 0xffa39885; }
-        static int gripColor() { return isDark() ? 0xff3b342c : 0xffdfd8cc; }
+        static int ink() {
+            if (isSageTheme()) return isDark() ? 0xfff2f6ed : 0xff222d22;
+            if (isSakuraTheme()) return isDark() ? 0xfffaf1f4 : 0xff332229;
+            return isDark() ? 0xfff3efe8 : 0xff393d46;
+        }
+        static int warmInk() {
+            if (isSageTheme()) return isDark() ? 0xffc7d8be : 0xff4e754d;
+            if (isSakuraTheme()) return isDark() ? 0xffe8c6d2 : 0xffa64d69;
+            return isDark() ? 0xffdfc9aa : 0xff79664d;
+        }
+        static int muted() {
+            if (isSageTheme()) return isDark() ? 0xff798a76 : 0xff7e8f7c;
+            if (isSakuraTheme()) return isDark() ? 0xff947d87 : 0xff997f8a;
+            return isDark() ? 0xff9c9182 : 0xffa39885;
+        }
+        static int navSelectedBg() {
+            if (isSageTheme()) return isDark() ? 0xff223322 : 0xffdfebcb;
+            if (isSakuraTheme()) return isDark() ? 0xff38222c : 0xfff8dce6;
+            return isDark() ? 0xff1c2f50 : 0xffe6effd;
+        }
+        static int navSelectedInk() {
+            if (isSageTheme()) return isDark() ? 0xff92b98e : 0xff4e754d;
+            if (isSakuraTheme()) return isDark() ? 0xffea9bb3 : 0xffa64d69;
+            return isDark() ? 0xff6ea4ff : 0xff3278f6;
+        }
+        static int blue() {
+            if (isSageTheme()) return isDark() ? 0xff92b98e : 0xff4e754d;
+            if (isSakuraTheme()) return isDark() ? 0xffea9bb3 : 0xffa64d69;
+            return 0xff3278f6;
+        }
+        static int disabledBg() {
+            if (isSageTheme()) return isDark() ? 0xff202920 : 0xffe8eee2;
+            if (isSakuraTheme()) return isDark() ? 0xff2a2025 : 0xfff2e6eb;
+            return isDark() ? 0xff28231d : 0xffedeae4;
+        }
+        static int disabledInk() {
+            if (isSageTheme()) return isDark() ? 0xff627360 : 0xff97a595;
+            if (isSakuraTheme()) return isDark() ? 0xff7a646e : 0xffb098a2;
+            return isDark() ? 0xff7e7467 : 0xffa39885;
+        }
+        static int gripColor() {
+            if (isSageTheme()) return isDark() ? 0xff314030 : 0xffd0ddc7;
+            if (isSakuraTheme()) return isDark() ? 0xff47353d : 0xffe3cdd6;
+            return isDark() ? 0xff3b342c : 0xffdfd8cc;
+        }
     }
 
     private static GradientDrawable roundedShape(Context context, int fillColor, int borderColor,
@@ -382,7 +454,7 @@ final class TimeShopUi {
     }
 
     static final class ShopIllustrationView extends View {
-        enum Kind { CARD, PIGGY, LIQUID, EFFECT }
+        enum Kind { CARD, PIGGY, LIQUID, EFFECT, THEME }
 
         private final Kind kind;
         private final String key;
@@ -422,10 +494,26 @@ final class TimeShopUi {
                 case PIGGY -> drawMiniPiggy(canvas, w, h, ctx);
                 case LIQUID -> drawLiquidJar(canvas, w, h, ctx);
                 case EFFECT -> drawEffectOrb(canvas, w, h, ctx);
+                case THEME -> drawTheme(canvas, w, h, ctx);
             }
 
             // Tiny crisp 4-point sparkle top-right matching mockup
             drawSpark(canvas, w * 0.82f, h * 0.28f, dp(ctx, 4.5f), isDark() ? 0xffe6c98a : 0xffdfca9f);
+        }
+
+        private void drawTheme(Canvas canvas, float w, float h, Context ctx) {
+            int[] colors = ShopCatalog.appTheme(key).swatches();
+            float radius = dp(ctx, 6);
+            paint.setColor(colors[1]);
+            canvas.drawRoundRect(w * .16f, h * .15f, w * .84f, h * .86f, radius, radius, paint);
+            float edge = dp(ctx, 2);
+            paint.setColor(colors[3]);
+            canvas.drawRoundRect(w * .16f + edge, h * .15f + edge, w * .84f - edge, h * .86f - edge,
+                    radius, radius, paint);
+            paint.setColor(colors[0]);
+            canvas.drawRoundRect(w * .25f, h * .26f, w * .75f, h * .44f, radius, radius, paint);
+            paint.setColor(colors[2]);
+            canvas.drawRoundRect(w * .25f, h * .51f, w * .75f, h * .72f, radius, radius, paint);
         }
 
         private void drawCard(Canvas canvas, float w, float h, Context ctx) {
@@ -1048,7 +1136,7 @@ final class TimeShopUi {
         private final int[] tmpLoc = new int[2];
         private ValueAnimator animator;
         private float sx, sy, cx, cy, tx, ty;
-        private int accentColor = 0xff3278f6;
+        private int accentColor = ShopColors.blue();
         private Runnable pendingDone;
 
         ShopFlyOverlay(Context context) {
@@ -1186,6 +1274,15 @@ final class TimeShopUi {
 
     static Dialog showTimeShopSheet(MainActivity activity, FocusState state,
                                     Runnable onChanged, Runnable onDismissBack) {
+        return showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_ALL);
+    }
+
+    static void showAppearanceShop(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
+        showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_APPEARANCE);
+    }
+
+    private static Dialog showTimeShopSheet(MainActivity activity, FocusState state,
+                                            Runnable onChanged, Runnable onDismissBack, int initialTab) {
         state.seedDefaultRewardsIfNeeded();
 
         Dialog dialog = new Dialog(activity);
@@ -1364,7 +1461,9 @@ final class TimeShopUi {
         overlayHost.requestFocus();
         dialog.setContentView(overlayHost);
 
-        final int[] activeTab = {TAB_ALL};
+        final int openedPalette = state.colorTheme;
+        final boolean[] suppressDismissBack = {false};
+        final int[] activeTab = {initialTab};
         final int[] displayedMinutes = {(int) Math.max(0L, state.rewardSpendableMs() / FocusState.MINUTE)};
         final ValueAnimator[] balanceAnimator = {null};
         final boolean[] actionBusy = {false};
@@ -1447,6 +1546,12 @@ pill.setSingleLine(true);
         Runnable refreshAfterPurchase = () -> {
             FocusStore.get(activity).save();
             onChanged.run();
+            if (state.colorTheme != openedPalette) {
+                suppressDismissBack[0] = true;
+                dialog.dismiss();
+                showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0]);
+                return;
+            }
             rebuild[0].run();
         };
 
@@ -1494,6 +1599,14 @@ pill.setSingleLine(true);
             // Cozy Card Achievement & Synthesis Shelf Module (migrated from Rate Settings)
             if (tab == TAB_ALL || tab == TAB_PROP) {
                 addCardCraftShelfModule(activity, shelfContentWrap, state, actionBusy, bagBtnWrap, refreshAfterPurchase);
+            }
+
+            if (tab == TAB_ALL || tab == TAB_APPEARANCE) {
+                ShelfItem sage = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAGE_APP_THEME),
+                        ShopIllustrationView.Kind.THEME, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
+                ShelfItem sakura = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME),
+                        ShopIllustrationView.Kind.THEME, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
+                addShelfSection(activity, shelfContentWrap, "应用主题", sage, sakura);
             }
 
             // Piggy Bank Collection Shelves
@@ -1602,7 +1715,7 @@ pill.setSingleLine(true);
                 FocusStore.get(activity).save();
                 onChanged.run();
             }
-            if (onDismissBack != null) {
+            if (onDismissBack != null && !suppressDismissBack[0]) {
                 FocusSheets.postReturn(activity, onDismissBack);
             }
         });
@@ -1644,7 +1757,11 @@ pill.setSingleLine(true);
 
         itemsRow.addView(buildShelfItemColumn(activity, left), new LinearLayout.LayoutParams(0, -2, 1f));
         space(itemsRow, 10);
-        itemsRow.addView(buildShelfItemColumn(activity, right), new LinearLayout.LayoutParams(0, -2, 1f));
+        if (right != null) {
+            itemsRow.addView(buildShelfItemColumn(activity, right), new LinearLayout.LayoutParams(0, -2, 1f));
+        } else {
+            weight(itemsRow, new View(activity));
+        }
         parent.addView(itemsRow, -1, -2);
 
         WoodenShelfPlankView plank = new WoodenShelfPlankView(activity);
@@ -1768,7 +1885,7 @@ pill.setSingleLine(true);
                         if (!state.buyVaultExpandCard(System.currentTimeMillis(), ZoneId.systemDefault())) return false;
                         FocusStore.get(activity).save();
                         busy[0] = true;
-                        flyOverlay.playCollect(art, bagTarget, 0xff3278f6, () -> {
+                        flyOverlay.playCollect(art, bagTarget, ShopColors.blue(), () -> {
                             busy[0] = false;
                             CardCraftUi.bouncePill(bagTarget);
                             onUpdated.run();
@@ -1898,15 +2015,21 @@ pill.setSingleLine(true);
             case PIGGY_SKIN -> entry.id().equals(state.equippedPiggySkin);
             case LIQUID_THEME -> entry.id().equals(state.equippedLiquidTheme);
             case REDEEM_EFFECT -> entry.id().equals(state.equippedRedeemEffect);
+            case APP_THEME -> state.colorTheme == ShopCatalog.appTheme(entry.id()).palette();
             default -> false;
         };
     }
 
-    private static boolean equipPermanentItem(FocusState state, ShopCatalog.PermanentEntry entry) {
+    private static boolean equipPermanentItem(MainActivity activity, FocusState state, ShopCatalog.PermanentEntry entry) {
         return switch (entry.type()) {
             case PIGGY_SKIN -> state.equipPiggySkin(entry.id());
             case LIQUID_THEME -> state.equipLiquidTheme(entry.id());
             case REDEEM_EFFECT -> state.equipRedeemEffect(entry.id());
+            case APP_THEME -> {
+                if (!state.setColorTheme(ShopCatalog.appTheme(entry.id()).palette())) yield false;
+                activity.applyThemeNow();
+                yield true;
+            }
             default -> false;
         };
     }
@@ -2360,6 +2483,7 @@ pill.setSingleLine(true);
             case PIGGY_SKIN -> "装备后将替换首页小猪储蓄罐的专属外观与涂装主题，可随时在「背包 → 外观」切换。";
             case LIQUID_THEME -> "装备后将替换首页小猪储蓄罐内的流动水波色彩，可随时在「背包 → 外观」切换。";
             case REDEEM_EFFECT -> "装备后将在兑换页收获时间兑换券时绽放专属动画粒子效果。";
+            case APP_THEME -> "装备后切换应用配色。";
             default -> "";
         };
 
@@ -2391,7 +2515,7 @@ pill.setSingleLine(true);
                 entry.name(), null, content, cancelText, confirmText, false, true, () -> {
                     if (equipped) return;
                     if (owned) {
-                        if (equipPermanentItem(state, entry)) {
+                        if (equipPermanentItem(activity, state, entry)) {
                             haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
                             onUpdated.run();
                             Toast.makeText(activity, "已装备「" + entry.name() + "」", Toast.LENGTH_SHORT).show();
@@ -2412,7 +2536,7 @@ pill.setSingleLine(true);
                                     "已收集「" + entry.name() + "」",
                                     "已放入「背包 → 外观」，是否立即装备生效？",
                                     "留存背包", "立即装备", false, () -> {
-                                        if (equipPermanentItem(state, entry)) {
+                                        if (equipPermanentItem(activity, state, entry)) {
                                             haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
                                             onUpdated.run();
                                             Toast.makeText(activity, "已装备「" + entry.name() + "」", Toast.LENGTH_SHORT).show();
@@ -2831,6 +2955,21 @@ pill.setSingleLine(true);
                 if (t == BAG_ALL) {
                     listWrap.addView(text(activity, "小猪与商店外观", 12, MUTED, true));
                     gap(listWrap, 6);
+                }
+                for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
+                    if (!state.isShopItemOwned(theme.id())) continue;
+                    boolean equipped = state.colorTheme == theme.palette();
+                    listWrap.addView(buildWarehouseRow(activity,
+                            new ShopIllustrationView(activity, ShopIllustrationView.Kind.THEME, theme.id(), 0f),
+                            "主题 · " + theme.name(), theme.subtitle(),
+                            equipped ? "已装备" : "装备", !equipped, equipped ? GREEN : BLUE, () -> {
+                                if (equipPermanentItem(activity, state, ShopCatalog.findPermanentItem(theme.id()))) {
+                                    haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
+                                    onUpdated.run();
+                                    rebuild[0].run();
+                                }
+                            }));
+                    gap(listWrap, 8);
                 }
                 for (ShopCatalog.PiggySkinPalette s : ShopCatalog.piggySkins()) {
                     if (!state.isShopItemOwned(s.id())) continue;

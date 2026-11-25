@@ -37,7 +37,7 @@ final class RedeemUi {
         return !ValueAnimator.areAnimatorsEnabled();
     }
 
-    static int voucherBg() { return 0xff2576ff; }
+    static int voucherBg() { return heroStart(); }
     static int voucherStroke() { return 0x28ffffff; }
     static int voucherDash() { return 0x55ffffff; }
     static int voucherTitleInk() { return 0xe0ffffff; }
@@ -51,12 +51,12 @@ final class RedeemUi {
     static int goldDisabledBg() { return 0x28ffffff; }
     static int goldDisabledInk() { return 0xd8ffffff; }
 
-    static int blueFace() { return 0xff3278f6; }
-    static int blueBase() { return 0xff194fb9; }
+    static int blueFace() { return button3DFace(); }
+    static int blueBase() { return button3DBase(); }
     static int blueInk() { return ON_ACCENT; }
 
-    static int itemDisabledBg() { return isDark() ? 0xff1d2636 : 0xfff0f2f6; }
-    static int itemDisabledInk() { return isDark() ? 0xff5a6b82 : 0xff9aa6b8; }
+    static int itemDisabledBg() { return BLUE_DISABLED_BG; }
+    static int itemDisabledInk() { return BLUE_DISABLED_TEXT; }
 
     static int successBg() { return isDark() ? 0xff123325 : 0xffe5f7ee; }
     static int successInk() { return isDark() ? 0xff34d399 : 0xff149e58; }
@@ -95,7 +95,7 @@ final class RedeemUi {
 
             fillPaint.setStyle(Paint.Style.FILL);
             fillPaint.setShader(new LinearGradient(0f, 0f, w, h,
-                    0xff2576ff, BLUE_DARK, Shader.TileMode.CLAMP));
+                    heroStart(), heroEnd(), Shader.TileMode.CLAMP));
             canvas.drawRoundRect(cardRect, radius, radius, fillPaint);
             fillPaint.setShader(null);
 

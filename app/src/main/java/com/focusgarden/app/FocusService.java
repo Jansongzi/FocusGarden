@@ -838,7 +838,7 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void showSettingsGuardOverlay() {
-        GardenUi.applyTheme(this, store.state.themeMode);
+        GardenUi.applyTheme(this, store.state.themeMode, store.state.colorTheme);
         blockScreen = null;
         blockedPackage = "com.android.settings";
         showing = FocusState.Restriction.FOCUS;

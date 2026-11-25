@@ -83,12 +83,32 @@ final class GardenUi {
     static int SAND = AMBER_SOFT;
 
     private static boolean darkTheme;
+    private static int activePalette = FocusState.PALETTE_BLUE;
 
     static boolean isDark() {
         return darkTheme;
     }
 
+    static int colorTheme() {
+        return activePalette;
+    }
+
+    static boolean isSageTheme() {
+        return activePalette == FocusState.PALETTE_SAGE;
+    }
+
+    static boolean isSakuraTheme() {
+        return activePalette == FocusState.PALETTE_SAKURA;
+    }
+
     static boolean applyTheme(Context context, int themeMode) {
+        return applyTheme(context, themeMode, activePalette);
+    }
+
+    static boolean applyTheme(Context context, int themeMode, int colorTheme) {
+        int nextPalette = colorTheme == FocusState.PALETTE_SAGE ? FocusState.PALETTE_SAGE
+                : colorTheme == FocusState.PALETTE_SAKURA ? FocusState.PALETTE_SAKURA
+                : FocusState.PALETTE_BLUE;
         boolean shouldBeDark;
         if (themeMode == FocusState.THEME_DARK) {
             shouldBeDark = true;
@@ -99,8 +119,136 @@ final class GardenUi {
                     : (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK);
             shouldBeDark = mask == Configuration.UI_MODE_NIGHT_YES;
         }
-        boolean changed = darkTheme != shouldBeDark;
+        boolean changed = darkTheme != shouldBeDark || activePalette != nextPalette;
         darkTheme = shouldBeDark;
+        activePalette = nextPalette;
+
+        if (nextPalette == FocusState.PALETTE_SAGE) {
+            if (shouldBeDark) {
+                PAPER = 0xff101510;
+                CARD = 0xff182018;
+                SURFACE_SUBTLE = 0xff212b21;
+                BORDER = 0xff2d3b2c;
+                LINE = 0xff263326;
+                INK = 0xfff2f6ed;
+                INK_SUB = 0xffb2c2ae;
+                MUTED = 0xff798a76;
+                BLUE = 0xff92b98e;
+                BLUE_LIGHT = 0xff7fa47b;
+                BLUE_DARK = 0xff3b5c3a;
+                BLUE_SOFT = 0xff223322;
+                BLUE_DISABLED_BG = 0xff202920;
+                BLUE_DISABLED_TEXT = 0xff627360;
+                GREEN = 0xff66c27c;
+                GREEN_SOFT = 0xff19311e;
+                RED = 0xffeb726a;
+                RED_SOFT = 0xff381c1c;
+                AMBER = 0xffe6ad4f;
+                AMBER_SOFT = 0xff332815;
+                PURPLE = 0xffa694cf;
+                PURPLE_SOFT = 0xff282138;
+                CYAN = 0xff6eb8a6;
+                CYAN_SOFT = 0xff172f29;
+                FOREST = 0xff4e754d;
+            } else {
+                PAPER = 0xfff2f6ed;
+                CARD = 0xfff9f6ed;
+                SURFACE_SUBTLE = 0xffeff4e8;
+                BORDER = 0xffdce6d2;
+                LINE = 0xffe5edd9;
+                INK = 0xff222d22;
+                INK_SUB = 0xff536352;
+                MUTED = 0xff7e8f7c;
+                BLUE = 0xff4e754d;
+                BLUE_LIGHT = 0xff7fa47b;
+                BLUE_DARK = 0xff4e754d;
+                BLUE_SOFT = 0xffdfebcb;
+                BLUE_DISABLED_BG = 0xffe8eee2;
+                BLUE_DISABLED_TEXT = 0xff97a595;
+                GREEN = 0xff3f8f54;
+                GREEN_SOFT = 0xffdfebcb;
+                RED = 0xffd1534a;
+                RED_SOFT = 0xfffbece9;
+                AMBER = 0xffc78522;
+                AMBER_SOFT = 0xfff8efe0;
+                PURPLE = 0xff7e6ba8;
+                PURPLE_SOFT = 0xffefecf7;
+                CYAN = 0xff4f9482;
+                CYAN_SOFT = 0xffe3f2ed;
+                FOREST = 0xff3e613d;
+            }
+            MINT = BLUE_SOFT;
+            LIME = darkTheme ? 0xff273b27 : 0xffdfebcb;
+            PALE = 0xffdfebcb;
+            GOLD = AMBER;
+            SAGE = GREEN;
+            SAND = AMBER_SOFT;
+            return changed;
+        }
+
+        if (nextPalette == FocusState.PALETTE_SAKURA) {
+            if (shouldBeDark) {
+                PAPER = 0xff161013;
+                CARD = 0xff21181c;
+                SURFACE_SUBTLE = 0xff2b2025;
+                BORDER = 0xff3d2d34;
+                LINE = 0xff34262c;
+                INK = 0xfffaf1f4;
+                INK_SUB = 0xffccbac2;
+                MUTED = 0xff947d87;
+                BLUE = 0xffea9bb3;
+                BLUE_LIGHT = 0xffd67b96;
+                BLUE_DARK = 0xff803950;
+                BLUE_SOFT = 0xff38222c;
+                BLUE_DISABLED_BG = 0xff2a2025;
+                BLUE_DISABLED_TEXT = 0xff7a646e;
+                GREEN = 0xff5dc78a;
+                GREEN_SOFT = 0xff193125;
+                RED = 0xfff96b5e;
+                RED_SOFT = 0xff3c1c1b;
+                AMBER = 0xfff0b254;
+                AMBER_SOFT = 0xff362815;
+                PURPLE = 0xffb399e6;
+                PURPLE_SOFT = 0xff2c223d;
+                CYAN = 0xff6fc2d9;
+                CYAN_SOFT = 0xff192f38;
+                FOREST = 0xffa64d69;
+            } else {
+                PAPER = 0xfffaf1f4;
+                CARD = 0xfffffbf8;
+                SURFACE_SUBTLE = 0xfff7eaf0;
+                BORDER = 0xffeed9e1;
+                LINE = 0xfff3e3e9;
+                INK = 0xff332229;
+                INK_SUB = 0xff6b525c;
+                MUTED = 0xff997f8a;
+                BLUE = 0xffa64d69;
+                BLUE_LIGHT = 0xffd67b96;
+                BLUE_DARK = 0xffa64d69;
+                BLUE_SOFT = 0xfff8dce6;
+                BLUE_DISABLED_BG = 0xfff2e6eb;
+                BLUE_DISABLED_TEXT = 0xffb098a2;
+                GREEN = 0xff369662;
+                GREEN_SOFT = 0xffe6f5ec;
+                RED = 0xffd93829;
+                RED_SOFT = 0xfffeeae8;
+                AMBER = 0xffcf8722;
+                AMBER_SOFT = 0xfffbf1e1;
+                PURPLE = 0xff8969b8;
+                PURPLE_SOFT = 0xfff2ecf9;
+                CYAN = 0xff4c97ab;
+                CYAN_SOFT = 0xffe6f4f7;
+                FOREST = 0xff8a3c55;
+            }
+            MINT = BLUE_SOFT;
+            LIME = darkTheme ? 0xff422632 : 0xfff8dce6;
+            PALE = 0xfffce7ef;
+            GOLD = AMBER;
+            SAGE = GREEN;
+            SAND = AMBER_SOFT;
+            return changed;
+        }
+
         if (shouldBeDark) {
             PAPER = 0xff0b0f17;
             CARD = 0xff151c28;
@@ -163,11 +311,51 @@ final class GardenUi {
         return changed;
     }
 
+    static int heroStart() {
+        if (isSageTheme()) return darkTheme ? 0xff5b8258 : 0xff7fa47b;
+        if (isSakuraTheme()) return darkTheme ? 0xffb86680 : 0xffd67b96;
+        return darkTheme ? 0xff2466db : 0xff2576ff;
+    }
+
+    static int heroEnd() {
+        if (isSageTheme()) return darkTheme ? 0xff395938 : 0xff4e754d;
+        if (isSakuraTheme()) return darkTheme ? 0xff7d3950 : 0xffa64d69;
+        return darkTheme ? 0xff163b8a : BLUE_DARK;
+    }
+
+    static int heroSub() {
+        if (isSageTheme()) return 0xffdfebcb;
+        if (isSakuraTheme()) return 0xfffce4ec;
+        return 0xffcbe2ff;
+    }
+
+    static int heroAccent() {
+        if (isSageTheme()) return 0xffdfebcb;
+        if (isSakuraTheme()) return 0xffffe5ee;
+        return 0xff5eead4;
+    }
+
+    static int button3DFace() {
+        if (isSageTheme()) return 0xff7fa47b;
+        if (isSakuraTheme()) return 0xffd67b96;
+        return 0xff3278f6;
+    }
+
+    static int button3DBase() {
+        if (isSageTheme()) return 0xff4e754d;
+        if (isSakuraTheme()) return 0xffa64d69;
+        return 0xff194fb9;
+    }
+
     static int blueStroke() {
+        if (isSageTheme()) return darkTheme ? 0xff3b583a : 0xffc6d9b5;
+        if (isSakuraTheme()) return darkTheme ? 0xff5e3645 : 0xffebc5d3;
         return darkTheme ? 0xff294980 : 0xffcfe0ff;
     }
 
     static int greenStroke() {
+        if (isSageTheme()) return darkTheme ? 0xff2c5234 : 0xffc4dbaf;
+        if (isSakuraTheme()) return darkTheme ? 0xff254d38 : 0xffbfe5cf;
         return darkTheme ? 0xff1f5740 : 0xffbcecd3;
     }
 
@@ -180,6 +368,8 @@ final class GardenUi {
     }
 
     static int cyanStroke() {
+        if (isSageTheme()) return darkTheme ? 0xff285046 : 0xffc0ded4;
+        if (isSakuraTheme()) return darkTheme ? 0xff244a57 : 0xffc1e2ec;
         return darkTheme ? 0xff1c4d6b : 0xffccebfb;
     }
 
@@ -188,6 +378,8 @@ final class GardenUi {
     }
 
     static int mutedCircleBorder() {
+        if (isSageTheme()) return darkTheme ? 0xff3c4c3a : 0xffc5d1bf;
+        if (isSakuraTheme()) return darkTheme ? 0xff4d3942 : 0xffdecad2;
         return darkTheme ? 0xff3b4961 : 0xffc6d2e2;
     }
 
@@ -258,18 +450,22 @@ final class GardenUi {
     static void elevate(View view, float elevationDp) {
         view.setElevation(dp(view.getContext(), elevationDp));
         if (Build.VERSION.SDK_INT >= 28) {
-            view.setOutlineAmbientShadowColor(0x1a152849);
-            view.setOutlineSpotShadowColor(0x24152849);
+            int ambient = isSageTheme() ? 0x1a263b25 : isSakuraTheme() ? 0x1a471f2e : 0x1a152849;
+            int spot = isSageTheme() ? 0x24263b25 : isSakuraTheme() ? 0x24471f2e : 0x24152849;
+            view.setOutlineAmbientShadowColor(ambient);
+            view.setOutlineSpotShadowColor(spot);
         }
     }
 
     static RippleDrawable touch(Context context, int color, int radiusDp) {
-        return new RippleDrawable(ColorStateList.valueOf(0x201a6bff),
+        int ripple = isSageTheme() ? 0x247fa47b : isSakuraTheme() ? 0x24d67b96 : 0x201a6bff;
+        return new RippleDrawable(ColorStateList.valueOf(ripple),
                 shape(context, color, radiusDp), null);
     }
 
     static RippleDrawable touchCard(Context context, int fillColor, int strokeColor, int radiusDp) {
-        return new RippleDrawable(ColorStateList.valueOf(0x1a1a6bff),
+        int ripple = isSageTheme() ? 0x1c7fa47b : isSakuraTheme() ? 0x1cd67b96 : 0x1a1a6bff;
+        return new RippleDrawable(ColorStateList.valueOf(ripple),
                 cardBg(context, fillColor, strokeColor, radiusDp), null);
     }
 
@@ -559,7 +755,10 @@ final class GardenUi {
         grip.setContentDescription("向下拖动关闭面板");
         grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         View handle = new View(activity);
-        handle.setBackground(shape(activity, darkTheme ? 0xff3a4860 : 0xffd5dde9, 3));
+        int gripColor = isSageTheme() ? (darkTheme ? 0xff3a4a39 : 0xffcedac6)
+                : isSakuraTheme() ? (darkTheme ? 0xff4b3740 : 0xffe4cdd6)
+                : (darkTheme ? 0xff3a4860 : 0xffd5dde9);
+        handle.setBackground(shape(activity, gripColor, 3));
         grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, 42), dp(activity, 4), Gravity.CENTER));
         sheet.addView(grip, -1, dp(activity, 34));
         int touchSlop = ViewConfiguration.get(activity).getScaledTouchSlop();
@@ -882,7 +1081,10 @@ final class GardenUi {
             float radius = h / 2f;
             track.set(0, 0, w, h);
 
-            paint.setColor(blend(darkTheme ? 0xff2c384c : 0xffdce4f0, BLUE, thumbPos));
+            int offTrack = darkTheme
+                    ? (isSageTheme() ? 0xff2d3b2c : isSakuraTheme() ? 0xff3d2d34 : 0xff2c384c)
+                    : (isSageTheme() ? 0xffd7e2cf : isSakuraTheme() ? 0xffe8d5dc : 0xffdce4f0);
+            paint.setColor(blend(offTrack, (isSageTheme() || isSakuraTheme()) ? BLUE_LIGHT : BLUE, thumbPos));
             canvas.drawRoundRect(track, radius, radius, paint);
 
             float thumbR = (h - pad * 2f) / 2f;

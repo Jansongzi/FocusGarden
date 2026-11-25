@@ -31,7 +31,7 @@ final class InsightChart extends View {
         float height = getHeight();
         float radius = width * .36f;
 
-        paint.setColor(GardenUi.isDark() ? 0xff202a3b : 0xffedf2f8);
+        paint.setColor(GardenUi.isDark() ? GardenUi.SURFACE_SUBTLE : GardenUi.LINE);
         column.set(left, 0, right, height);
         canvas.drawRoundRect(column, radius, radius, paint);
 

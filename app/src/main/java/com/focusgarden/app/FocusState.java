@@ -45,6 +45,9 @@ final class FocusState {
     static final int THEME_SYSTEM = 0;
     static final int THEME_LIGHT = 1;
     static final int THEME_DARK = 2;
+    static final int PALETTE_BLUE = 0;
+    static final int PALETTE_SAGE = 1;
+    static final int PALETTE_SAKURA = 2;
     static final int[] ABSTINENCE_STAGE_HOURS = {24, 72, 168, 360, 720, 1440, 2160, 4320, 6480, 8760};
     static final int MAX_ABSTINENCE_UI_REWARD_MINUTES = 30;
     static final long ABSTINENCE_BACKDATE_GUARD_MS = 24L * 60 * MINUTE;
@@ -372,6 +375,7 @@ final class FocusState {
     int habitDailyCapMinutes = 25;
     int stepDailyCapMinutes = 30;
     int themeMode = THEME_SYSTEM;
+    int colorTheme = PALETTE_BLUE;
     final Set<String> freeConfigUsedKeys = new LinkedHashSet<>();
 
     int presetWork = 25;
@@ -627,6 +631,17 @@ final class FocusState {
         if (!SLEEP_BG_AURORA.equals(id) && !TIMER_BG_CUSTOM.equals(id) && !isBuiltInFullBlockId(id)) return false;
         sleepLockBackgroundId = id;
         return true;
+    }
+
+    boolean setColorTheme(int palette) {
+        for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
+            if (theme.palette() == palette) {
+                if (!isShopItemOwned(theme.id())) return false;
+                colorTheme = palette;
+                return true;
+            }
+        }
+        return false;
     }
 
     void syncLegacyPercents() {
@@ -1405,11 +1420,13 @@ final class FocusState {
     }
 
     boolean isShopItemOwned(String id) {
-        return "default".equals(id) || (id != null && !id.isEmpty() && ownedShopItems.contains(id));
+        return "default".equals(id) || ShopCatalog.DEFAULT_APP_THEME.equals(id) || ownedShopItems.contains(id);
     }
 
     boolean buyPermanentShopItem(String id, int costMinutes, String title, long now, ZoneId zone) {
         if (id == null || id.isEmpty() || costMinutes <= 0 || isShopItemOwned(id)) return false;
+        var appTheme = ShopCatalog.appTheme(id);
+        if (appTheme != null && costMinutes != appTheme.costMinutes()) return false;
         long costMs = costMinutes * MINUTE;
         if (!spendForShop(costMs, "兑换外观 · " + (title == null ? id : title), "永久收藏", now, zone)) {
             return false;

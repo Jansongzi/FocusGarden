@@ -984,7 +984,7 @@ final class FocusSheets {
         boolean failedToday = state.earlySleepFailedOn(today);
 
         FrameLayout hero = new FrameLayout(activity);
-        hero.setBackground(cardBg(activity, 0xffebf2ff, BORDER, 18));
+        hero.setBackground(cardBg(activity, BLUE_SOFT, BORDER, 18));
         hero.setClipToOutline(true);
         ImageView stars = new ImageView(activity);
         stars.setImageResource(R.drawable.bg_sleep_stars);
@@ -2483,8 +2483,68 @@ final class FocusSheets {
         Dialog[] sheetRef = new Dialog[1];
         boolean[] suppressReturn = {false};
 
-        body.addView(text(activity, "外观与夜间模式", 13, MUTED, true));
+        body.addView(text(activity, "外观与主题", 13, MUTED, true));
         gap(body, 8);
+        LinearLayout paletteRow = row(activity);
+        for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
+            boolean selected = state.colorTheme == theme.palette();
+            boolean owned = state.isShopItemOwned(theme.id());
+            if (paletteRow.getChildCount() > 0) space(paletteRow, 8);
+
+            LinearLayout tile = column(activity);
+            tile.setBackground(touchCard(activity, selected ? BLUE_SOFT : SURFACE_SUBTLE,
+                    selected ? blueStroke() : BORDER, 14));
+            tile.setPadding(dp(activity, 9), dp(activity, 10), dp(activity, 9), dp(activity, 10));
+            tile.setContentDescription("主题：" + theme.name());
+
+            LinearLayout topLine = row(activity);
+            TextView nameTv = text(activity, theme.name(), 13, selected ? BLUE : INK, true);
+            nameTv.setSingleLine(true);
+            nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            weight(topLine, nameTv);
+            if (selected) {
+                space(topLine, 3);
+                topLine.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 16, 9, 8));
+            }
+            tile.addView(topLine);
+            gap(tile, 7);
+
+            LinearLayout swRow = row(activity);
+            int[] pSwatches = theme.swatches();
+            for (int cIdx = 0; cIdx < pSwatches.length; cIdx++) {
+                View dot = new View(activity);
+                dot.setBackground(cardBg(activity, pSwatches[cIdx], BORDER, 5));
+                swRow.addView(dot, dp(activity, 14), dp(activity, 14));
+                if (cIdx + 1 < pSwatches.length) space(swRow, 4);
+            }
+            tile.addView(swRow);
+            gap(tile, 6);
+            TextView subTv = text(activity, owned ? theme.subtitle() : theme.costMinutes() + " 分钟",
+                    11, selected ? BLUE : MUTED, false);
+            subTv.setSingleLine(true);
+            subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            tile.addView(subTv);
+            tile.setOnClickListener(v -> {
+                if (selected) return;
+                tapHaptic(v);
+                Runnable reopen = () -> showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
+                suppressReturn[0] = true;
+                if (sheetRef[0] != null) sheetRef[0].dismiss();
+                if (state.setColorTheme(theme.palette())) {
+                    FocusStore.get(activity).save();
+                    activity.applyThemeNow();
+                    reopen.run();
+                } else {
+                    TimeShopUi.showAppearanceShop(activity, state, onChanged, reopen);
+                }
+            });
+            weight(paletteRow, tile);
+        }
+        body.addView(paletteRow);
+        gap(body, 12);
+
+        body.addView(text(activity, "夜间模式", 12, MUTED, true));
+        gap(body, 6);
         body.addView(chipRow(activity, new String[]{"跟随系统", "浅色", "深色"}, state.themeMode, idx -> {
             if (idx == state.themeMode) return;
             state.themeMode = idx;

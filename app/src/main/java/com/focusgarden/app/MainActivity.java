@@ -205,7 +205,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     };
 
     void applyThemeNow() {
-        applyTheme(this, state.themeMode);
+        applyTheme(this, state.themeMode, state.colorTheme);
         render();
     }
 
@@ -224,7 +224,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         state = FocusStore.get(this).state;
-        applyTheme(this, state.themeMode);
+        applyTheme(this, state.themeMode, state.colorTheme);
         updatePanel = new UpdatePanel(this);
         if (saved != null) {
             tab = saved.getInt("tab", 0);
@@ -258,7 +258,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        if (state != null && state.themeMode == FocusState.THEME_SYSTEM && applyTheme(this, state.themeMode)) {
+        if (state != null && state.themeMode == FocusState.THEME_SYSTEM
+                && applyTheme(this, state.themeMode, state.colorTheme)) {
             render();
         }
     }
@@ -290,7 +291,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
-        applyTheme(this, state.themeMode);
+        applyTheme(this, state.themeMode, state.colorTheme);
         long now = System.currentTimeMillis();
         TimerReceiver.advance(this, now);
         state.syncResetDay(now, ZoneId.systemDefault());
@@ -991,7 +992,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout vaultCard = column(this);
         vaultCard.setBackground(layFlat
                 ? gradientBg(this, 0xff8b6eff, 0xff5b3fd6, 22)
-                : gradientBg(this, 0xff2576ff, BLUE_DARK, 22));
+                : gradientBg(this, heroStart(), heroEnd(), 22));
         vaultCard.setPadding(dp(this, 18), dp(this, 16), dp(this, 18), dp(this, 16));
         elevate(vaultCard, 5);
 
@@ -1018,11 +1019,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
         vaultCard.addView(vaultTop);
         gap(vaultCard, 14);
 
-        int withdrawInk = layFlat ? 0xff5b3fd6 : 0xff1a6bff;
+        int withdrawInk = layFlat ? 0xff5b3fd6 : (isSakuraTheme() ? 0xffa64d69 : BLUE);
         LinearLayout vaultBtns = row(this);
         RedeemUi.Pressable3DButton depositBtn = new RedeemUi.Pressable3DButton(this, 38, 13, 13, 8, R.drawable.ic_deposit);
         depositBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "存入 " + state.vaultStepMinutes + " 分");
-        depositBtn.setEnabledColors(layFlat ? 0xff7659ea : 0xff397ce8, layFlat ? 0xff4832ae : 0xff0948a8, ON_ACCENT);
+        depositBtn.setEnabledColors(
+                layFlat ? 0xff7659ea : isSageTheme() ? 0xff6e966a : isSakuraTheme() ? 0xffcb6f8a : 0xff397ce8,
+                layFlat ? 0xff4832ae : isSageTheme() ? 0xff3c5f3b : isSakuraTheme() ? 0xff873953 : 0xff0948a8,
+                ON_ACCENT);
         depositBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
                 haptic(depositBtn, state.hapticFeedback, HapticKind.REJECT);
@@ -1053,7 +1057,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         RedeemUi.Pressable3DButton withdrawBtn = new RedeemUi.Pressable3DButton(this, 38, 13, 13, 8, R.drawable.ic_withdraw);
         withdrawBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "提取 " + state.vaultStepMinutes + " 分");
-        withdrawBtn.setEnabledColors(ON_ACCENT, layFlat ? 0xffb6a7f2 : 0xff9cb9eb, withdrawInk);
+        withdrawBtn.setEnabledColors(ON_ACCENT,
+                layFlat ? 0xffb6a7f2 : isSageTheme() ? 0xffc2d6b6 : isSakuraTheme() ? 0xffe8b7c6 : 0xff9cb9eb,
+                withdrawInk);
         withdrawBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
                 haptic(withdrawBtn, state.hapticFeedback, HapticKind.REJECT);
@@ -2166,7 +2172,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         RedeemUi.Pressable3DButton enterBtn = new RedeemUi.Pressable3DButton(this, 31, 11, 13, 10, false);
         enterBtn.applyState(hasChest ? RedeemUi.Pressable3DButton.Mode.GOLD_ENABLED
                 : RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, hasChest ? "去开箱" : "进入商店");
-        if (!hasChest) enterBtn.setEnabledColors(0xffa6bddc, 0xff718eb7, 0xfff8f5ec);
+        if (!hasChest) enterBtn.setEnabledColors(
+                isSageTheme() ? 0xff7fa47b : isSakuraTheme() ? 0xffd67b96 : 0xffa6bddc,
+                isSageTheme() ? 0xff4e754d : isSakuraTheme() ? 0xffa64d69 : 0xff718eb7,
+                isSageTheme() ? 0xfff9f6ed : isSakuraTheme() ? 0xfffffbf8 : 0xfff8f5ec);
         content.addView(enterBtn, dp(this, 100), -2);
         card.addView(content, -1, -2);
 
@@ -3381,7 +3390,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private FrameLayout topBarBtn(int iconRes, int tint, String desc, Runnable action) {
-        int bg = isDark() ? 0xe61c2534 : 0xf2ffffff;
+        int bg = (isDark() ? 0xe6000000 : 0xf2000000) | ((isDark() ? SURFACE_SUBTLE : CARD) & 0x00ffffff);
         FrameLayout btn = iconBadge(this, iconRes, bg, tint, 38, 19, 12);
         btn.setBackground(touchCard(this, bg, BORDER, 12));
         elevate(btn, 4);
