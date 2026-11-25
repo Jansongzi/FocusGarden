@@ -1644,6 +1644,10 @@ pill.setSingleLine(true);
                 } else {
                     rebuild[0].run();
                 }
+            }, () -> {
+                suppressDismissBack[0] = true;
+                dialog.dismiss();
+                activity.returnToHome();
             });
         });
 
@@ -1824,15 +1828,15 @@ pill.setSingleLine(true);
                         new OnboardingUi.GuideStep(
                                 navRow,
                                 R.drawable.guide_mascot_gift,
-                                "时光杂货铺开张啦！",
-                                "攒下的时间不仅能用来玩手机，还能在这里兑换扩容卡、晴空蓝/樱花粉主题、可爱小猪皮肤，或者写下喝奶茶、看电影的现实心愿哦～",
-                                16, 6),
+                                "兑换道具、主题与心愿",
+                                "攒下的时间可以在这里换扩容卡、主题皮肤，还能自定义自己的现实小奖励哦～",
+                                16, 3),
                         new OnboardingUi.GuideStep(
                                 bagBtnWrap,
                                 R.drawable.guide_mascot_bag,
-                                "宝贝全都收在背包里",
-                                "买到的道具、皮肤和兑出来的心愿券都在右上角小背包里，随时点进来使用、换装或核销心愿～",
-                                14, 6)
+                                "查看已拥有的物品",
+                                "买到的道具、主题外观和心愿券都收在背包里，随时点开使用、换装或核销～",
+                                14, 3)
                 );
                 shopGuideRef[0] = OnboardingUi.SpotlightGuideView.show(overlayHost, scroller, steps, () -> {
                     shopGuideRef[0] = null;
@@ -2924,11 +2928,16 @@ pill.setSingleLine(true);
     }
 
     static void showWarehouseSheet(MainActivity activity, FocusState state, int initialTab, Runnable onUpdated) {
-        showWarehouseSheet(activity, state, initialTab, onUpdated, null);
+        showWarehouseSheet(activity, state, initialTab, onUpdated, null, null);
     }
 
     static void showWarehouseSheet(MainActivity activity, FocusState state, int initialTab,
                                    Runnable onUpdated, Runnable onClosed) {
+        showWarehouseSheet(activity, state, initialTab, onUpdated, onClosed, null);
+    }
+
+    static void showWarehouseSheet(MainActivity activity, FocusState state, int initialTab,
+                                   Runnable onUpdated, Runnable onClosed, Runnable onGoHome) {
         final int openedPalette = state.effectiveColorTheme();
         final Dialog[] sheetRef = new Dialog[1];
         final boolean[] suppressClose = {false};
@@ -3060,8 +3069,12 @@ pill.setSingleLine(true);
                                 "取消", "立即开启", false, () -> {
                                     if (state.activateIndulgentMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                        refreshOrReopen.run();
+                                        suppressClose[0] = true;
+                                        if (sheetRef[0] != null) sheetRef[0].dismiss();
+                                        onUpdated.run();
                                         Toast.makeText(activity, "已开启放纵模式（1:2）", Toast.LENGTH_SHORT).show();
+                                        if (onGoHome != null) onGoHome.run();
+                                        else activity.returnToHome();
                                     }
                                 })));
                 gap(listWrap, 8);
@@ -3080,8 +3093,12 @@ pill.setSingleLine(true);
                                 "取消", "立即躺平", false, () -> {
                                     if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                        refreshOrReopen.run();
+                                        suppressClose[0] = true;
+                                        if (sheetRef[0] != null) sheetRef[0].dismiss();
+                                        onUpdated.run();
                                         Toast.makeText(activity, "已开启躺平模式，今日全天免限", Toast.LENGTH_SHORT).show();
+                                        if (onGoHome != null) onGoHome.run();
+                                        else activity.returnToHome();
                                     }
                                 })));
                 gap(listWrap, 12);

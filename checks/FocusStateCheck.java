@@ -1412,10 +1412,12 @@ final class FocusStateCheck {
         equal(false, fresh.hiddenCards.contains("habits"));
 
         equal(0, fresh.completedGuides.size());
+        equal(false, fresh.isGuideCompleted(FocusState.GUIDE_DISCLAIMER));
         equal(false, fresh.isGuideCompleted(FocusState.GUIDE_HOME));
         fresh.markGuideCompleted(FocusState.GUIDE_HOME);
         equal(true, fresh.isGuideCompleted(FocusState.GUIDE_HOME));
         fresh.markAllGuidesCompleted();
+        equal(true, fresh.isGuideCompleted(FocusState.GUIDE_DISCLAIMER));
         equal(FocusState.ALL_GUIDE_KEYS.size(), fresh.completedGuides.size());
         fresh.resetAllGuides();
         equal(0, fresh.completedGuides.size());

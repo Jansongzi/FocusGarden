@@ -175,6 +175,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private SoberModeUi.Timer soberTimer;
     private SleepLockUi sleepLockUi;
     private FocusSheets.LiveRefresh liveKeepAliveSheet;
+    private FocusSheets.LiveRefresh liveDisclaimerDialog;
     private FocusSheets.LiveRefresh livePermissionWizard;
     private FrameLayout windowHost;
     private OnboardingUi.SpotlightGuideView activeSpotlight;
@@ -2947,11 +2948,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         pages.addView(sleep);
         gap(pages, 12);
 
-        long nowRules = System.currentTimeMillis();
-        ZoneId zoneRules = ZoneId.systemDefault();
         boolean layFlatMode = state.rateMode == FocusState.RateMode.LAY_FLAT;
         boolean indulgentMode = state.rateMode == FocusState.RateMode.INDULGENT;
-        boolean switchedToday = state.hasSwitchedModeToday(nowRules, zoneRules);
 
         LinearLayout rates = surfaceCard();
         LinearLayout rateHead = row(this);
@@ -2964,15 +2962,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         modeChip.setPadding(dp(this, 10), dp(this, 4), dp(this, 10), dp(this, 4));
         rateHead.addView(modeChip);
         rates.addView(rateHead);
-        gap(rates, 6);
-        String switchStatus = switchedToday ? "今日已切换" : "每日限切 1 次";
-        String cardStatus = " · 放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
-                + " · 躺平卡 " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS
-                + (state.hasPendingIndulgentReward() ? " · 宝箱" + state.pendingIndulgentRewards : "");
-        TextView rateSubTv = text(this, switchStatus + cardStatus, 12, MUTED, false);
-        rateSubTv.setSingleLine(true);
-        rateSubTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        rates.addView(rateSubTv);
         gap(rates, 12);
         TextView switchBtn = secondaryButton(this, "进入模式切换");
         switchBtn.setSingleLine(true);
@@ -3730,7 +3719,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private boolean isOnboardingActive() {
-        return (livePermissionWizard != null && livePermissionWizard.isShowing())
+        return (liveDisclaimerDialog != null && liveDisclaimerDialog.isShowing())
+                || (livePermissionWizard != null && livePermissionWizard.isShowing())
                 || activeSpotlight != null;
     }
 
@@ -3746,6 +3736,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private boolean hasPendingOnboardingForCurrentScreen() {
         if (state == null) return false;
+        if (!state.isGuideCompleted(FocusState.GUIDE_DISCLAIMER)) return true;
         if (!state.isGuideCompleted(FocusState.GUIDE_PERMS)) return true;
         return !state.isGuideCompleted(currentPageGuideKey());
     }
@@ -3753,6 +3744,25 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void scheduleOnboardingCheck(long delayMs) {
         main.removeCallbacks(onboardingTrigger);
         main.postDelayed(onboardingTrigger, Math.max(0L, delayMs));
+    }
+
+    void returnToHome() {
+        rulesFromSettings = false;
+        if (tab != 0) {
+            pendingSlideDir = 0;
+            pendingPageTransition = 0;
+            activeSpotlightKey = null;
+            activeSpotlightStep = 0;
+            if (activeSpotlight != null) {
+                activeSpotlight.dismissWithoutFinish();
+                activeSpotlight = null;
+            }
+            tab = 0;
+            render();
+        } else if (scroll != null) {
+            scroll.scrollTo(0, 0);
+        }
+        scheduleOnboardingCheck(140L);
     }
 
     void openOnboardingPermissionWizard() {
@@ -3771,6 +3781,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     void replayOnboardingFromStart() {
         if (state == null || isFinishing() || isDestroyed()) return;
         state.resetAllGuides();
+        state.markGuideCompleted(FocusState.GUIDE_DISCLAIMER);
         state.markGuideCompleted(FocusState.GUIDE_PERMS);
         FocusStore.get(this).save();
         activeSpotlightKey = null;
@@ -3800,6 +3811,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 || (timerConfirmation != null && timerConfirmation.isShowing())
                 || state.isSleepLocked(now, ZoneId.systemDefault())
                 || state.soberActive(now)) {
+            return;
+        }
+
+        if (!state.isGuideCompleted(FocusState.GUIDE_DISCLAIMER)) {
+            liveDisclaimerDialog = OnboardingUi.showDisclaimerDialog(this, state, () -> {
+                liveDisclaimerDialog = null;
+                scheduleOnboardingCheck(160L);
+            });
             return;
         }
 
@@ -3841,25 +3860,25 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     steps.add(new OnboardingUi.GuideStep(
                             homeSignIn,
                             R.drawable.guide_mascot_gift,
-                            "每天白领摸鱼基金",
+                            "领取每天摸鱼基金",
                             "点这里签个到，每天轻松领 10 分钟可用时长！凌晨 04:00 准时刷新，不领白不领哦～",
-                            14, 6));
+                            14, 3));
                 }
                 if (homeBudgetCard != null) {
                     steps.add(new OnboardingUi.GuideStep(
                             homeBudgetCard,
                             R.drawable.guide_mascot_point,
-                            "先把上头 App 管起来",
-                            "新朋友见面礼 40 分钟已到账啦！点这里加上最容易刷停不下来的娱乐应用，大家共用今日余额，用完就会温柔拦住你～",
-                            20, 4));
+                            "管理限制的应用",
+                            "新朋友见面礼 40 分钟已到账啦！点这里添加你想限制的娱乐应用～",
+                            20, 2));
                 }
                 if (homeDisciplineCardView != null) {
                     steps.add(new OnboardingUi.GuideStep(
                             homeDisciplineCardView,
                             R.drawable.guide_mascot_study,
-                            "专注一会儿就赚时间",
-                            "想攒更多自由时间？开启正计时或不能反悔的倒计时就行！默认是贴心的「简单模式 (2:1)」，专注 2 分钟就能换 1 分钟快乐时光～",
-                            20, 4));
+                            "赚取摸鱼时间",
+                            "开启自律模式或者进行正向行为可赚取使用限制应用的时间哦！",
+                            20, 2));
                 }
                 View vaultTarget = (!state.vaultCardCollapsed && homeVaultCard != null)
                         ? homeVaultCard : homePiggyBank;
@@ -3867,9 +3886,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     steps.add(new OnboardingUi.GuideStep(
                             vaultTarget,
                             R.drawable.guide_mascot_clock,
-                            "多余时间喂给小猪储蓄罐",
-                            "今日用不完的时间凌晨会清零，快存进小猪肚子里跨天保留！其他页面点过去时再悄悄教你新玩法哦～",
-                            22, 4));
+                            "存下多余的时间",
+                            "今日用不完的时间可以存进储蓄罐，跨天不清零，想用时随时取出来～",
+                            22, 2));
                 }
             }
             case FocusState.GUIDE_REDEEM -> {
@@ -3877,30 +3896,32 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     steps.add(new OnboardingUi.GuideStep(
                             redeemVoucherGuideTarget,
                             R.drawable.guide_mascot_cheer,
-                            "攒好的时间来这儿提现！",
-                            "学习应用、自律计时、戒断挑战赚到的时间都会汇成兑换券，点一下大按钮就能全部“咻”进可用余额～",
-                            22, 4));
+                            "一键领取赚到的时间",
+                            "自律、学习、戒断攒下的奖励都会汇到这里，点按钮就能一键领进可用时长～",
+                            22, 2));
                 }
                 if (redeemCardsGuideTarget != null) {
                     steps.add(new OnboardingUi.GuideStep(
                             redeemCardsGuideTarget,
                             R.drawable.guide_mascot_idea,
-                            "轻装上阵，更多玩法按需开",
-                            "先替你开了「应用、自律、戒断」3 张基础卡片；想用早睡、待办或步数，滑到底部点「添加和编辑卡片」随时唤醒它们～",
-                            18, 4));
+                            "按需开启更多玩法",
+                            "点击卡片就能展开使用，滑到底部还能随时开启早睡、待办和步数兑换哦！",
+                            18, 2));
                 }
             }
             case FocusState.GUIDE_ABSTINENCE -> {
                 if (abstinenceGuideTarget != null) {
-                    String msg = state.abstinences.isEmpty()
-                            ? "挑个模板一键开启戒熬夜或戒短视频吧！坚持越久奖励越高，手滑破戒也不清零累计阶段，冲动时还有「冷静一下」陪着你～"
-                            : "圆环里记录着你的每一次坚持！实在忍不住时点「冷静一下」做 60 秒呼吸或 5 分钟小锁机，破戒也不清零总阶段，慢慢变更好～";
+                    boolean empty = state.abstinences.isEmpty();
+                    String title = empty ? "开始你的戒断挑战" : "戒断进度与冲动救急";
+                    String msg = empty
+                            ? "选个模板就能开启戒断挑战，坚持达标领时间奖励，忍不住时还能点「冷静一下」帮你稳住～"
+                            : "这里记录你的坚持进度与奖励，忍不住时就点「冷静一下」做呼吸或短时锁机哦～";
                     steps.add(new OnboardingUi.GuideStep(
                             abstinenceGuideTarget,
                             R.drawable.guide_mascot_calm,
-                            "温柔地和坏习惯说拜拜",
+                            title,
                             msg,
-                            20, 4));
+                            20, 2));
                 }
             }
             case FocusState.GUIDE_INSIGHTS -> {
@@ -3908,9 +3929,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     steps.add(new OnboardingUi.GuideStep(
                             insightsGuideTarget,
                             R.drawable.guide_mascot_book,
-                            "你的每次努力都有小本本记着",
-                            "「数据统计」永久珍藏你的专注趋势和 7 日战绩，「时间线」能翻看每一笔时间的赚取与花费，超有成就感！",
-                            15, 5));
+                            "查看统计与时间线",
+                            "「数据统计」记录你的专注时长与 7 日趋势，「时间线」可以回看每笔时间的收支明细哦！",
+                            15, 3));
                 }
             }
             case FocusState.GUIDE_RULES -> {
@@ -3918,9 +3939,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     steps.add(new OnboardingUi.GuideStep(
                             rulesGuideTarget,
                             R.drawable.guide_mascot_think,
-                            "正经学习赚时，摸鱼应用设红线",
-                            "「学习」里的应用打开就能自动赚时间，「限制」里的娱乐应用共用今天余额，用完就会被小管家拦住啦～",
-                            15, 5));
+                            "分类管理应用规则",
+                            "「学习」里的应用打开就自动赚时间，「限制」里的应用共用今日余额，用完自动拦截～",
+                            15, 3));
                 }
             }
             default -> {}

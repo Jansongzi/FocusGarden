@@ -2152,16 +2152,11 @@ final class FocusSheets {
         Runnable[] rebuild = new Runnable[1];
         Dialog[] sheetRef = new Dialog[1];
         boolean[] suppressReturn = {false};
-        int openedPalette = state.effectiveColorTheme();
-        Runnable refreshOrReopenMode = () -> {
+        Runnable finishModeSwitchAndGoHome = () -> {
+            suppressReturn[0] = true;
+            if (sheetRef[0] != null) sheetRef[0].dismiss();
             onChanged.run();
-            if (state.effectiveColorTheme() != openedPalette) {
-                suppressReturn[0] = true;
-                if (sheetRef[0] != null) sheetRef[0].dismiss();
-                showRateSettings(activity, state, onChanged, onDismissBack);
-            } else {
-                rebuild[0].run();
-            }
+            activity.returnToHome();
         };
         Runnable openShopFromRates = () -> {
             suppressReturn[0] = true;
@@ -2257,7 +2252,7 @@ final class FocusSheets {
                                         System.currentTimeMillis(), ZoneId.systemDefault());
                                 if (res == FocusState.ModeSwitchCheck.OK) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    refreshOrReopenMode.run();
+                                    finishModeSwitchAndGoHome.run();
                                     Toast.makeText(activity,
                                             (firstFree ? "首次免费已切换为" : "已切换为") + mode.label + "（" + mode.ratioText + "）",
                                             Toast.LENGTH_SHORT).show();
@@ -2351,7 +2346,7 @@ final class FocusSheets {
                             "稍后", "立即开启（1 天）", false, () -> {
                                 if (state.activateIndulgentMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    refreshOrReopenMode.run();
+                                    finishModeSwitchAndGoHome.run();
                                     Toast.makeText(activity, "已开启放纵模式（1:2），明日 04:00 自动恢复",
                                             Toast.LENGTH_SHORT).show();
                                 } else {
@@ -2410,7 +2405,7 @@ final class FocusSheets {
                     ? "开启（耗 1 张躺平卡）"
                     : canCraft
                     ? "材料已齐 · 去商店合成"
-                    : "去时间商店合成（2→1）";
+                    : "去时间商店合成";
             int layBtnInk = layFlatActive || hasLayCard ? ON_ACCENT : PURPLE;
             android.graphics.drawable.Drawable layBtnBg = layFlatActive || hasLayCard
                     ? touch(activity, PURPLE, 11)
@@ -2443,7 +2438,7 @@ final class FocusSheets {
                             "稍后", "立即躺平（今天）", false, () -> {
                                 if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    refreshOrReopenMode.run();
+                                    finishModeSwitchAndGoHome.run();
                                     Toast.makeText(activity, "已开启躺平模式，今日全天应用不受限",
                                             Toast.LENGTH_SHORT).show();
                                 } else {
@@ -2636,6 +2631,9 @@ final class FocusSheets {
             if (modeSelected) {
                 space(topLine, 3);
                 topLine.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 16, 9, 8));
+            } else {
+                space(topLine, 3);
+                topLine.addView(iconBadge(activity, R.drawable.ic_lock, BORDER, INK_SUB, 16, 8, 11));
             }
             tile.addView(topLine);
             gap(tile, 7);
@@ -2993,7 +2991,7 @@ final class FocusSheets {
         mailCard.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
         mailCard.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
         LinearLayout mailTop = row(activity);
-        mailTop.addView(iconBadge(activity, R.drawable.ic_brand_qqmail, BLUE_SOFT, 0, 38, 24, 11));
+        mailTop.addView(iconBadge(activity, R.drawable.ic_mail, GREEN_SOFT, GREEN, 38, 19, 11));
         space(mailTop, 12);
         LinearLayout mailCopy = column(activity);
         mailCopy.addView(text(activity, "作者邮箱", 15, INK, true));

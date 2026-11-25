@@ -28,6 +28,7 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Permissions-first setup wizard and per-page theme-aware dashed Spotlight onboarding overlay.
@@ -47,6 +48,145 @@ final class OnboardingUi {
             int padDp) {}
 
     private record PermRenderSignature(KeepAliveManager.StatusSnapshot snap, boolean floatingBall) {}
+
+    static FocusSheets.LiveRefresh showDisclaimerDialog(MainActivity activity, FocusState state,
+                                                        Runnable onAccepted) {
+        Dialog dialog = new Dialog(activity);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setCancelable(false);
+        dialog.setCanceledOnTouchOutside(false);
+
+        FrameLayout backdrop = new FrameLayout(activity);
+        int hPad = dp(activity, 20);
+        backdrop.setPadding(hPad, dp(activity, 24), hPad, dp(activity, 24));
+
+        LinearLayout card = column(activity);
+        card.setBackground(cardBg(activity, CARD, BORDER, 24));
+        card.setPadding(dp(activity, 20), dp(activity, 20), dp(activity, 20), dp(activity, 18));
+        elevate(card, 12);
+
+        LinearLayout header = row(activity);
+        header.addView(iconBadge(activity, R.drawable.ic_info, BLUE_SOFT, BLUE, 36, 18, 11));
+        space(header, 10);
+        header.addView(text(activity, "开源及版权声明", 18, INK, true));
+        card.addView(header);
+        gap(card, 12);
+
+        FrameLayout scrollBox = new FrameLayout(activity);
+        scrollBox.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        scrollBox.setPadding(dp(activity, 14), dp(activity, 12), dp(activity, 10), dp(activity, 12));
+
+        int viewH = Math.max(dp(activity, 165),
+                Math.min(dp(activity, 225),
+                        Math.round(activity.getResources().getDisplayMetrics().heightPixels * 0.25f)));
+        ScrollView scroller = new ScrollView(activity);
+        scroller.setVerticalScrollBarEnabled(true);
+        scroller.setScrollbarFadingEnabled(false);
+
+        LinearLayout content = column(activity);
+        content.setPadding(0, dp(activity, 2), dp(activity, 6), dp(activity, 6));
+        String[] paragraphs = {
+                "本项目免费提供并公开源代码，旨在为用户提供便捷的使用体验，鼓励学习、交流与共同完善。",
+                "未经授权，禁止以任何形式对本项目进行商业转售、付费分发或其他营利性销售。若您通过第三方付费渠道获取本项目，请及时联系卖家申请退款，谨防上当受骗。",
+                "本项目所使用的部分图片及其他素材来源于互联网，相关版权归原作者或权利人所有。如有任何版权争议或侵权问题，请联系项目开发者，我们将在核实后及时进行删除或替换处理。",
+                "感谢您的理解、支持与监督。"
+        };
+        for (int i = 0; i < paragraphs.length; i++) {
+            TextView pTv = text(activity, paragraphs[i], 14, INK_SUB, false);
+            pTv.setLineSpacing(dp(activity, 4), 1.08f);
+            content.addView(pTv, -1, -2);
+            if (i + 1 < paragraphs.length) gap(content, 12);
+        }
+        gap(content, 14);
+        TextView endMark = text(activity, "— 已阅读至底部 —", 12, MUTED, false);
+        endMark.setGravity(Gravity.CENTER);
+        content.addView(endMark, -1, -2);
+        scroller.addView(content, -1, -2);
+        scrollBox.addView(scroller, new FrameLayout.LayoutParams(-1, viewH));
+        card.addView(scrollBox, -1, -2);
+        gap(card, 10);
+
+        TextView scrollHintTv = text(activity, "请向下滑动阅读全部内容 ↓", 12, MUTED, false);
+        scrollHintTv.setGravity(Gravity.CENTER);
+        card.addView(scrollHintTv, -1, -2);
+        gap(card, 10);
+
+        TextView nextBtn = pillButton(activity, "请先阅读至底部", BLUE_DISABLED_BG, BLUE_DISABLED_TEXT, 14, 46);
+        card.addView(nextBtn, -1, -2);
+
+        backdrop.addView(card, new FrameLayout.LayoutParams(-1, -2, Gravity.CENTER));
+        dialog.setContentView(backdrop);
+
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawableResource(android.R.color.transparent);
+            win.setGravity(Gravity.CENTER);
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            win.setDimAmount(isDark() ? 0.65f : 0.46f);
+        }
+
+        final boolean[] reachedBottom = {false};
+        final boolean[] accepted = {false};
+
+        Runnable checkAtBottom = () -> {
+            if (reachedBottom[0]) return;
+            View child = scroller.getChildCount() > 0 ? scroller.getChildAt(0) : null;
+            boolean atBottom = child == null
+                    || !scroller.canScrollVertically(1)
+                    || (scroller.getScrollY() + scroller.getHeight() >= child.getHeight() - dp(activity, 8));
+            if (atBottom) {
+                reachedBottom[0] = true;
+                scrollHintTv.setText("已阅读至底部 ✓");
+                scrollHintTv.setTextColor(GREEN);
+                nextBtn.setText("我已阅读，进入下一步");
+                nextBtn.setTextColor(ON_ACCENT);
+                nextBtn.setBackground(touch(activity, BLUE, 14));
+            }
+        };
+
+        scroller.setOnScrollChangeListener((v, sx, sy, osx, osy) -> checkAtBottom.run());
+
+        nextBtn.setOnClickListener(v -> {
+            if (!reachedBottom[0]) {
+                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                Toast.makeText(activity, "请先向下滑动阅读至声明底部哦～", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (accepted[0]) return;
+            accepted[0] = true;
+            tapHaptic(v);
+            state.markGuideCompleted(FocusState.GUIDE_DISCLAIMER);
+            FocusStore.get(activity).save();
+            dialog.dismiss();
+            if (onAccepted != null) onAccepted.run();
+        });
+
+        dialog.setOnKeyListener((d, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                Toast.makeText(activity, "请先阅读开源及版权声明后进入下一步", Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            return false;
+        });
+
+        if (!RedeemUi.reducedMotion(activity)) {
+            card.setScaleX(0.95f);
+            card.setScaleY(0.95f);
+            card.setAlpha(0f);
+            card.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(170)
+                    .setInterpolator(new DecelerateInterpolator(1.6f)).start();
+        }
+        dialog.show();
+        scroller.post(checkAtBottom);
+
+        return new FocusSheets.LiveRefresh() {
+            @Override public void refresh() {}
+            @Override public boolean isShowing() {
+                return dialog.isShowing();
+            }
+        };
+    }
 
     static FocusSheets.LiveRefresh showPermissionWizard(MainActivity activity, FocusState state,
                                                       Runnable onPickWallpaper, Runnable onChanged,
@@ -498,7 +638,7 @@ final class OnboardingUi {
     }
 
     // =========================================================================
-    // Static Theme-Aware Dashed Spotlight Overlay
+    // Static Theme-Aware Dashed Spotlight Overlay (Pop-Out Mascot Bubble)
     // =========================================================================
     static final class SpotlightGuideView extends FrameLayout {
         private final FrameLayout host;
@@ -508,21 +648,33 @@ final class OnboardingUi {
 
         private final Paint scrimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dashPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bubbleShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bubbleFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bubbleStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint mascotShadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path scrimPath = new Path();
+        private final Path bubblePath = new Path();
         private final RectF cutoutRect = new RectF();
-        private final RectF dashRect = new RectF();
+        private final RectF cardRect = new RectF();
+        private final RectF arcOval = new RectF();
+        private final RectF mascotFootShadowRect = new RectF();
 
-        private final LinearLayout card;
-        private final ImageView mascotImg;
-        private final TextView stepBadgeTv;
+        private final LinearLayout cardContent;
+        private final LinearLayout copyCol;
+        private final TextView stepEyebrowTv;
         private final TextView titleTv;
         private final TextView bodyTv;
         private final TextView skipTv;
+        private final StepDotsView dotsView;
         private final TextView nextBtn;
+        private final ImageView mascotImg;
 
         private int currentIndex;
         private int currentRadiusPx;
         private boolean hasTargetRect;
+        private boolean hasCardRect;
+        private boolean bubbleArrowUp = true;
+        private float bubbleArrowCenterX;
         private int layoutRetryCount;
         private boolean finished;
 
@@ -536,6 +688,8 @@ final class OnboardingUi {
 
             Context ctx = host.getContext();
             setWillNotDraw(false);
+            setClipChildren(false);
+            setClipToPadding(false);
             setClickable(true);
             setFocusable(true);
             setFocusableInTouchMode(true);
@@ -544,73 +698,82 @@ final class OnboardingUi {
             scrimPaint.setColor(isDark() ? 0xCC060911 : 0xAD0E1418);
 
             dashPaint.setStyle(Paint.Style.STROKE);
-            dashPaint.setStrokeWidth(dp(ctx, 2.5f));
+            dashPaint.setStrokeWidth(dp(ctx, 1.5f));
             dashPaint.setStrokeCap(Paint.Cap.ROUND);
             dashPaint.setColor(isDark() ? BLUE : BLUE_LIGHT);
-            dashPaint.setPathEffect(new DashPathEffect(new float[]{dp(ctx, 7f), dp(ctx, 5f)}, 0f));
+            dashPaint.setPathEffect(new DashPathEffect(new float[]{dp(ctx, 5.5f), dp(ctx, 4f)}, 0f));
 
-            card = column(ctx);
-            GradientDrawable cardBgDrawable = new GradientDrawable();
-            cardBgDrawable.setColor(CARD);
-            cardBgDrawable.setCornerRadius(dp(ctx, 20));
-            cardBgDrawable.setStroke(dp(ctx, 1.5f), blueStroke());
-            card.setBackground(cardBgDrawable);
-            card.setPadding(dp(ctx, 15), dp(ctx, 15), dp(ctx, 15), dp(ctx, 14));
-            elevate(card, 8);
+            bubbleShadowPaint.setStyle(Paint.Style.FILL);
+            bubbleShadowPaint.setColor(isDark() ? 0x55000000 : 0x260E1418);
 
-            LinearLayout topRow = row(ctx);
-            mascotImg = new ImageView(ctx);
-            mascotImg.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            mascotImg.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-            topRow.addView(mascotImg, dp(ctx, 74), dp(ctx, 74));
-            space(topRow, 12);
+            bubbleFillPaint.setStyle(Paint.Style.FILL);
+            bubbleFillPaint.setColor(CARD);
 
-            LinearLayout copyCol = column(ctx);
-            LinearLayout titleLine = row(ctx);
-            stepBadgeTv = text(ctx, "", 11, BLUE, true);
-            stepBadgeTv.setSingleLine(true);
-            stepBadgeTv.setBackground(shape(ctx, BLUE_SOFT, 8));
-            stepBadgeTv.setPadding(dp(ctx, 7), dp(ctx, 2), dp(ctx, 7), dp(ctx, 2));
-            titleLine.addView(stepBadgeTv);
-            space(titleLine, 6);
+            bubbleStrokePaint.setStyle(Paint.Style.STROKE);
+            bubbleStrokePaint.setStrokeWidth(dp(ctx, 1f));
+            bubbleStrokePaint.setColor(blueStroke());
 
-            titleTv = text(ctx, "", 15, INK, true);
-            weight(titleLine, titleTv);
-            copyCol.addView(titleLine);
-            gap(copyCol, 6);
+            mascotShadowPaint.setStyle(Paint.Style.FILL);
+            mascotShadowPaint.setColor(isDark() ? 0x40000000 : 0x1A182218);
+
+            cardContent = column(ctx);
+            cardContent.setPadding(dp(ctx, 14), dp(ctx, 13), dp(ctx, 14), dp(ctx, 12));
+
+            copyCol = column(ctx);
+            copyCol.setPadding(dp(ctx, 98), 0, dp(ctx, 2), 0);
+            copyCol.setMinimumHeight(dp(ctx, 76));
+
+            stepEyebrowTv = text(ctx, "", 11, MUTED, true);
+            stepEyebrowTv.setSingleLine(true);
+            stepEyebrowTv.setLetterSpacing(0.06f);
+            copyCol.addView(stepEyebrowTv);
+            gap(copyCol, 2);
+
+            titleTv = text(ctx, "", 16, INK, true);
+            copyCol.addView(titleTv);
+            gap(copyCol, 4);
 
             bodyTv = text(ctx, "", 13, INK_SUB, false);
-            bodyTv.setLineSpacing(dp(ctx, 2.5f), 1.08f);
+            bodyTv.setLineSpacing(dp(ctx, 2f), 1.06f);
             copyCol.addView(bodyTv);
-            weight(topRow, copyCol);
-            card.addView(topRow);
-            gap(card, 12);
+            cardContent.addView(copyCol, -1, -2);
+            gap(cardContent, 10);
 
             LinearLayout actions = row(ctx);
-            skipTv = text(ctx, "跳过引导", 13, MUTED, true);
+            skipTv = text(ctx, "跳过引导", 12.5f, MUTED, true);
             skipTv.setGravity(Gravity.CENTER_VERTICAL);
-            skipTv.setMinimumHeight(dp(ctx, 36));
-            skipTv.setPadding(dp(ctx, 6), dp(ctx, 4), dp(ctx, 10), dp(ctx, 4));
+            skipTv.setMinimumHeight(dp(ctx, 34));
+            skipTv.setPadding(dp(ctx, 4), dp(ctx, 4), dp(ctx, 8), dp(ctx, 4));
             skipTv.setOnClickListener(v -> {
                 tapHaptic(v);
                 dismiss();
             });
             actions.addView(skipTv);
 
-            View spacer = new View(ctx);
-            actions.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+            FrameLayout dotsSlot = new FrameLayout(ctx);
+            dotsView = new StepDotsView(ctx);
+            dotsSlot.addView(dotsView, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+            actions.addView(dotsSlot, new LinearLayout.LayoutParams(0, -2, 1f));
 
-            nextBtn = pillButton(ctx, "下一步", BLUE, ON_ACCENT, 13, 38);
-            nextBtn.setPadding(dp(ctx, 18), dp(ctx, 6), dp(ctx, 18), dp(ctx, 6));
+            nextBtn = pillButton(ctx, "下一步 →", BLUE, ON_ACCENT, 18, 34);
+            nextBtn.setTextSize(12.5f);
+            nextBtn.setSingleLine(true);
+            nextBtn.setPadding(dp(ctx, 16), dp(ctx, 5), dp(ctx, 16), dp(ctx, 5));
             nextBtn.setOnClickListener(v -> {
                 tapHaptic(v);
                 advanceOrFinish();
             });
             actions.addView(nextBtn, -2, -2);
-            card.addView(actions);
+            cardContent.addView(actions, -1, -2);
 
-            card.setVisibility(View.INVISIBLE);
-            addView(card, new FrameLayout.LayoutParams(-1, -2));
+            mascotImg = new ImageView(ctx);
+            mascotImg.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            mascotImg.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+
+            cardContent.setVisibility(View.INVISIBLE);
+            mascotImg.setVisibility(View.INVISIBLE);
+            addView(cardContent, new FrameLayout.LayoutParams(-1, -2));
+            addView(mascotImg, new FrameLayout.LayoutParams(dp(ctx, 94), dp(ctx, 102)));
         }
 
         static SpotlightGuideView show(FrameLayout host, ScrollView scroller,
@@ -689,11 +852,14 @@ final class OnboardingUi {
             GuideStep step = steps.get(index);
 
             mascotImg.setImageResource(step.mascotRes());
-            stepBadgeTv.setText(steps.size() > 1 ? (index + 1) + " / " + steps.size() : "小提示");
+            stepEyebrowTv.setText(steps.size() > 1
+                    ? String.format(Locale.ROOT, "STEP %02d / %02d", index + 1, steps.size())
+                    : "小贴士");
             titleTv.setText(step.title());
             bodyTv.setText(step.body());
-            nextBtn.setText(index + 1 < steps.size() ? "下一步" : "我知道啦！");
+            nextBtn.setText(index + 1 < steps.size() ? "下一步 →" : "我知道啦！");
             skipTv.setVisibility(steps.size() > 1 ? View.VISIBLE : View.INVISIBLE);
+            dotsView.setStep(index, steps.size());
 
             positionCurrentStep(allowScroll);
         }
@@ -755,43 +921,115 @@ final class OnboardingUi {
             bottom = Math.min(hostH - dp(ctx, 4), bottom);
 
             cutoutRect.set(left, top, right, bottom);
-            float dashOut = dp(ctx, 2.5f);
-            dashRect.set(left - dashOut, top - dashOut, right + dashOut, bottom + dashOut);
             currentRadiusPx = dp(ctx, step.cornerRadiusDp());
             hasTargetRect = cutoutRect.width() > 0 && cutoutRect.height() > 0;
 
-            int sideMargin = dp(ctx, 16);
-            int cardMaxW = Math.max(dp(ctx, 200), hostW - sideMargin * 2);
-            card.measure(
+            int sideMargin = dp(ctx, 20);
+            int cardMaxW = Math.max(dp(ctx, 220), hostW - sideMargin * 2);
+            cardContent.measure(
                     MeasureSpec.makeMeasureSpec(cardMaxW, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(hostH, MeasureSpec.AT_MOST));
-            int cardH = card.getMeasuredHeight();
+            int cardH = cardContent.getMeasuredHeight();
 
-            int topSafe = dp(ctx, 36);
-            int bottomSafe = dp(ctx, 24);
-            int gapPx = dp(ctx, 14);
+            int mascotProtrude = dp(ctx, 26);
+            int arrowH = dp(ctx, 10);
+            int pointerGap = dp(ctx, 18);
+            int topSafe = dp(ctx, 36) + mascotProtrude;
+            int bottomSafe = dp(ctx, 24) + arrowH;
 
             float spaceBelow = (hostH - bottomSafe) - cutoutRect.bottom;
-            float spaceAbove = cutoutRect.top - topSafe;
+            float spaceAbove = cutoutRect.top - topSafe - arrowH;
 
             int cardTop;
-            if (spaceBelow >= cardH + gapPx || spaceBelow >= spaceAbove) {
-                cardTop = Math.round(cutoutRect.bottom + gapPx);
+            if (spaceBelow >= cardH + pointerGap || spaceBelow >= spaceAbove) {
+                bubbleArrowUp = true;
+                cardTop = Math.round(cutoutRect.bottom + pointerGap);
                 cardTop = Math.min(cardTop, hostH - bottomSafe - cardH);
             } else {
-                cardTop = Math.round(cutoutRect.top - gapPx - cardH);
+                bubbleArrowUp = false;
+                cardTop = Math.round(cutoutRect.top - pointerGap - cardH);
             }
             cardTop = Math.max(topSafe, Math.min(cardTop, Math.max(topSafe, hostH - bottomSafe - cardH)));
 
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) card.getLayoutParams();
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) cardContent.getLayoutParams();
             lp.width = cardMaxW;
             lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             lp.gravity = Gravity.TOP | Gravity.START;
             lp.leftMargin = sideMargin;
             lp.topMargin = cardTop;
-            card.setLayoutParams(lp);
-            card.setVisibility(View.VISIBLE);
+            cardContent.setLayoutParams(lp);
+            cardContent.setVisibility(View.VISIBLE);
+
+            int mascotW = dp(ctx, 94);
+            int mascotH = dp(ctx, 102);
+            int mascotLeft = sideMargin + dp(ctx, 4);
+            int mascotTop = cardTop - mascotProtrude;
+            FrameLayout.LayoutParams mLp = (FrameLayout.LayoutParams) mascotImg.getLayoutParams();
+            mLp.width = mascotW;
+            mLp.height = mascotH;
+            mLp.gravity = Gravity.TOP | Gravity.START;
+            mLp.leftMargin = mascotLeft;
+            mLp.topMargin = mascotTop;
+            mascotImg.setLayoutParams(mLp);
+            mascotImg.setVisibility(View.VISIBLE);
+
+            cardRect.set(sideMargin, cardTop, sideMargin + cardMaxW, cardTop + cardH);
+            mascotFootShadowRect.set(
+                    sideMargin + dp(ctx, 24),
+                    cardTop + dp(ctx, 68),
+                    sideMargin + dp(ctx, 78),
+                    cardTop + dp(ctx, 76));
+
+            float r = dp(ctx, 20);
+            float halfArrowW = dp(ctx, 9);
+            float minArrowX = bubbleArrowUp
+                    ? (sideMargin + dp(ctx, 112))
+                    : (sideMargin + r + halfArrowW + dp(ctx, 6));
+            float maxArrowX = cardRect.right - r - halfArrowW - dp(ctx, 6);
+            if (minArrowX > maxArrowX) minArrowX = (cardRect.left + cardRect.right) * 0.5f;
+            bubbleArrowCenterX = Math.max(minArrowX, Math.min(maxArrowX, cutoutRect.centerX()));
+            hasCardRect = true;
+
+            buildBubblePath(ctx, r, halfArrowW, arrowH);
             invalidate();
+        }
+
+        private void buildBubblePath(Context ctx, float r, float halfArrowW, float arrowH) {
+            float l = cardRect.left;
+            float t = cardRect.top;
+            float right = cardRect.right;
+            float b = cardRect.bottom;
+            float d = r * 2f;
+            float ax = bubbleArrowCenterX;
+            float tipInset = dp(ctx, 1.5f);
+
+            bubblePath.reset();
+            bubblePath.moveTo(l + r, t);
+            if (bubbleArrowUp) {
+                bubblePath.lineTo(ax - halfArrowW, t);
+                bubblePath.lineTo(ax - tipInset, t - arrowH + tipInset);
+                bubblePath.quadTo(ax, t - arrowH, ax + tipInset, t - arrowH + tipInset);
+                bubblePath.lineTo(ax + halfArrowW, t);
+            }
+            bubblePath.lineTo(right - r, t);
+            arcOval.set(right - d, t, right, t + d);
+            bubblePath.arcTo(arcOval, -90f, 90f, false);
+            bubblePath.lineTo(right, b - r);
+            arcOval.set(right - d, b - d, right, b);
+            bubblePath.arcTo(arcOval, 0f, 90f, false);
+            if (!bubbleArrowUp) {
+                bubblePath.lineTo(ax + halfArrowW, b);
+                bubblePath.lineTo(ax + tipInset, b + arrowH - tipInset);
+                bubblePath.quadTo(ax, b + arrowH, ax - tipInset, b + arrowH - tipInset);
+                bubblePath.lineTo(ax - halfArrowW, b);
+            }
+            bubblePath.lineTo(l + r, b);
+            arcOval.set(l, b - d, l + d, b);
+            bubblePath.arcTo(arcOval, 90f, 90f, false);
+            bubblePath.lineTo(l, t + r);
+            arcOval.set(l, t, l + d, t + d);
+            bubblePath.arcTo(arcOval, 180f, 90f, false);
+            bubblePath.close();
         }
 
         private static boolean isDescendantOf(View child, View parent) {
@@ -818,8 +1056,69 @@ final class OnboardingUi {
             canvas.drawPath(scrimPath, scrimPaint);
 
             if (hasTargetRect) {
-                float dashRadius = currentRadiusPx + dp(getContext(), 2);
-                canvas.drawRoundRect(dashRect, dashRadius, dashRadius, dashPaint);
+                canvas.drawRoundRect(cutoutRect, currentRadiusPx, currentRadiusPx, dashPaint);
+            }
+
+            if (hasCardRect) {
+                canvas.save();
+                canvas.translate(0f, dp(getContext(), 4));
+                canvas.drawPath(bubblePath, bubbleShadowPaint);
+                canvas.restore();
+                canvas.drawPath(bubblePath, bubbleFillPaint);
+                canvas.drawPath(bubblePath, bubbleStrokePaint);
+                canvas.drawOval(mascotFootShadowRect, mascotShadowPaint);
+            }
+        }
+    }
+
+    private static final class StepDotsView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF capsule = new RectF();
+        private int activeIndex;
+        private int total;
+
+        StepDotsView(Context context) {
+            super(context);
+            setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        void setStep(int index, int count) {
+            this.activeIndex = index;
+            this.total = count;
+            setVisibility(count > 1 ? VISIBLE : GONE);
+            requestLayout();
+            invalidate();
+        }
+
+        @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            Context ctx = getContext();
+            if (total <= 1) {
+                setMeasuredDimension(0, 0);
+                return;
+            }
+            int dot = dp(ctx, 6);
+            int activeW = dp(ctx, 18);
+            int gapPx = dp(ctx, 5);
+            int w = activeW + (total - 1) * dot + (total - 1) * gapPx;
+            setMeasuredDimension(w, dot + dp(ctx, 2));
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            if (total <= 1) return;
+            Context ctx = getContext();
+            float dot = dp(ctx, 6);
+            float activeW = dp(ctx, 18);
+            float gapPx = dp(ctx, 5);
+            float y = (getHeight() - dot) * 0.5f;
+            float r = dot * 0.5f;
+            float x = 0f;
+            for (int i = 0; i < total; i++) {
+                boolean active = i == activeIndex;
+                float itemW = active ? activeW : dot;
+                paint.setColor(active ? BLUE : mutedCircleBorder());
+                capsule.set(x, y, x + itemW, y + dot);
+                canvas.drawRoundRect(capsule, r, r, paint);
+                x += itemW + gapPx;
             }
         }
     }

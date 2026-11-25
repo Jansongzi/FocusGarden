@@ -58,6 +58,7 @@ final class FocusState {
     static final int ABSTINENCE_CONFIG_CHANGE_COST_MINUTES = 15;
     static final int MAX_ABSTINENCE_RUNS = 40;
 
+    static final String GUIDE_DISCLAIMER = "disclaimer";
     static final String GUIDE_PERMS = "perm_setup";
     static final String GUIDE_HOME = "home";
     static final String GUIDE_REDEEM = "redeem";
@@ -66,7 +67,8 @@ final class FocusState {
     static final String GUIDE_RULES = "rules";
     static final String GUIDE_SHOP = "shop";
     static final List<String> ALL_GUIDE_KEYS = List.of(
-            GUIDE_PERMS, GUIDE_HOME, GUIDE_REDEEM, GUIDE_ABSTINENCE, GUIDE_INSIGHTS, GUIDE_RULES, GUIDE_SHOP);
+            GUIDE_DISCLAIMER, GUIDE_PERMS, GUIDE_HOME, GUIDE_REDEEM,
+            GUIDE_ABSTINENCE, GUIDE_INSIGHTS, GUIDE_RULES, GUIDE_SHOP);
 
     enum Category { LEARNING, LIMITED }
     enum Restriction { NONE, FOCUS, BEDTIME, BUDGET, SOBER }
