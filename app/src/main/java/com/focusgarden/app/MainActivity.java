@@ -175,6 +175,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private SoberModeUi.Timer soberTimer;
     private SleepLockUi sleepLockUi;
     private FocusSheets.LiveRefresh liveKeepAliveSheet;
+    private LayFlatAuraView layFlatAuraOverlay;
     private final List<AbstinenceTicker> liveAbstinenceTickers = new ArrayList<>();
 
     private record AbstinenceTicker(FocusState.Abstinence item, TextView clockView) {}
@@ -187,7 +188,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             long now = System.currentTimeMillis();
             TimerReceiver.advance(MainActivity.this, now);
             String logicToday = FocusState.date(now, ZoneId.systemDefault());
-            if (!logicToday.equals(lastLogicDate)
+            if (applyTheme(MainActivity.this, state.themeMode, state.effectiveColorTheme())) {
+                render();
+            } else if (!logicToday.equals(lastLogicDate)
                     || (tab == INSIGHTS_PAGE && insightsMode == 0
                     && lastDisciplineSessions != state.totalDisciplineSessions)) {
                 redraw();
@@ -205,7 +208,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     };
 
     void applyThemeNow() {
-        applyTheme(this, state.themeMode, state.colorTheme);
+        applyTheme(this, state.themeMode, state.effectiveColorTheme());
         render();
     }
 
@@ -224,7 +227,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         state = FocusStore.get(this).state;
-        applyTheme(this, state.themeMode, state.colorTheme);
+        applyTheme(this, state.themeMode, state.effectiveColorTheme());
         updatePanel = new UpdatePanel(this);
         if (saved != null) {
             tab = saved.getInt("tab", 0);
@@ -259,7 +262,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         if (state != null && state.themeMode == FocusState.THEME_SYSTEM
-                && applyTheme(this, state.themeMode, state.colorTheme)) {
+                && applyTheme(this, state.themeMode, state.effectiveColorTheme())) {
             render();
         }
     }
@@ -291,10 +294,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
-        applyTheme(this, state.themeMode, state.colorTheme);
         long now = System.currentTimeMillis();
         TimerReceiver.advance(this, now);
         state.syncResetDay(now, ZoneId.systemDefault());
+        boolean themeChanged = applyTheme(this, state.themeMode, state.effectiveColorTheme());
         state.recordHeartbeat(now);
         KeepAliveManager.applyExcludeFromRecents(this, state.excludeFromRecents);
         KeepAliveManager.syncServiceState(this);
@@ -303,7 +306,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (resumed) redraw();
         });
         registerStepListener();
-        redraw();
+        if (themeChanged) {
+            render();
+        } else {
+            redraw();
+        }
         KeepAliveManager.refreshStatusAsync(this, snap -> {
             if (liveKeepAliveSheet != null && liveKeepAliveSheet.isShowing()) {
                 liveKeepAliveSheet.refresh();
@@ -319,6 +326,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override protected void onPause() {
         resumed = false;
+        syncLayFlatAura();
         main.removeCallbacks(clock);
         cancelRedeemAnimations();
         unregisterStepListener();
@@ -353,6 +361,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     @Override protected void onDestroy() {
+        if (layFlatAuraOverlay != null) layFlatAuraOverlay.release();
         cancelVaultToggleAnimator();
         updatePanel.dismiss();
         if (sleepLockUi != null) sleepLockUi.dismiss();
@@ -788,10 +797,19 @@ public final class MainActivity extends Activity implements SensorEventListener 
         }
         if (tab != RULES_PAGE) root.addView(navBar, -1, -2);
         redraw();
-        setContentView(root);
-        root.requestApplyInsets();
+        if (layFlatAuraOverlay == null) {
+            layFlatAuraOverlay = new LayFlatAuraView(this);
+        } else if (layFlatAuraOverlay.getParent() instanceof android.view.ViewGroup oldParent) {
+            oldParent.removeView(layFlatAuraOverlay);
+        }
+        FrameLayout windowHost = new FrameLayout(this);
+        windowHost.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        windowHost.addView(layFlatAuraOverlay, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(windowHost);
+        windowHost.requestApplyInsets();
         getWindow().setBackgroundDrawable(new ColorDrawable(PAPER));
         updateStatusBar(isDark());
+        syncLayFlatAura();
 
         if (Build.VERSION.SDK_INT >= 33) BackNavigation.update(this);
 
@@ -871,7 +889,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
         applySystemBars(getWindow(), darkBackdrop);
     }
 
+    private void syncLayFlatAura() {
+        if (layFlatAuraOverlay == null) return;
+        layFlatAuraOverlay.setAuraState(state != null && state.isLayFlatAuraVisible(), resumed, isDark());
+    }
+
     private void redraw() {
+        syncLayFlatAura();
         clearHomeRefs();
         pages.removeAllViews();
         int side = tab == 0 ? 0 : dp(this, 16);
@@ -988,11 +1012,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
         homeContentRoot = content;
         pages.addView(content, -1, -2);
 
-        // 2. Hero Card: 时间储蓄罐 (Blue normally, Purple when 躺平模式 is active; sucks into piggy when collapsed)
+        // 2. Hero Card: 时间储蓄罐 (Blue/Sage/Sakura normally, Orange in 放纵模式, Purple when 躺平模式 is active; sucks into piggy when collapsed)
         LinearLayout vaultCard = column(this);
-        vaultCard.setBackground(layFlat
-                ? gradientBg(this, 0xff8b6eff, 0xff5b3fd6, 22)
-                : gradientBg(this, heroStart(), heroEnd(), 22));
+        vaultCard.setBackground(gradientBg(this, heroStart(), heroEnd(), 22));
         vaultCard.setPadding(dp(this, 18), dp(this, 16), dp(this, 18), dp(this, 16));
         elevate(vaultCard, 5);
 
@@ -1019,13 +1041,31 @@ public final class MainActivity extends Activity implements SensorEventListener 
         vaultCard.addView(vaultTop);
         gap(vaultCard, 14);
 
-        int withdrawInk = layFlat ? 0xff5b3fd6 : (isSakuraTheme() ? 0xffa64d69 : BLUE);
+        int withdrawInk = switch (colorTheme()) {
+            case FocusState.PALETTE_SAGE -> 0xff4e754d;
+            case FocusState.PALETTE_SAKURA -> 0xffa64d69;
+            case FocusState.PALETTE_INDULGENT -> 0xffad530b;
+            case FocusState.PALETTE_LAY_FLAT -> 0xff5b3fd6;
+            default -> BLUE;
+        };
         LinearLayout vaultBtns = row(this);
         RedeemUi.Pressable3DButton depositBtn = new RedeemUi.Pressable3DButton(this, 38, 13, 13, 8, R.drawable.ic_deposit);
         depositBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "存入 " + state.vaultStepMinutes + " 分");
         depositBtn.setEnabledColors(
-                layFlat ? 0xff7659ea : isSageTheme() ? 0xff6e966a : isSakuraTheme() ? 0xffcb6f8a : 0xff397ce8,
-                layFlat ? 0xff4832ae : isSageTheme() ? 0xff3c5f3b : isSakuraTheme() ? 0xff873953 : 0xff0948a8,
+                switch (colorTheme()) {
+                    case FocusState.PALETTE_SAGE -> 0xff6e966a;
+                    case FocusState.PALETTE_SAKURA -> 0xffcb6f8a;
+                    case FocusState.PALETTE_INDULGENT -> 0xffd16d16;
+                    case FocusState.PALETTE_LAY_FLAT -> 0xff7659ea;
+                    default -> 0xff397ce8;
+                },
+                switch (colorTheme()) {
+                    case FocusState.PALETTE_SAGE -> 0xff3c5f3b;
+                    case FocusState.PALETTE_SAKURA -> 0xff873953;
+                    case FocusState.PALETTE_INDULGENT -> 0xff8f4104;
+                    case FocusState.PALETTE_LAY_FLAT -> 0xff4832ae;
+                    default -> 0xff0948a8;
+                },
                 ON_ACCENT);
         depositBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
@@ -1058,7 +1098,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
         RedeemUi.Pressable3DButton withdrawBtn = new RedeemUi.Pressable3DButton(this, 38, 13, 13, 8, R.drawable.ic_withdraw);
         withdrawBtn.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, "提取 " + state.vaultStepMinutes + " 分");
         withdrawBtn.setEnabledColors(ON_ACCENT,
-                layFlat ? 0xffb6a7f2 : isSageTheme() ? 0xffc2d6b6 : isSakuraTheme() ? 0xffe8b7c6 : 0xff9cb9eb,
+                switch (colorTheme()) {
+                    case FocusState.PALETTE_SAGE -> 0xffc2d6b6;
+                    case FocusState.PALETTE_SAKURA -> 0xffe8b7c6;
+                    case FocusState.PALETTE_INDULGENT -> 0xfff0c8a0;
+                    case FocusState.PALETTE_LAY_FLAT -> 0xffb6a7f2;
+                    default -> 0xff9cb9eb;
+                },
                 withdrawInk);
         withdrawBtn.setActionListener(() -> {
             if (state.isLayFlat()) {
@@ -2173,9 +2219,27 @@ public final class MainActivity extends Activity implements SensorEventListener 
         enterBtn.applyState(hasChest ? RedeemUi.Pressable3DButton.Mode.GOLD_ENABLED
                 : RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, hasChest ? "去开箱" : "进入商店");
         if (!hasChest) enterBtn.setEnabledColors(
-                isSageTheme() ? 0xff7fa47b : isSakuraTheme() ? 0xffd67b96 : 0xffa6bddc,
-                isSageTheme() ? 0xff4e754d : isSakuraTheme() ? 0xffa64d69 : 0xff718eb7,
-                isSageTheme() ? 0xfff9f6ed : isSakuraTheme() ? 0xfffffbf8 : 0xfff8f5ec);
+                switch (colorTheme()) {
+                    case FocusState.PALETTE_SAGE -> 0xff7fa47b;
+                    case FocusState.PALETTE_SAKURA -> 0xffd67b96;
+                    case FocusState.PALETTE_INDULGENT -> 0xffde7a22;
+                    case FocusState.PALETTE_LAY_FLAT -> 0xff8368ee;
+                    default -> 0xffa6bddc;
+                },
+                switch (colorTheme()) {
+                    case FocusState.PALETTE_SAGE -> 0xff4e754d;
+                    case FocusState.PALETTE_SAKURA -> 0xffa64d69;
+                    case FocusState.PALETTE_INDULGENT -> 0xffad530b;
+                    case FocusState.PALETTE_LAY_FLAT -> 0xff5a3fd1;
+                    default -> 0xff718eb7;
+                },
+                switch (colorTheme()) {
+                    case FocusState.PALETTE_SAGE -> 0xfff9f6ed;
+                    case FocusState.PALETTE_SAKURA -> 0xfffffbf8;
+                    case FocusState.PALETTE_INDULGENT -> 0xfffffdf8;
+                    case FocusState.PALETTE_LAY_FLAT -> 0xfffdfcff;
+                    default -> 0xfff8f5ec;
+                });
         content.addView(enterBtn, dp(this, 100), -2);
         card.addView(content, -1, -2);
 
@@ -3536,17 +3600,21 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     new ComponentName(this, FocusTile.class), getString(R.string.focus_tile),
                     Icon.createWithResource(this, R.drawable.ic_tile), getMainExecutor(),
                     result -> {
-                        if (result >= 1000) toast("请在快捷设置编辑页查找「简松时」");
+                        if (result >= 1000) toast("请在快捷设置编辑页查找「松时」");
                     });
         } else {
-            toast("请在快捷设置编辑页添加「简松时」");
+            toast("请在快捷设置编辑页添加「松时」");
         }
     }
 
     private void changed() {
         TimerReceiver.changed(this);
         FocusService.refreshConnected();
-        redraw();
+        if (applyTheme(this, state.themeMode, state.effectiveColorTheme())) {
+            render();
+        } else {
+            redraw();
+        }
         updateSleepLock(System.currentTimeMillis());
     }
 

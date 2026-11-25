@@ -838,7 +838,7 @@ public final class FocusService extends AccessibilityService {
     }
 
     private void showSettingsGuardOverlay() {
-        GardenUi.applyTheme(this, store.state.themeMode, store.state.colorTheme);
+        GardenUi.applyTheme(this, store.state.themeMode, store.state.effectiveColorTheme());
         blockScreen = null;
         blockedPackage = "com.android.settings";
         showing = FocusState.Restriction.FOCUS;
@@ -949,7 +949,7 @@ public final class FocusService extends AccessibilityService {
                 params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             }
         }
-        params.setTitle("简松时提醒");
+        params.setTitle("松时提醒");
         try {
             windows.addView(rootView, params);
             overlay = rootView;

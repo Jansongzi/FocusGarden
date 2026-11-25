@@ -27,6 +27,8 @@ final class FocusStateCheck {
         equal(FocusState.PALETTE_BLUE, state.colorTheme);
         equal(false, state.setColorTheme(FocusState.PALETTE_SAGE));
         equal(false, state.setColorTheme(FocusState.PALETTE_SAKURA));
+        equal(false, state.setColorTheme(FocusState.PALETTE_INDULGENT));
+        equal(false, state.setColorTheme(FocusState.PALETTE_LAY_FLAT));
         equal(false, state.setColorTheme(99));
         equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
         checkAppThemePurchase(noon);
@@ -620,6 +622,48 @@ final class FocusStateCheck {
         equal(true, state.setColorTheme(FocusState.PALETTE_BLUE));
         equal(true, state.isShopItemOwned(sageTheme.id()));
         equal(true, state.isShopItemOwned(sakuraTheme.id()));
+
+        // Mode-locked non-purchasable auto hot-swap themes (Indulgent Orange & Lay-Flat Purple)
+        equal(3, ShopCatalog.appThemes().size());
+        equal(2, ShopCatalog.modeThemes().size());
+        equal(false, state.setColorTheme(FocusState.PALETTE_INDULGENT));
+        equal(false, state.setColorTheme(FocusState.PALETTE_LAY_FLAT));
+        equal(true, state.setColorTheme(FocusState.PALETTE_SAKURA));
+        equal(FocusState.PALETTE_SAKURA, state.effectiveColorTheme());
+        equal(false, state.isModeThemeActive());
+        equal(true, state.layFlatAuraEffect);
+        equal(false, state.isLayFlatAuraVisible());
+
+        state.indulgentPasses = 1;
+        equal(true, state.activateIndulgentMode(noon, UTC));
+        equal(FocusState.PALETTE_INDULGENT, state.effectiveColorTheme());
+        equal(true, state.isModeThemeActive());
+        equal(false, state.isLayFlatAuraVisible());
+        equal(FocusState.PALETTE_SAKURA, state.colorTheme);
+
+        state.layFlatCards = 1;
+        equal(true, state.activateLayFlatMode(noon, UTC));
+        equal(FocusState.PALETTE_LAY_FLAT, state.effectiveColorTheme());
+        equal(true, state.isModeThemeActive());
+        equal(true, state.isLayFlatAuraVisible());
+        state.layFlatAuraEffect = false;
+        equal(false, state.isLayFlatAuraVisible());
+        state.layFlatAuraEffect = true;
+        equal(true, state.isLayFlatAuraVisible());
+        equal(FocusState.PALETTE_SAKURA, state.colorTheme);
+
+        long nextDay = noon + 24L * 60 * MINUTE;
+        equal(true, state.syncResetDay(nextDay, UTC));
+        equal(FocusState.PALETTE_SAKURA, state.effectiveColorTheme());
+        equal(false, state.isModeThemeActive());
+        equal(false, state.isLayFlatAuraVisible());
+
+        state.indulgentPasses = 1;
+        equal(true, state.activateIndulgentMode(nextDay, UTC));
+        equal(FocusState.PALETTE_INDULGENT, state.effectiveColorTheme());
+        equal(FocusState.ModeSwitchCheck.OK, state.switchMode(FocusState.RateMode.RELAXED, nextDay, UTC));
+        equal(FocusState.PALETTE_SAKURA, state.effectiveColorTheme());
+        equal(false, state.isModeThemeActive());
     }
 
     private static void checkBlockAppearances() {

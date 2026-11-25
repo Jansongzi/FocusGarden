@@ -66,99 +66,171 @@ final class TimeShopUi {
 
     static final class ShopColors {
         static int pageBg() {
-            if (isSageTheme()) return isDark() ? 0xff101510 : 0xfff2f6ed;
-            if (isSakuraTheme()) return isDark() ? 0xff161013 : 0xfffaf1f4;
-            return isDark() ? 0xff141210 : 0xfffaf7f1;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff101510 : 0xfff2f6ed;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff161013 : 0xfffaf1f4;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff17120e : 0xfffbf4ec;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff110f1a : 0xfff5f3fc;
+                default -> isDark() ? 0xff141210 : 0xfffaf7f1;
+            };
         }
         static int interiorBg() {
-            if (isSageTheme()) return isDark() ? 0xff182018 : 0xfff9f6ed;
-            if (isSakuraTheme()) return isDark() ? 0xff21181c : 0xfffffbf8;
-            return isDark() ? 0xff1c1915 : 0xfffffcf6;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff182018 : 0xfff9f6ed;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff21181c : 0xfffffbf8;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff221b15 : 0xfffffdf8;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff1b1729 : 0xfffdfcff;
+                default -> isDark() ? 0xff1c1915 : 0xfffffcf6;
+            };
         }
         static int interiorBorder() {
-            if (isSageTheme()) return isDark() ? 0xff2c3a2b : 0xffdfebcb;
-            if (isSakuraTheme()) return isDark() ? 0xff3d2d34 : 0xfff8dce6;
-            return isDark() ? 0xff302921 : 0xffefe6d7;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff2c3a2b : 0xffdfebcb;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff3d2d34 : 0xfff8dce6;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff403226 : 0xfffce9d4;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff362f4f : 0xffeae4ff;
+                default -> isDark() ? 0xff302921 : 0xffefe6d7;
+            };
         }
         static int barBg() {
-            if (isSageTheme()) return isDark() ? 0xff1c251c : 0xfff9f6ed;
-            if (isSakuraTheme()) return isDark() ? 0xff261c21 : 0xfffffbf8;
-            return isDark() ? 0xff201c17 : 0xfffffcf6;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff1c251c : 0xfff9f6ed;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff261c21 : 0xfffffbf8;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff261f18 : 0xfffffdf8;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff201b30 : 0xfffdfcff;
+                default -> isDark() ? 0xff201c17 : 0xfffffcf6;
+            };
         }
         static int barBorder() {
-            if (isSageTheme()) return isDark() ? 0xff2e3d2d : 0xffdfebcb;
-            if (isSakuraTheme()) return isDark() ? 0xff402f37 : 0xfff3d4df;
-            return isDark() ? 0xff332c24 : 0xffefe8dc;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff2e3d2d : 0xffdfebcb;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff402f37 : 0xfff3d4df;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff453528 : 0xfff5ddc2;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff3c3357 : 0xffdfd6fa;
+                default -> isDark() ? 0xff332c24 : 0xffefe8dc;
+            };
         }
         static int pillBg() {
-            if (isSageTheme()) return isDark() ? 0xff1c251c : 0xfff9f6ed;
-            if (isSakuraTheme()) return isDark() ? 0xff261c21 : 0xfffffbf8;
-            return isDark() ? 0xff231e19 : 0xfffffcf6;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff1c251c : 0xfff9f6ed;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff261c21 : 0xfffffbf8;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff261f18 : 0xfffffdf8;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff201b30 : 0xfffdfcff;
+                default -> isDark() ? 0xff231e19 : 0xfffffcf6;
+            };
         }
         static int pillBorder() {
-            if (isSageTheme()) return isDark() ? 0xff2e3d2d : 0xffdfebcb;
-            if (isSakuraTheme()) return isDark() ? 0xff402f37 : 0xfff3d4df;
-            return isDark() ? 0xff373028 : 0xffebe2d4;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff2e3d2d : 0xffdfebcb;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff402f37 : 0xfff3d4df;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff453528 : 0xfff5ddc2;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff3c3357 : 0xffdfd6fa;
+                default -> isDark() ? 0xff373028 : 0xffebe2d4;
+            };
         }
         static int woodTop() { return isDark() ? 0xff5d4c3b : 0xffe8d6b9; }
         static int woodFace() { return isDark() ? 0xff4b3e30 : 0xffd9c4a4; }
         static int woodEdge() { return isDark() ? 0xff372c21 : 0xffc3a982; }
         static int woodGrain() { return isDark() ? 0x33251d15 : 0x389d7d52; }
         static int awningBlue() {
-            if (isSageTheme()) return isDark() ? 0xff4e754d : 0xff7fa47b;
-            if (isSakuraTheme()) return isDark() ? 0xff9e506a : 0xffe49cb1;
-            return isDark() ? 0xff3d5478 : 0xffabc4e6;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff4e754d : 0xff7fa47b;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff9e506a : 0xffe49cb1;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xffb36119 : 0xffec994b;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff6950c9 : 0xffa692f5;
+                default -> isDark() ? 0xff3d5478 : 0xffabc4e6;
+            };
         }
         static int awningCream() {
-            if (isSageTheme()) return isDark() ? 0xff212b21 : 0xfff9f6ed;
-            if (isSakuraTheme()) return isDark() ? 0xff2b2025 : 0xfffffbf8;
-            return isDark() ? 0xff29241e : 0xfffaf6ee;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff212b21 : 0xfff9f6ed;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff2b2025 : 0xfffffbf8;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff2c231b : 0xfffffdf8;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff241f36 : 0xfffdfcff;
+                default -> isDark() ? 0xff29241e : 0xfffaf6ee;
+            };
         }
         static int awningTrim() { return isDark() ? 0x44000000 : 0x2279664d; }
         static int ink() {
-            if (isSageTheme()) return isDark() ? 0xfff2f6ed : 0xff222d22;
-            if (isSakuraTheme()) return isDark() ? 0xfffaf1f4 : 0xff332229;
-            return isDark() ? 0xfff3efe8 : 0xff393d46;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xfff2f6ed : 0xff222d22;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xfffaf1f4 : 0xff332229;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xfffbf4ec : 0xff332418;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xfff5f3fc : 0xff211b33;
+                default -> isDark() ? 0xfff3efe8 : 0xff393d46;
+            };
         }
         static int warmInk() {
-            if (isSageTheme()) return isDark() ? 0xffc7d8be : 0xff4e754d;
-            if (isSakuraTheme()) return isDark() ? 0xffe8c6d2 : 0xffa64d69;
-            return isDark() ? 0xffdfc9aa : 0xff79664d;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xffc7d8be : 0xff4e754d;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xffe8c6d2 : 0xffa64d69;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xffeccaa8 : 0xffad530b;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xffd5cbff : 0xff5a3fd1;
+                default -> isDark() ? 0xffdfc9aa : 0xff79664d;
+            };
         }
         static int muted() {
-            if (isSageTheme()) return isDark() ? 0xff798a76 : 0xff7e8f7c;
-            if (isSakuraTheme()) return isDark() ? 0xff947d87 : 0xff997f8a;
-            return isDark() ? 0xff9c9182 : 0xffa39885;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff798a76 : 0xff7e8f7c;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff947d87 : 0xff997f8a;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff968271 : 0xff9a826e;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff8b81a6 : 0xff877ea1;
+                default -> isDark() ? 0xff9c9182 : 0xffa39885;
+            };
         }
         static int navSelectedBg() {
-            if (isSageTheme()) return isDark() ? 0xff223322 : 0xffdfebcb;
-            if (isSakuraTheme()) return isDark() ? 0xff38222c : 0xfff8dce6;
-            return isDark() ? 0xff1c2f50 : 0xffe6effd;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff223322 : 0xffdfebcb;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff38222c : 0xfff8dce6;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff3a2717 : 0xfffce9d4;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff2d234a : 0xffeae4ff;
+                default -> isDark() ? 0xff1c2f50 : 0xffe6effd;
+            };
         }
         static int navSelectedInk() {
-            if (isSageTheme()) return isDark() ? 0xff92b98e : 0xff4e754d;
-            if (isSakuraTheme()) return isDark() ? 0xffea9bb3 : 0xffa64d69;
-            return isDark() ? 0xff6ea4ff : 0xff3278f6;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff92b98e : 0xff4e754d;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xffea9bb3 : 0xffa64d69;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xfff5a85b : 0xffad530b;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xffb39dff : 0xff5a3fd1;
+                default -> isDark() ? 0xff6ea4ff : 0xff3278f6;
+            };
         }
         static int blue() {
-            if (isSageTheme()) return isDark() ? 0xff92b98e : 0xff4e754d;
-            if (isSakuraTheme()) return isDark() ? 0xffea9bb3 : 0xffa64d69;
-            return 0xff3278f6;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff92b98e : 0xff4e754d;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xffea9bb3 : 0xffa64d69;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xfff5a85b : 0xffad530b;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xffb39dff : 0xff5a3fd1;
+                default -> 0xff3278f6;
+            };
         }
         static int disabledBg() {
-            if (isSageTheme()) return isDark() ? 0xff202920 : 0xffe8eee2;
-            if (isSakuraTheme()) return isDark() ? 0xff2a2025 : 0xfff2e6eb;
-            return isDark() ? 0xff28231d : 0xffedeae4;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff202920 : 0xffe8eee2;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff2a2025 : 0xfff2e6eb;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff2a2119 : 0xfff3eae0;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff231e34 : 0xffece8f7;
+                default -> isDark() ? 0xff28231d : 0xffedeae4;
+            };
         }
         static int disabledInk() {
-            if (isSageTheme()) return isDark() ? 0xff627360 : 0xff97a595;
-            if (isSakuraTheme()) return isDark() ? 0xff7a646e : 0xffb098a2;
-            return isDark() ? 0xff7e7467 : 0xffa39885;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff627360 : 0xff97a595;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff7a646e : 0xffb098a2;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff7d6958 : 0xffb29d8a;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff73698f : 0xffa39ab8;
+                default -> isDark() ? 0xff7e7467 : 0xffa39885;
+            };
         }
         static int gripColor() {
-            if (isSageTheme()) return isDark() ? 0xff314030 : 0xffd0ddc7;
-            if (isSakuraTheme()) return isDark() ? 0xff47353d : 0xffe3cdd6;
-            return isDark() ? 0xff3b342c : 0xffdfd8cc;
+            return switch (colorTheme()) {
+                case FocusState.PALETTE_SAGE -> isDark() ? 0xff314030 : 0xffd0ddc7;
+                case FocusState.PALETTE_SAKURA -> isDark() ? 0xff47353d : 0xffe3cdd6;
+                case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff4f3e2f : 0xffe4d2be;
+                case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff423a5c : 0xffd7cff0;
+                default -> isDark() ? 0xff3b342c : 0xffdfd8cc;
+            };
         }
     }
 
@@ -1461,7 +1533,7 @@ final class TimeShopUi {
         overlayHost.requestFocus();
         dialog.setContentView(overlayHost);
 
-        final int openedPalette = state.colorTheme;
+        final int openedPalette = state.effectiveColorTheme();
         final boolean[] suppressDismissBack = {false};
         final int[] activeTab = {initialTab};
         final int[] displayedMinutes = {(int) Math.max(0L, state.rewardSpendableMs() / FocusState.MINUTE)};
@@ -1546,7 +1618,7 @@ pill.setSingleLine(true);
         Runnable refreshAfterPurchase = () -> {
             FocusStore.get(activity).save();
             onChanged.run();
-            if (state.colorTheme != openedPalette) {
+            if (state.effectiveColorTheme() != openedPalette) {
                 suppressDismissBack[0] = true;
                 dialog.dismiss();
                 showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0]);
@@ -1560,7 +1632,17 @@ pill.setSingleLine(true);
             showWarehouseSheet(activity, state, BAG_ALL, () -> {
                 FocusStore.get(activity).save();
                 onChanged.run();
-                rebuild[0].run();
+                if (state.effectiveColorTheme() == openedPalette) {
+                    rebuild[0].run();
+                }
+            }, () -> {
+                if (state.effectiveColorTheme() != openedPalette) {
+                    suppressDismissBack[0] = true;
+                    dialog.dismiss();
+                    showTimeShopSheet(activity, state, onChanged, onDismissBack, activeTab[0]);
+                } else {
+                    rebuild[0].run();
+                }
             });
         });
 
@@ -2803,6 +2885,15 @@ pill.setSingleLine(true);
     }
 
     static void showWarehouseSheet(MainActivity activity, FocusState state, int initialTab, Runnable onUpdated) {
+        showWarehouseSheet(activity, state, initialTab, onUpdated, null);
+    }
+
+    static void showWarehouseSheet(MainActivity activity, FocusState state, int initialTab,
+                                   Runnable onUpdated, Runnable onClosed) {
+        final int openedPalette = state.effectiveColorTheme();
+        final Dialog[] sheetRef = new Dialog[1];
+        final boolean[] suppressClose = {false};
+
         LinearLayout body = column(activity);
         int[] bagTab = {Math.max(BAG_ALL, Math.min(BAG_VOUCHER, initialTab))};
         LinearLayout navRow = row(activity);
@@ -2815,6 +2906,16 @@ pill.setSingleLine(true);
         String[] tabNames = {"全部", "道具", "卡牌", "外观", "心愿券"};
         TextView[] tabViews = new TextView[tabNames.length];
         Runnable[] rebuild = new Runnable[1];
+        Runnable refreshOrReopen = () -> {
+            onUpdated.run();
+            if (state.effectiveColorTheme() != openedPalette) {
+                suppressClose[0] = true;
+                if (sheetRef[0] != null) sheetRef[0].dismiss();
+                showWarehouseSheet(activity, state, bagTab[0], onUpdated, onClosed);
+            } else {
+                rebuild[0].run();
+            }
+        };
 
         for (int i = 0; i < tabNames.length; i++) {
             final int tIdx = i;
@@ -2920,8 +3021,7 @@ pill.setSingleLine(true);
                                 "取消", "立即开启", false, () -> {
                                     if (state.activateIndulgentMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                        onUpdated.run();
-                                        rebuild[0].run();
+                                        refreshOrReopen.run();
                                         Toast.makeText(activity, "已开启放纵模式（1:2）", Toast.LENGTH_SHORT).show();
                                     }
                                 })));
@@ -2941,8 +3041,7 @@ pill.setSingleLine(true);
                                 "取消", "立即躺平", false, () -> {
                                     if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                        onUpdated.run();
-                                        rebuild[0].run();
+                                        refreshOrReopen.run();
                                         Toast.makeText(activity, "已开启躺平模式，今日全天免限", Toast.LENGTH_SHORT).show();
                                     }
                                 })));
@@ -2958,15 +3057,22 @@ pill.setSingleLine(true);
                 }
                 for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
                     if (!state.isShopItemOwned(theme.id())) continue;
-                    boolean equipped = state.colorTheme == theme.palette();
+                    boolean equipped = !state.isModeThemeActive() && state.colorTheme == theme.palette();
+                    boolean baseSaved = state.isModeThemeActive() && state.colorTheme == theme.palette();
+                    String btnTxt = equipped ? "已装备" : baseSaved ? "默认" : "装备";
+                    boolean canEquip = state.colorTheme != theme.palette();
                     listWrap.addView(buildWarehouseRow(activity,
                             new ShopIllustrationView(activity, ShopIllustrationView.Kind.THEME, theme.id(), 0f),
-                            "主题 · " + theme.name(), theme.subtitle(),
-                            equipped ? "已装备" : "装备", !equipped, equipped ? GREEN : BLUE, () -> {
+                            "主题 · " + theme.name(), baseSaved ? "常规默认（退出模式后生效）" : theme.subtitle(),
+                            btnTxt, canEquip, (equipped || baseSaved) ? GREEN : BLUE, () -> {
                                 if (equipPermanentItem(activity, state, ShopCatalog.findPermanentItem(theme.id()))) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    onUpdated.run();
-                                    rebuild[0].run();
+                                    if (state.isModeThemeActive()) {
+                                        Toast.makeText(activity,
+                                                "已设为常规主题「" + theme.name() + "」，退出当前模式后生效",
+                                                Toast.LENGTH_SHORT).show();
+                                    }
+                                    refreshOrReopen.run();
                                 }
                             }));
                     gap(listWrap, 8);
@@ -3071,7 +3177,12 @@ pill.setSingleLine(true);
         };
 
         rebuild[0].run();
-        bottomSheet(activity, "我的背包仓库", null, body);
+        sheetRef[0] = bottomSheet(activity, "我的背包仓库", null, body);
+        if (onClosed != null) {
+            sheetRef[0].setOnDismissListener(d -> {
+                if (!suppressClose[0]) onClosed.run();
+            });
+        }
     }
 
     private static LinearLayout buildWarehouseRow(MainActivity activity, View iconView, String title, String sub,

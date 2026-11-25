@@ -204,6 +204,7 @@ final class FocusStore {
         state.freeHabitSlotUsed = root.optBoolean("freeHabitSlotUsed", false);
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
+        state.layFlatAuraEffect = root.optBoolean("layFlatAuraEffect", true);
         loadBlockAppearances(root);
         String focusBg = root.optString("focusTimerBackgroundId", "");
         if (!state.setFocusTimerBackgroundId(focusBg)) {
@@ -647,6 +648,7 @@ final class FocusStore {
                     .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
                     .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
                     .put("timeAwarenessBar", state.timeAwarenessBar)
+                    .put("layFlatAuraEffect", state.layFlatAuraEffect)
                     .put("builtInBlockCatalogVersion", state.builtInBlockCatalogVersion)
                     .put("blockAppearances", blockAppearances)
                     .put("enabledBlockAppearances", new JSONArray(state.enabledBlockAppearances))

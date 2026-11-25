@@ -90,6 +90,18 @@ final class ShopCatalog {
         return null;
     }
 
+    record ModeTheme(int palette, String name, String subtitle, int[] swatches) {}
+
+    private static final List<ModeTheme> MODE_THEMES = List.of(
+            new ModeTheme(FocusState.PALETTE_INDULGENT, "放纵橙", "放纵模式自动切换",
+                    new int[]{0xffde7a22, 0xffad530b, 0xfffce9d4, 0xfffffdf8}),
+            new ModeTheme(FocusState.PALETTE_LAY_FLAT, "躺平紫", "躺平模式自动切换",
+                    new int[]{0xff8368ee, 0xff5a3fd1, 0xffeae4ff, 0xfffdfcff}));
+
+    static List<ModeTheme> modeThemes() {
+        return MODE_THEMES;
+    }
+
     record WishStyle(
             int index,
             String label,

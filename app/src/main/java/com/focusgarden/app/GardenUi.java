@@ -101,14 +101,26 @@ final class GardenUi {
         return activePalette == FocusState.PALETTE_SAKURA;
     }
 
+    static boolean isIndulgentTheme() {
+        return activePalette == FocusState.PALETTE_INDULGENT;
+    }
+
+    static boolean isLayFlatTheme() {
+        return activePalette == FocusState.PALETTE_LAY_FLAT;
+    }
+
     static boolean applyTheme(Context context, int themeMode) {
         return applyTheme(context, themeMode, activePalette);
     }
 
     static boolean applyTheme(Context context, int themeMode, int colorTheme) {
-        int nextPalette = colorTheme == FocusState.PALETTE_SAGE ? FocusState.PALETTE_SAGE
-                : colorTheme == FocusState.PALETTE_SAKURA ? FocusState.PALETTE_SAKURA
-                : FocusState.PALETTE_BLUE;
+        int nextPalette = switch (colorTheme) {
+            case FocusState.PALETTE_SAGE -> FocusState.PALETTE_SAGE;
+            case FocusState.PALETTE_SAKURA -> FocusState.PALETTE_SAKURA;
+            case FocusState.PALETTE_INDULGENT -> FocusState.PALETTE_INDULGENT;
+            case FocusState.PALETTE_LAY_FLAT -> FocusState.PALETTE_LAY_FLAT;
+            default -> FocusState.PALETTE_BLUE;
+        };
         boolean shouldBeDark;
         if (themeMode == FocusState.THEME_DARK) {
             shouldBeDark = true;
@@ -249,6 +261,132 @@ final class GardenUi {
             return changed;
         }
 
+        if (nextPalette == FocusState.PALETTE_INDULGENT) {
+            if (shouldBeDark) {
+                PAPER = 0xff17120e;
+                CARD = 0xff221b15;
+                SURFACE_SUBTLE = 0xff2c231b;
+                BORDER = 0xff403226;
+                LINE = 0xff362a20;
+                INK = 0xfffbf4ec;
+                INK_SUB = 0xffcfc0b2;
+                MUTED = 0xff968271;
+                BLUE = 0xfff5a85b;
+                BLUE_LIGHT = 0xffde7a22;
+                BLUE_DARK = 0xff8a4309;
+                BLUE_SOFT = 0xff3a2717;
+                BLUE_DISABLED_BG = 0xff2a2119;
+                BLUE_DISABLED_TEXT = 0xff7d6958;
+                GREEN = 0xff59cc86;
+                GREEN_SOFT = 0xff183123;
+                RED = 0xfffa6b60;
+                RED_SOFT = 0xff3d1c1b;
+                AMBER = 0xffffcf4d;
+                AMBER_SOFT = 0xff392b14;
+                PURPLE = 0xffa991ff;
+                PURPLE_SOFT = 0xff2a2142;
+                CYAN = 0xff66c4dc;
+                CYAN_SOFT = 0xff173038;
+                FOREST = 0xffad530b;
+            } else {
+                PAPER = 0xfffbf4ec;
+                CARD = 0xfffffdf8;
+                SURFACE_SUBTLE = 0xfff8efe4;
+                BORDER = 0xffefe0cf;
+                LINE = 0xfff4e8da;
+                INK = 0xff332418;
+                INK_SUB = 0xff6b5442;
+                MUTED = 0xff9a826e;
+                BLUE = 0xffad530b;
+                BLUE_LIGHT = 0xffde7a22;
+                BLUE_DARK = 0xffad530b;
+                BLUE_SOFT = 0xfffce9d4;
+                BLUE_DISABLED_BG = 0xfff3eae0;
+                BLUE_DISABLED_TEXT = 0xffb29d8a;
+                GREEN = 0xff2f9a5f;
+                GREEN_SOFT = 0xffe6f6ed;
+                RED = 0xffdc3b30;
+                RED_SOFT = 0xfffeeceb;
+                AMBER = 0xffe5a014;
+                AMBER_SOFT = 0xfffef3de;
+                PURPLE = 0xff7c5cff;
+                PURPLE_SOFT = 0xfff1eeff;
+                CYAN = 0xff2e93ae;
+                CYAN_SOFT = 0xffe5f5f9;
+                FOREST = 0xff914207;
+            }
+            MINT = BLUE_SOFT;
+            LIME = darkTheme ? 0xff452e19 : 0xfffce9d4;
+            PALE = 0xffffefe0;
+            GOLD = AMBER;
+            SAGE = GREEN;
+            SAND = AMBER_SOFT;
+            return changed;
+        }
+
+        if (nextPalette == FocusState.PALETTE_LAY_FLAT) {
+            if (shouldBeDark) {
+                PAPER = 0xff110f1a;
+                CARD = 0xff1b1729;
+                SURFACE_SUBTLE = 0xff241f36;
+                BORDER = 0xff362f4f;
+                LINE = 0xff2d2742;
+                INK = 0xfff5f3fc;
+                INK_SUB = 0xffc2b9d9;
+                MUTED = 0xff8b81a6;
+                BLUE = 0xffb39dff;
+                BLUE_LIGHT = 0xff8368ee;
+                BLUE_DARK = 0xff4a31ad;
+                BLUE_SOFT = 0xff2d234a;
+                BLUE_DISABLED_BG = 0xff231e34;
+                BLUE_DISABLED_TEXT = 0xff73698f;
+                GREEN = 0xff54cc8a;
+                GREEN_SOFT = 0xff173026;
+                RED = 0xfff96962;
+                RED_SOFT = 0xff3a1c22;
+                AMBER = 0xfff3b549;
+                AMBER_SOFT = 0xff352915;
+                PURPLE = 0xffb39dff;
+                PURPLE_SOFT = 0xff2d234a;
+                CYAN = 0xff5dc2e8;
+                CYAN_SOFT = 0xff162e3d;
+                FOREST = 0xff5a3fd1;
+            } else {
+                PAPER = 0xfff5f3fc;
+                CARD = 0xfffdfcff;
+                SURFACE_SUBTLE = 0xfff1edfa;
+                BORDER = 0xffe4def5;
+                LINE = 0xffece7f8;
+                INK = 0xff211b33;
+                INK_SUB = 0xff584f70;
+                MUTED = 0xff877ea1;
+                BLUE = 0xff5a3fd1;
+                BLUE_LIGHT = 0xff8368ee;
+                BLUE_DARK = 0xff5a3fd1;
+                BLUE_SOFT = 0xffeae4ff;
+                BLUE_DISABLED_BG = 0xffece8f7;
+                BLUE_DISABLED_TEXT = 0xffa39ab8;
+                GREEN = 0xff249e63;
+                GREEN_SOFT = 0xffe6f7ee;
+                RED = 0xffe5433b;
+                RED_SOFT = 0xfffeeceb;
+                AMBER = 0xffd98a12;
+                AMBER_SOFT = 0xfffef4df;
+                PURPLE = 0xff6e4fe0;
+                PURPLE_SOFT = 0xffeae4ff;
+                CYAN = 0xff1d98c7;
+                CYAN_SOFT = 0xffe5f5fc;
+                FOREST = 0xff492fb8;
+            }
+            MINT = BLUE_SOFT;
+            LIME = darkTheme ? 0xff362a59 : 0xffeae4ff;
+            PALE = 0xffe8e2ff;
+            GOLD = AMBER;
+            SAGE = GREEN;
+            SAND = AMBER_SOFT;
+            return changed;
+        }
+
         if (shouldBeDark) {
             PAPER = 0xff0b0f17;
             CARD = 0xff151c28;
@@ -312,51 +450,83 @@ final class GardenUi {
     }
 
     static int heroStart() {
-        if (isSageTheme()) return darkTheme ? 0xff5b8258 : 0xff7fa47b;
-        if (isSakuraTheme()) return darkTheme ? 0xffb86680 : 0xffd67b96;
-        return darkTheme ? 0xff2466db : 0xff2576ff;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff5b8258 : 0xff7fa47b;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xffb86680 : 0xffd67b96;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xffca7222 : 0xffde7a22;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff795ce0 : 0xff8b6eff;
+            default -> darkTheme ? 0xff2466db : 0xff2576ff;
+        };
     }
 
     static int heroEnd() {
-        if (isSageTheme()) return darkTheme ? 0xff395938 : 0xff4e754d;
-        if (isSakuraTheme()) return darkTheme ? 0xff7d3950 : 0xffa64d69;
-        return darkTheme ? 0xff163b8a : BLUE_DARK;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff395938 : 0xff4e754d;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xff7d3950 : 0xffa64d69;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xff8c450c : 0xffad530b;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff4a31ad : 0xff5b3fd6;
+            default -> darkTheme ? 0xff163b8a : BLUE_DARK;
+        };
     }
 
     static int heroSub() {
-        if (isSageTheme()) return 0xffdfebcb;
-        if (isSakuraTheme()) return 0xfffce4ec;
-        return 0xffcbe2ff;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> 0xffdfebcb;
+            case FocusState.PALETTE_SAKURA -> 0xfffce4ec;
+            case FocusState.PALETTE_INDULGENT -> 0xffffe8cf;
+            case FocusState.PALETTE_LAY_FLAT -> 0xffeae4ff;
+            default -> 0xffcbe2ff;
+        };
     }
 
     static int heroAccent() {
-        if (isSageTheme()) return 0xffdfebcb;
-        if (isSakuraTheme()) return 0xffffe5ee;
-        return 0xff5eead4;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> 0xffdfebcb;
+            case FocusState.PALETTE_SAKURA -> 0xffffe5ee;
+            case FocusState.PALETTE_INDULGENT -> 0xffffefcc;
+            case FocusState.PALETTE_LAY_FLAT -> 0xffddd4ff;
+            default -> 0xff5eead4;
+        };
     }
 
     static int button3DFace() {
-        if (isSageTheme()) return 0xff7fa47b;
-        if (isSakuraTheme()) return 0xffd67b96;
-        return 0xff3278f6;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> 0xff7fa47b;
+            case FocusState.PALETTE_SAKURA -> 0xffd67b96;
+            case FocusState.PALETTE_INDULGENT -> 0xffde7a22;
+            case FocusState.PALETTE_LAY_FLAT -> 0xff8368ee;
+            default -> 0xff3278f6;
+        };
     }
 
     static int button3DBase() {
-        if (isSageTheme()) return 0xff4e754d;
-        if (isSakuraTheme()) return 0xffa64d69;
-        return 0xff194fb9;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> 0xff4e754d;
+            case FocusState.PALETTE_SAKURA -> 0xffa64d69;
+            case FocusState.PALETTE_INDULGENT -> 0xffad530b;
+            case FocusState.PALETTE_LAY_FLAT -> 0xff5a3fd1;
+            default -> 0xff194fb9;
+        };
     }
 
     static int blueStroke() {
-        if (isSageTheme()) return darkTheme ? 0xff3b583a : 0xffc6d9b5;
-        if (isSakuraTheme()) return darkTheme ? 0xff5e3645 : 0xffebc5d3;
-        return darkTheme ? 0xff294980 : 0xffcfe0ff;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff3b583a : 0xffc6d9b5;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xff5e3645 : 0xffebc5d3;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xff634121 : 0xfff2cfb0;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff493b78 : 0xffd5cbff;
+            default -> darkTheme ? 0xff294980 : 0xffcfe0ff;
+        };
     }
 
     static int greenStroke() {
-        if (isSageTheme()) return darkTheme ? 0xff2c5234 : 0xffc4dbaf;
-        if (isSakuraTheme()) return darkTheme ? 0xff254d38 : 0xffbfe5cf;
-        return darkTheme ? 0xff1f5740 : 0xffbcecd3;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff2c5234 : 0xffc4dbaf;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xff254d38 : 0xffbfe5cf;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xff244f36 : 0xffbce6cf;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff224d3b : 0xffbce8d3;
+            default -> darkTheme ? 0xff1f5740 : 0xffbcecd3;
+        };
     }
 
     static int redStroke() {
@@ -368,9 +538,13 @@ final class GardenUi {
     }
 
     static int cyanStroke() {
-        if (isSageTheme()) return darkTheme ? 0xff285046 : 0xffc0ded4;
-        if (isSakuraTheme()) return darkTheme ? 0xff244a57 : 0xffc1e2ec;
-        return darkTheme ? 0xff1c4d6b : 0xffccebfb;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff285046 : 0xffc0ded4;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xff244a57 : 0xffc1e2ec;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xff224c59 : 0xffbee2ed;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff204a63 : 0xffbfe3f5;
+            default -> darkTheme ? 0xff1c4d6b : 0xffccebfb;
+        };
     }
 
     static int purpleStroke() {
@@ -378,9 +552,13 @@ final class GardenUi {
     }
 
     static int mutedCircleBorder() {
-        if (isSageTheme()) return darkTheme ? 0xff3c4c3a : 0xffc5d1bf;
-        if (isSakuraTheme()) return darkTheme ? 0xff4d3942 : 0xffdecad2;
-        return darkTheme ? 0xff3b4961 : 0xffc6d2e2;
+        return switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff3c4c3a : 0xffc5d1bf;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xff4d3942 : 0xffdecad2;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xff4f3f31 : 0xffdfd0c0;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff443c5e : 0xffd2cbe6;
+            default -> darkTheme ? 0xff3b4961 : 0xffc6d2e2;
+        };
     }
 
     static void applySystemBars(Window win, boolean darkBackground) {
@@ -450,21 +628,45 @@ final class GardenUi {
     static void elevate(View view, float elevationDp) {
         view.setElevation(dp(view.getContext(), elevationDp));
         if (Build.VERSION.SDK_INT >= 28) {
-            int ambient = isSageTheme() ? 0x1a263b25 : isSakuraTheme() ? 0x1a471f2e : 0x1a152849;
-            int spot = isSageTheme() ? 0x24263b25 : isSakuraTheme() ? 0x24471f2e : 0x24152849;
+            int ambient = switch (activePalette) {
+                case FocusState.PALETTE_SAGE -> 0x1a263b25;
+                case FocusState.PALETTE_SAKURA -> 0x1a471f2e;
+                case FocusState.PALETTE_INDULGENT -> 0x1a47260b;
+                case FocusState.PALETTE_LAY_FLAT -> 0x1a261a52;
+                default -> 0x1a152849;
+            };
+            int spot = switch (activePalette) {
+                case FocusState.PALETTE_SAGE -> 0x24263b25;
+                case FocusState.PALETTE_SAKURA -> 0x24471f2e;
+                case FocusState.PALETTE_INDULGENT -> 0x2447260b;
+                case FocusState.PALETTE_LAY_FLAT -> 0x24261a52;
+                default -> 0x24152849;
+            };
             view.setOutlineAmbientShadowColor(ambient);
             view.setOutlineSpotShadowColor(spot);
         }
     }
 
     static RippleDrawable touch(Context context, int color, int radiusDp) {
-        int ripple = isSageTheme() ? 0x247fa47b : isSakuraTheme() ? 0x24d67b96 : 0x201a6bff;
+        int ripple = switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> 0x247fa47b;
+            case FocusState.PALETTE_SAKURA -> 0x24d67b96;
+            case FocusState.PALETTE_INDULGENT -> 0x24de7a22;
+            case FocusState.PALETTE_LAY_FLAT -> 0x248368ee;
+            default -> 0x201a6bff;
+        };
         return new RippleDrawable(ColorStateList.valueOf(ripple),
                 shape(context, color, radiusDp), null);
     }
 
     static RippleDrawable touchCard(Context context, int fillColor, int strokeColor, int radiusDp) {
-        int ripple = isSageTheme() ? 0x1c7fa47b : isSakuraTheme() ? 0x1cd67b96 : 0x1a1a6bff;
+        int ripple = switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> 0x1c7fa47b;
+            case FocusState.PALETTE_SAKURA -> 0x1cd67b96;
+            case FocusState.PALETTE_INDULGENT -> 0x1cde7a22;
+            case FocusState.PALETTE_LAY_FLAT -> 0x1c8368ee;
+            default -> 0x1a1a6bff;
+        };
         return new RippleDrawable(ColorStateList.valueOf(ripple),
                 cardBg(context, fillColor, strokeColor, radiusDp), null);
     }
@@ -755,9 +957,13 @@ final class GardenUi {
         grip.setContentDescription("向下拖动关闭面板");
         grip.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         View handle = new View(activity);
-        int gripColor = isSageTheme() ? (darkTheme ? 0xff3a4a39 : 0xffcedac6)
-                : isSakuraTheme() ? (darkTheme ? 0xff4b3740 : 0xffe4cdd6)
-                : (darkTheme ? 0xff3a4860 : 0xffd5dde9);
+        int gripColor = switch (activePalette) {
+            case FocusState.PALETTE_SAGE -> darkTheme ? 0xff3a4a39 : 0xffcedac6;
+            case FocusState.PALETTE_SAKURA -> darkTheme ? 0xff4b3740 : 0xffe4cdd6;
+            case FocusState.PALETTE_INDULGENT -> darkTheme ? 0xff524031 : 0xffe4d2be;
+            case FocusState.PALETTE_LAY_FLAT -> darkTheme ? 0xff463d61 : 0xffd7cff0;
+            default -> darkTheme ? 0xff3a4860 : 0xffd5dde9;
+        };
         handle.setBackground(shape(activity, gripColor, 3));
         grip.addView(handle, new FrameLayout.LayoutParams(dp(activity, 42), dp(activity, 4), Gravity.CENTER));
         sheet.addView(grip, -1, dp(activity, 34));
@@ -1081,10 +1287,20 @@ final class GardenUi {
             float radius = h / 2f;
             track.set(0, 0, w, h);
 
-            int offTrack = darkTheme
-                    ? (isSageTheme() ? 0xff2d3b2c : isSakuraTheme() ? 0xff3d2d34 : 0xff2c384c)
-                    : (isSageTheme() ? 0xffd7e2cf : isSakuraTheme() ? 0xffe8d5dc : 0xffdce4f0);
-            paint.setColor(blend(offTrack, (isSageTheme() || isSakuraTheme()) ? BLUE_LIGHT : BLUE, thumbPos));
+            int offTrack = darkTheme ? switch (activePalette) {
+                case FocusState.PALETTE_SAGE -> 0xff2d3b2c;
+                case FocusState.PALETTE_SAKURA -> 0xff3d2d34;
+                case FocusState.PALETTE_INDULGENT -> 0xff403226;
+                case FocusState.PALETTE_LAY_FLAT -> 0xff362f4f;
+                default -> 0xff2c384c;
+            } : switch (activePalette) {
+                case FocusState.PALETTE_SAGE -> 0xffd7e2cf;
+                case FocusState.PALETTE_SAKURA -> 0xffe8d5dc;
+                case FocusState.PALETTE_INDULGENT -> 0xffe8dacb;
+                case FocusState.PALETTE_LAY_FLAT -> 0xffdfd8f2;
+                default -> 0xffdce4f0;
+            };
+            paint.setColor(blend(offTrack, activePalette == FocusState.PALETTE_BLUE ? BLUE : BLUE_LIGHT, thumbPos));
             canvas.drawRoundRect(track, radius, radius, paint);
 
             float thumbR = (h - pad * 2f) / 2f;

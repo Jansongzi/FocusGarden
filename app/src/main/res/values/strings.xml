@@ -1,11 +1,11 @@
 <resources>
-    <string name="app_name">简松时</string>
-    <string name="accessibility_label">简松时 · 应用限制</string>
-    <string name="accessibility_description">通过无障碍服务确认前台窗口所属的应用，用于统计学习和受限应用时长，以及显示拦截提示。简松时只读取窗口和事件所属的应用包名，不读取界面文字或输入内容。可随时在系统设置中关闭。</string>
-    <string name="focus_tile">简松时</string>
+    <string name="app_name">松时</string>
+    <string name="accessibility_label">松时 · 应用限制</string>
+    <string name="accessibility_description">通过无障碍服务确认前台窗口所属的应用，用于统计学习和受限应用时长，以及显示拦截提示。松时只读取窗口和事件所属的应用包名，不读取界面文字或输入内容。可随时在系统设置中关闭。</string>
+    <string name="focus_tile">松时</string>
     <string name="focus_widget">专注与结余</string>
-    <string name="wallpaper_label">简松时保活壁纸</string>
-    <string name="wallpaper_description">展示自选桌面壁纸并辅助简松时在后台稳定守护，降低被系统查杀概率。</string>
-    <string name="admin_label">简松时 · 防卸载保护</string>
-    <string name="admin_description">开启后可防止误操作或冲动卸载简松时，需要时可在本页面或系统设备管理器中取消激活。</string>
+    <string name="wallpaper_label">松时保活壁纸</string>
+    <string name="wallpaper_description">展示自选桌面壁纸并辅助松时在后台稳定守护，降低被系统查杀概率。</string>
+    <string name="admin_label">松时 · 防卸载保护</string>
+    <string name="admin_description">开启后可防止误操作或冲动卸载松时，需要时可在本页面或系统设备管理器中取消激活。</string>
 </resources>

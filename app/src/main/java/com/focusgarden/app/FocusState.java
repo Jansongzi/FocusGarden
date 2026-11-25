@@ -48,6 +48,8 @@ final class FocusState {
     static final int PALETTE_BLUE = 0;
     static final int PALETTE_SAGE = 1;
     static final int PALETTE_SAKURA = 2;
+    static final int PALETTE_INDULGENT = 3;
+    static final int PALETTE_LAY_FLAT = 4;
     static final int[] ABSTINENCE_STAGE_HOURS = {24, 72, 168, 360, 720, 1440, 2160, 4320, 6480, 8760};
     static final int MAX_ABSTINENCE_UI_REWARD_MINUTES = 30;
     static final long ABSTINENCE_BACKDATE_GUARD_MS = 24L * 60 * MINUTE;
@@ -419,6 +421,7 @@ final class FocusState {
     boolean freeHabitSlotUsed;
 
     boolean timeAwarenessBar = true;
+    boolean layFlatAuraEffect = true;
     static final String LEGACY_DEFAULT_BLOCK_APPEARANCE = "default";
     static final String BUILTIN_FULL_1 = "builtin_full_1";
     static final String BUILTIN_FULL_2 = "builtin_full_2";
@@ -642,6 +645,16 @@ final class FocusState {
             }
         }
         return false;
+    }
+
+    int effectiveColorTheme() {
+        if (rateMode == RateMode.INDULGENT) return PALETTE_INDULGENT;
+        if (rateMode == RateMode.LAY_FLAT) return PALETTE_LAY_FLAT;
+        return colorTheme;
+    }
+
+    boolean isModeThemeActive() {
+        return rateMode == RateMode.INDULGENT || rateMode == RateMode.LAY_FLAT;
     }
 
     void syncLegacyPercents() {
@@ -1163,6 +1176,10 @@ final class FocusState {
 
     boolean isLayFlat() {
         return rateMode == RateMode.LAY_FLAT;
+    }
+
+    boolean isLayFlatAuraVisible() {
+        return isLayFlat() && layFlatAuraEffect;
     }
 
     long convertByMode(long effortMs) {

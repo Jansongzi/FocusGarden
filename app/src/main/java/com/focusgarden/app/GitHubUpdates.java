@@ -456,7 +456,7 @@ final class GitHubUpdates {
         PackageInfo current = installed(context);
         PackageInfo archive = context.getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(), flags());
         if (archive == null || !context.getPackageName().equals(archive.packageName)) {
-            throw new IOException("这不是简松时的安装包");
+            throw new IOException("这不是松时的安装包");
         }
         Set<Signature> expected = signers(current);
         if (expected.isEmpty() || !expected.equals(signers(archive))) throw new IOException("安装包签名与当前版本不同");

@@ -62,7 +62,7 @@ public final class FocusWidget extends AppWidgetProvider {
                 views.setTextViewText(R.id.widget_value,
                         GardenUi.countdown(state.offlinePaused() ? state.offlineElapsed(now) : remaining));
             } else {
-                views.setTextViewText(R.id.widget_title, "简松时");
+                views.setTextViewText(R.id.widget_title, "松时");
                 views.setTextViewText(R.id.widget_value, credit);
             }
         }

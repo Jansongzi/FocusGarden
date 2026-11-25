@@ -542,7 +542,7 @@ final class FocusSheets {
             LinearLayout pinTipRow = row(activity);
             pinTipRow.setPadding(0, dp(activity, 12), 0, dp(activity, 6));
             weight(pinTipRow, titleWithInfo(activity, "后台锁定指引", 15, INK,
-                    "后台锁定", "在系统多任务列表中长按简松时卡片并选择「锁定」。"));
+                    "后台锁定", "在系统多任务列表中长按松时卡片并选择「锁定」。"));
             guardList.addView(pinTipRow);
         };
 
@@ -2107,6 +2107,17 @@ final class FocusSheets {
         Runnable[] rebuild = new Runnable[1];
         Dialog[] sheetRef = new Dialog[1];
         boolean[] suppressReturn = {false};
+        int openedPalette = state.effectiveColorTheme();
+        Runnable refreshOrReopenMode = () -> {
+            onChanged.run();
+            if (state.effectiveColorTheme() != openedPalette) {
+                suppressReturn[0] = true;
+                if (sheetRef[0] != null) sheetRef[0].dismiss();
+                showRateSettings(activity, state, onChanged, onDismissBack);
+            } else {
+                rebuild[0].run();
+            }
+        };
         Runnable openShopFromRates = () -> {
             suppressReturn[0] = true;
             if (sheetRef[0] != null) sheetRef[0].dismiss();
@@ -2201,8 +2212,7 @@ final class FocusSheets {
                                         System.currentTimeMillis(), ZoneId.systemDefault());
                                 if (res == FocusState.ModeSwitchCheck.OK) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    onChanged.run();
-                                    rebuild[0].run();
+                                    refreshOrReopenMode.run();
                                     Toast.makeText(activity,
                                             (firstFree ? "首次免费已切换为" : "已切换为") + mode.label + "（" + mode.ratioText + "）",
                                             Toast.LENGTH_SHORT).show();
@@ -2296,8 +2306,7 @@ final class FocusSheets {
                             "稍后", "立即开启（1 天）", false, () -> {
                                 if (state.activateIndulgentMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    onChanged.run();
-                                    rebuild[0].run();
+                                    refreshOrReopenMode.run();
                                     Toast.makeText(activity, "已开启放纵模式（1:2），明日 04:00 自动恢复",
                                             Toast.LENGTH_SHORT).show();
                                 } else {
@@ -2389,8 +2398,7 @@ final class FocusSheets {
                             "稍后", "立即躺平（今天）", false, () -> {
                                 if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    onChanged.run();
-                                    rebuild[0].run();
+                                    refreshOrReopenMode.run();
                                     Toast.makeText(activity, "已开启躺平模式，今日全天应用不受限",
                                             Toast.LENGTH_SHORT).show();
                                 } else {
@@ -2485,20 +2493,22 @@ final class FocusSheets {
 
         body.addView(text(activity, "外观与主题", 13, MUTED, true));
         gap(body, 8);
+        boolean modeActive = state.isModeThemeActive();
         LinearLayout paletteRow = row(activity);
         for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
-            boolean selected = state.colorTheme == theme.palette();
+            boolean selected = !modeActive && state.colorTheme == theme.palette();
+            boolean savedBase = modeActive && state.colorTheme == theme.palette();
             boolean owned = state.isShopItemOwned(theme.id());
             if (paletteRow.getChildCount() > 0) space(paletteRow, 8);
 
             LinearLayout tile = column(activity);
             tile.setBackground(touchCard(activity, selected ? BLUE_SOFT : SURFACE_SUBTLE,
-                    selected ? blueStroke() : BORDER, 14));
+                    (selected || savedBase) ? blueStroke() : BORDER, 14));
             tile.setPadding(dp(activity, 9), dp(activity, 10), dp(activity, 9), dp(activity, 10));
             tile.setContentDescription("主题：" + theme.name());
 
             LinearLayout topLine = row(activity);
-            TextView nameTv = text(activity, theme.name(), 13, selected ? BLUE : INK, true);
+            TextView nameTv = text(activity, theme.name(), 13, (selected || savedBase) ? BLUE : INK, true);
             nameTv.setSingleLine(true);
             nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
             weight(topLine, nameTv);
@@ -2519,13 +2529,21 @@ final class FocusSheets {
             }
             tile.addView(swRow);
             gap(tile, 6);
-            TextView subTv = text(activity, owned ? theme.subtitle() : theme.costMinutes() + " 分钟",
-                    11, selected ? BLUE : MUTED, false);
+            String subTxt = !owned ? theme.costMinutes() + " 分钟"
+                    : savedBase ? "常规默认" : theme.subtitle();
+            TextView subTv = text(activity, subTxt,
+                    11, (selected || savedBase) ? BLUE : MUTED, false);
             subTv.setSingleLine(true);
             subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
             tile.addView(subTv);
             tile.setOnClickListener(v -> {
-                if (selected) return;
+                if (state.colorTheme == theme.palette() && !modeActive) return;
+                if (state.colorTheme == theme.palette()) {
+                    Toast.makeText(activity,
+                            "当前模式生效中，「" + theme.name() + "」已为默认主题",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 tapHaptic(v);
                 Runnable reopen = () -> showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
                 suppressReturn[0] = true;
@@ -2533,6 +2551,11 @@ final class FocusSheets {
                 if (state.setColorTheme(theme.palette())) {
                     FocusStore.get(activity).save();
                     activity.applyThemeNow();
+                    if (modeActive) {
+                        Toast.makeText(activity,
+                                "已设为常规主题「" + theme.name() + "」，退出当前模式后生效",
+                                Toast.LENGTH_SHORT).show();
+                    }
                     reopen.run();
                 } else {
                     TimeShopUi.showAppearanceShop(activity, state, onChanged, reopen);
@@ -2541,6 +2564,58 @@ final class FocusSheets {
             weight(paletteRow, tile);
         }
         body.addView(paletteRow);
+        gap(body, 8);
+
+        LinearLayout modeRow = row(activity);
+        int activePalette = state.effectiveColorTheme();
+        for (ShopCatalog.ModeTheme mt : ShopCatalog.modeThemes()) {
+            boolean modeSelected = activePalette == mt.palette();
+            if (modeRow.getChildCount() > 0) space(modeRow, 8);
+
+            LinearLayout tile = column(activity);
+            tile.setBackground(touchCard(activity, modeSelected ? BLUE_SOFT : SURFACE_SUBTLE,
+                    modeSelected ? blueStroke() : BORDER, 14));
+            tile.setPadding(dp(activity, 9), dp(activity, 10), dp(activity, 9), dp(activity, 10));
+            tile.setContentDescription("模式主题：" + mt.name());
+
+            LinearLayout topLine = row(activity);
+            TextView nameTv = text(activity, mt.name(), 13, modeSelected ? BLUE : INK, true);
+            nameTv.setSingleLine(true);
+            nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            weight(topLine, nameTv);
+            if (modeSelected) {
+                space(topLine, 3);
+                topLine.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 16, 9, 8));
+            }
+            tile.addView(topLine);
+            gap(tile, 7);
+
+            LinearLayout swRow = row(activity);
+            int[] pSwatches = mt.swatches();
+            for (int cIdx = 0; cIdx < pSwatches.length; cIdx++) {
+                View dot = new View(activity);
+                dot.setBackground(cardBg(activity, pSwatches[cIdx], BORDER, 5));
+                swRow.addView(dot, dp(activity, 14), dp(activity, 14));
+                if (cIdx + 1 < pSwatches.length) space(swRow, 4);
+            }
+            tile.addView(swRow);
+            gap(tile, 6);
+            TextView subTv = text(activity, modeSelected ? "生效中 · 不可购买" : mt.subtitle(),
+                    11, modeSelected ? BLUE : MUTED, false);
+            subTv.setSingleLine(true);
+            subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            tile.addView(subTv);
+            tile.setOnClickListener(v -> {
+                if (modeSelected) return;
+                tapHaptic(v);
+                Toast.makeText(activity,
+                        "不可购买，开启" + (mt.palette() == FocusState.PALETTE_INDULGENT ? "放纵模式" : "躺平模式")
+                                + "后自动热切换",
+                        Toast.LENGTH_SHORT).show();
+            });
+            weight(modeRow, tile);
+        }
+        body.addView(modeRow);
         gap(body, 12);
 
         body.addView(text(activity, "夜间模式", 12, MUTED, true));
@@ -2595,6 +2670,24 @@ final class FocusSheets {
         barRow.addView(sw);
         barRow.setOnClickListener(v -> sw.performClick());
         body.addView(barRow);
+        gap(body, 10);
+
+        LinearLayout auraRow = row(activity);
+        auraRow.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        auraRow.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
+        auraRow.addView(iconBadge(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE, 40, 20, 12));
+        space(auraRow, 12);
+        weight(auraRow, titleWithInfo(activity, "躺平流光动效", 15, INK,
+                "躺平流光动效", "躺平模式生效时自动在屏幕左右两侧展示紫色星尘流光，可随时关闭。"));
+        SwitchView auraSw = new SwitchView(activity, state.layFlatAuraEffect);
+        auraSw.setContentDescription("开关躺平流光动效");
+        auraSw.setOnToggleListener(on -> {
+            state.layFlatAuraEffect = on;
+            onChanged.run();
+        });
+        auraRow.addView(auraSw);
+        auraRow.setOnClickListener(v -> auraSw.performClick());
+        body.addView(auraRow);
         gap(body, 14);
 
         body.addView(settingRow(activity, R.drawable.ic_edit, BLUE_SOFT, BLUE,
