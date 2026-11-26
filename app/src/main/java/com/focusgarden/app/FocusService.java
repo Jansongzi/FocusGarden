@@ -459,6 +459,7 @@ public final class FocusService extends AccessibilityService {
         boolean focusGuardActive = !layFlatNow && !sleepLock
                 && store.state.guardSettingsDuringFocus
                 && store.state.isDisciplineLocked(now)
+                && !store.state.globalAllowlist.contains(foreground)
                 && "com.android.settings".equals(foreground)
                 && now > settingsBypassUntil;
 
@@ -480,7 +481,8 @@ public final class FocusService extends AccessibilityService {
                 : store.state.restriction(foreground, now, zone);
 
         // Bedtime violation tracking if limited app is ever foregrounded during active sleep lock
-        if (!layFlatNow && sleepLock && reason == FocusState.Restriction.NONE && foreground != null) {
+        if (!layFlatNow && sleepLock && reason == FocusState.Restriction.NONE && foreground != null
+                && !store.state.globalAllowlist.contains(foreground)) {
             FocusState.Rule rule = store.state.rules.get(foreground);
             if (rule != null && rule.category() == FocusState.Category.LIMITED) {
                 if (store.state.markEarlySleepFailed(now, zone)) {
@@ -493,7 +495,8 @@ public final class FocusService extends AccessibilityService {
         if (reason == FocusState.Restriction.NONE) {
             hideOverlay();
             if (sober || sleepLock || exempt) hideAwarenessBar();
-            else updateAwarenessBar(now);
+            else if (!store.state.globalAllowlist.contains(foreground)) updateAwarenessBar(now);
+            else hideAwarenessBar();
         } else {
             hideSoberPill();
             hideAwarenessBar();
@@ -556,7 +559,11 @@ public final class FocusService extends AccessibilityService {
                 var date = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
                 var start = date.atTime(LocalTime.ofSecondOfDay(store.state.sleepStart * 60L)).atZone(zone);
                 if (start.toInstant().toEpochMilli() <= now) start = start.plusDays(1);
-                main.postDelayed(pulse, start.toInstant().toEpochMilli() - now);
+                long nextStart = start.toInstant().toEpochMilli();
+                if (store.state.bedtimeSuspended(FocusState.date(now, zone))) {
+                    nextStart = Math.min(nextStart, FocusState.nextResetMs(now, zone));
+                }
+                main.postDelayed(pulse, Math.max(1L, nextStart - now));
             }
         }
     }

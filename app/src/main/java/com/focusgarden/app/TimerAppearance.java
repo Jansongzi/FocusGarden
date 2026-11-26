@@ -1,6 +1,8 @@
 package com.focusgarden.app;
 
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -14,7 +16,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.io.File;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.UUID;
 
 import static com.focusgarden.app.GardenUi.*;
 
@@ -32,8 +38,83 @@ final class TimerAppearance {
             this.fileName = fileName;
         }
 
-        private AtomicFile file(Context context) {
-            return new AtomicFile(new File(context.getFilesDir(), fileName));
+        private AtomicFile file(Context context, String id) {
+            if (FocusState.TIMER_BG_CUSTOM.equals(id)) {
+                return new AtomicFile(new File(context.getFilesDir(), fileName));
+            }
+            return new AtomicFile(new File(folder(context), id + ".png"));
+        }
+
+        private File folder(Context context) {
+            return new File(context.getFilesDir(), name().toLowerCase(java.util.Locale.ROOT) + "_backgrounds");
+        }
+
+        private SharedPreferences settings(Context context) {
+            return context.getSharedPreferences("timer_background_" + name(), Context.MODE_PRIVATE);
+        }
+
+        private List<String> customIds(Context context) {
+            List<String> ids = new ArrayList<>();
+            if (hasCustom(context)) ids.add(FocusState.TIMER_BG_CUSTOM);
+            File[] files = folder(context).listFiles();
+            if (files != null) {
+                java.util.Arrays.sort(files, java.util.Comparator.comparingLong(File::lastModified));
+                for (File image : files) {
+                    String name = image.getName();
+                    if (!name.endsWith(".png")) continue;
+                    String id = name.substring(0, name.length() - 4);
+                    if (FocusState.isCustomTimerBackground(id)) ids.add(id);
+                }
+            }
+            return ids;
+        }
+
+        private LinkedHashSet<String> selectedRotation(Context context) {
+            LinkedHashSet<String> ids = new LinkedHashSet<>();
+            String saved = settings(context).getString("order", "");
+            if (!saved.isEmpty()) ids.addAll(List.of(saved.split(",")));
+            return ids;
+        }
+
+        private void saveRotation(Context context, LinkedHashSet<String> ids) {
+            settings(context).edit().putString("order", String.join(",", ids)).apply();
+        }
+
+        private boolean rotating(Context context) {
+            return settings(context).getBoolean("enabled", false);
+        }
+
+        private void pickOption(Context context, FocusState state, String id) {
+            if (rotating(context)) {
+                var ids = selectedRotation(context);
+                if (!ids.remove(id)) ids.add(id);
+                saveRotation(context, ids);
+            } else {
+                selectId(state, id);
+            }
+        }
+
+        String currentForSession(Context context, FocusState state) {
+            if (!rotating(context)) return selectedId(state);
+            var queue = selectedRotation(context);
+            queue.removeIf(id -> FocusState.isCustomTimerBackground(id) && !file(context, id).getBaseFile().isFile());
+            if (queue.isEmpty()) return selectedId(state);
+            long session = switch (this) {
+                case FOCUS -> state.offlineActive()
+                        ? (state.offlineSessionStarted > 0 ? state.offlineSessionStarted : state.offlineStartMs)
+                        : state.phaseEnd;
+                case PURPOSE -> state.soberSessionStarted == 0 ? state.soberUntil : state.soberSessionStarted;
+                case SLEEP -> state.currentSleepWindowEndMs(System.currentTimeMillis(), ZoneId.systemDefault());
+            };
+            if (session == 0) return selectedId(state);
+            SharedPreferences prefs = settings(context);
+            String last = prefs.getString("last", "");
+            if (!queue.contains(last) || session != prefs.getLong("session", 0L)) {
+                List<String> ids = new ArrayList<>(queue);
+                last = ids.get((ids.indexOf(last) + 1) % ids.size());
+                prefs.edit().putLong("session", session).putString("last", last).apply();
+            }
+            return last;
         }
 
         String selectedId(FocusState state) {
@@ -55,18 +136,32 @@ final class TimerAppearance {
         }
 
         boolean hasCustom(Context context) {
-            return file(context).getBaseFile().isFile();
+            return file(context, FocusState.TIMER_BG_CUSTOM).getBaseFile().isFile();
         }
 
-        boolean save(Context context, Uri uri) {
-            return LocalImage.save(context, file(context), uri);
+        String save(Context context, Uri uri) {
+            File directory = folder(context);
+            if (!directory.isDirectory() && !directory.mkdirs()) return null;
+            String id = "custom_" + UUID.randomUUID().toString().replace("-", "");
+            return LocalImage.save(context, file(context, id), uri) ? id : null;
         }
 
-        void reset(Context context) {
-            LocalImage.clear(file(context));
-            FocusStore store = FocusStore.get(context);
-            selectId(store.state, this == SLEEP ? FocusState.SLEEP_BG_AURORA : FocusState.BUILTIN_FULL_1);
-            store.save();
+        void useImported(Context context, FocusState state, String id) {
+            selectId(state, id);
+            if (rotating(context)) {
+                var ids = selectedRotation(context);
+                ids.add(id);
+                saveRotation(context, ids);
+            }
+        }
+
+        private void deleteImage(Context context, FocusState state, String id) {
+            LocalImage.clear(file(context, id));
+            var ids = selectedRotation(context);
+            if (ids.remove(id)) saveRotation(context, ids);
+            if (id.equals(selectedId(state))) {
+                selectId(state, this == SLEEP ? FocusState.SLEEP_BG_AURORA : FocusState.BUILTIN_FULL_1);
+            }
         }
 
         boolean showIn(ImageView image) {
@@ -74,13 +169,16 @@ final class TimerAppearance {
         }
 
         boolean showIn(FocusState state, ImageView image) {
-            String id = selectedId(state);
+            return render(currentForSession(image.getContext(), state), image, 1);
+        }
+
+        private boolean render(String id, ImageView image, int sample) {
             if (FocusState.SLEEP_BG_AURORA.equals(id)) {
                 image.setImageDrawable(null);
                 return false;
             }
-            if (FocusState.TIMER_BG_CUSTOM.equals(id)) {
-                var bitmap = LocalImage.load(file(image.getContext()));
+            if (FocusState.isCustomTimerBackground(id)) {
+                var bitmap = LocalImage.load(file(image.getContext(), id), sample);
                 if (bitmap != null) {
                     image.setImageBitmap(bitmap);
                     return true;
@@ -128,21 +226,22 @@ final class TimerAppearance {
             TextView status = text(activity, "", 12, MUTED, false);
             details.addView(status);
             gap(details, 8);
-            LinearLayout customBtns = row(activity);
-            TextView choose = secondaryButton(activity, "从相册自选");
-            choose.setContentDescription(mode.label + "从相册自选图片");
+            TextView choose = secondaryButton(activity, "添加自选图片");
+            choose.setContentDescription(mode.label + "从相册添加自选图片");
             choose.setMinHeight(dp(activity, 36));
             choose.setTextSize(12);
-            weight(customBtns, choose);
-            TextView clearCustom = pillButton(activity, "清除自选", CARD, INK_SUB, 10, 36);
-            clearCustom.setContentDescription(mode.label + "清除自选图片");
-            clearCustom.setTextSize(12);
-            space(customBtns, 6);
-            customBtns.addView(clearCustom);
-            details.addView(customBtns, -1, -2);
+            details.addView(choose, -1, -2);
             weight(header, details);
             card.addView(header);
             gap(card, 10);
+
+            SwitchView rotate = new SwitchView(activity, mode.rotating(activity));
+            LinearLayout rotateRow = row(activity);
+            weight(rotateRow, text(activity, "每次开始时轮换", 13, INK_SUB, true));
+            rotate.setContentDescription(mode.label + "背景轮换");
+            rotateRow.addView(rotate);
+            card.addView(rotateRow);
+            gap(card, 8);
 
             HorizontalScrollView scroller = new HorizontalScrollView(activity);
             scroller.setHorizontalScrollBarEnabled(false);
@@ -153,19 +252,21 @@ final class TimerAppearance {
             Runnable[] refreshRef = new Runnable[1];
             refreshRef[0] = () -> {
                 String selectedId = mode.selectedId(state);
-                boolean hasPhoto = mode.showIn(state, thumbnail);
+                boolean rotating = mode.rotating(activity);
+                var queue = mode.selectedRotation(activity);
+                boolean hasPhoto = mode.render(selectedId, thumbnail, 4);
                 thumbnail.setVisibility(hasPhoto ? View.VISIBLE : View.GONE);
-                status.setText("当前：" + BlockAssets.titleOf(selectedId));
-                clearCustom.setVisibility(mode.hasCustom(activity) ? View.VISIBLE : View.GONE);
+                status.setText(rotating ? "已选 " + queue.size() + " 张 · 点击图片加入或移出"
+                        : "当前：" + (FocusState.isCustomTimerBackground(selectedId) ? "自选图片" : BlockAssets.titleOf(selectedId)));
 
                 strip.removeAllViews();
                 if (mode == Mode.SLEEP) {
-                    boolean activeAurora = FocusState.SLEEP_BG_AURORA.equals(selectedId);
+                    boolean activeAurora = rotating ? queue.contains(FocusState.SLEEP_BG_AURORA) : FocusState.SLEEP_BG_AURORA.equals(selectedId);
                     FrameLayout auroraTile = buildOptionTile(activity, null, "星空", activeAurora);
                     auroraTile.setContentDescription(mode.label + "设为星空夜览");
                     auroraTile.setOnClickListener(v -> {
                         tapHaptic(v);
-                        mode.selectId(state, FocusState.SLEEP_BG_AURORA);
+                        mode.pickOption(activity, state, FocusState.SLEEP_BG_AURORA);
                         store.save();
                         refreshRef[0].run();
                         if (onChanged != null) onChanged.run();
@@ -176,18 +277,50 @@ final class TimerAppearance {
 
                 for (int i = 0; i < fullPresets.size(); i++) {
                     FocusState.BlockAppearance preset = fullPresets.get(i);
-                    boolean active = preset.id().equals(selectedId);
+                    boolean active = rotating ? queue.contains(preset.id()) : preset.id().equals(selectedId);
                     FrameLayout tile = buildOptionTile(activity, BlockAssets.fullDrawable(preset.id()), null, active);
                     tile.setContentDescription(mode.label + "设为" + preset.text());
                     tile.setOnClickListener(v -> {
                         tapHaptic(v);
-                        mode.selectId(state, preset.id());
+                        mode.pickOption(activity, state, preset.id());
                         store.save();
                         refreshRef[0].run();
                         if (onChanged != null) onChanged.run();
                     });
                     strip.addView(tile, dp(activity, 52), dp(activity, 76));
                     if (i + 1 < fullPresets.size()) space(strip, 8);
+                }
+                int index = 0;
+                for (String id : mode.customIds(activity)) {
+                    Bitmap bitmap = LocalImage.load(mode.file(activity, id), 4);
+                    if (bitmap == null) continue;
+                    boolean active = rotating ? queue.contains(id) : id.equals(selectedId);
+                    FrameLayout tile = buildOptionTile(activity, null, null, active);
+                    ImageView preview = new ImageView(activity);
+                    preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    preview.setImageBitmap(bitmap);
+                    tile.addView(preview, 0, new FrameLayout.LayoutParams(-1, -1));
+                    tile.setContentDescription(mode.label + "自选图片 " + ++index + "，长按删除");
+                    tile.setOnClickListener(v -> {
+                        tapHaptic(v);
+                        mode.pickOption(activity, state, id);
+                        store.save();
+                        refreshRef[0].run();
+                        if (onChanged != null) onChanged.run();
+                    });
+                    tile.setOnLongClickListener(v -> {
+                        OnboardingUi.showMascotPrompt(activity, R.drawable.dialog_mascot_sleep_pause,
+                                "删除这张背景？", "这张图片会从松时的背景库移除。",
+                                "留着", "删除", () -> {
+                                    mode.deleteImage(activity, state, id);
+                                    store.save();
+                                    refreshRef[0].run();
+                                    if (onChanged != null) onChanged.run();
+                                });
+                        return true;
+                    });
+                    space(strip, 8);
+                    strip.addView(tile, dp(activity, 52), dp(activity, 76));
                 }
             };
 
@@ -199,15 +332,20 @@ final class TimerAppearance {
                 tapHaptic(v);
                 activity.pickTimerBackground(mode, saveFinished);
             });
-            clearCustom.setOnClickListener(v -> {
-                tapHaptic(v);
-                activity.resetTimerBackground(mode, saveFinished);
+            rotate.setOnToggleListener(enabled -> {
+                if (enabled && mode.selectedRotation(activity).isEmpty()) {
+                    var queue = mode.selectedRotation(activity);
+                    queue.add(mode.selectedId(state));
+                    mode.saveRotation(activity, queue);
+                }
+                mode.settings(activity).edit().putBoolean("enabled", enabled).apply();
+                saveFinished.run();
             });
             refreshRef[0].run();
             body.addView(card);
             if (mIdx + 1 < Mode.values().length) gap(body, 10);
         }
-        bottomSheet(activity, "计时与锁机背景", "自律模式、目的模式与早睡锁机均可选用内置全屏素材或自选图片", body);
+        bottomSheet(activity, "计时与锁机背景", "每种模式可保存多张自选图，并在每次新计时或新锁机时轮换。", body);
     }
 
     private static GradientDrawable auroraThumbnailBg(Context context) {

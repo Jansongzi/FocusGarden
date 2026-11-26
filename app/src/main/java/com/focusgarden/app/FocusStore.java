@@ -118,6 +118,12 @@ final class FocusStore {
             state.sleepTargetEndMs = state.computeNextSleepEndMs(
                     System.currentTimeMillis(), java.time.ZoneId.systemDefault());
         }
+        state.bedtimeSuspendedOn = root.optString("bedtimeSuspendedOn", "");
+        JSONArray allowlist = root.optJSONArray("globalAllowlist");
+        if (allowlist != null) for (int i = 0; i < allowlist.length(); i++) {
+            String pkg = allowlist.optString(i);
+            if (!pkg.isBlank()) state.globalAllowlist.add(pkg);
+        }
         state.sleepLockBypassEndMs = Math.max(0L, root.optLong("sleepLockBypassEndMs", 0L));
         state.earlySleepPendingClaimDate = root.optString("earlySleepPendingClaimDate", "");
         state.earlySleepRewardMinutes = root.optInt("earlySleepRewardMinutes", 10);
@@ -177,11 +183,14 @@ final class FocusStore {
         state.inBreak = root.optBoolean("inBreak");
         state.countdownCategory = state.disciplineCategory(root.optString("countdownCategory"));
 
+        state.offlineSessionStarted = root.optLong("offlineSessionStarted", 0L);
         state.offlineStartMs = root.optLong("offlineStartMs");
         state.offlineAccumulatedMs = root.optLong("offlineAccumulatedMs");
         state.offlineUnredeemedMs = root.optLong("offlineUnredeemedMs");
         state.stopwatchCategory = state.disciplineCategory(root.optString("stopwatchCategory"));
 
+        state.soberSessionStarted = root.optLong("soberSessionStarted", 0L);
+        state.soberStarted = root.optLong("soberStarted", 0L);
         state.soberUntil = root.optLong("soberUntil");
         state.soberPausedMs = Math.max(0L, root.optLong("soberPausedMs"));
         state.soberVaultPaid = Math.max(0L, root.optLong("soberVaultPaid"));
@@ -337,6 +346,8 @@ final class FocusStore {
                     row.optDouble("dailySavingYuan", 0.0),
                     row.optInt("iconIndex", 0)
             );
+            abs.extraTargetMinutes = Math.max(0, Math.min(abs.targetHours == 8760 ? 0 : 59, row.optInt("extraTargetMinutes")));
+            abs.customReward = row.optString("customReward", "");
             abs.createdMs = row.optLong("createdMs", abs.startedMs);
             abs.rewardGuardUntilMs = Math.max(0L, row.optLong("rewardGuardUntilMs", 0L));
             if (row.has("totalEarnedMinutes")) {
@@ -409,6 +420,7 @@ final class FocusStore {
                     row.optString("doneDate", ""),
                     row.optLong("createdMs", 0L)
             ));
+            state.todos.get(id).scheduledDate = row.optString("scheduledDate", "");
         }
 
         if (root.has("rewards")) {
@@ -630,6 +642,8 @@ final class FocusStore {
                     .put("sleepEnd", state.sleepEnd)
                     .put("sleepTargetEndMs", state.sleepTargetEndMs)
                     .put("sleepLockBypassEndMs", state.sleepLockBypassEndMs)
+                    .put("bedtimeSuspendedOn", state.bedtimeSuspendedOn)
+                    .put("globalAllowlist", new JSONArray(state.globalAllowlist))
                     .put("earlySleepPendingClaimDate", state.earlySleepPendingClaimDate)
                     .put("earlySleepRewardMinutes", state.earlySleepRewardMinutes)
                     .put("todoDailyCapMinutes", state.todoDailyCapMinutes)
@@ -651,12 +665,15 @@ final class FocusStore {
                     .put("inBreak", state.inBreak)
                     .put("countdownCategory", state.countdownCategory.id())
                     .put("offlineStartMs", state.offlineStartMs)
+                    .put("offlineSessionStarted", state.offlineSessionStarted)
                     .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
                     .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
                     .put("stopwatchCategory", state.stopwatchCategory.id())
                     .put("customDisciplineCategories", new JSONObject(state.customDisciplineCategories))
                     .put("archivedDisciplineCategories", new JSONArray(state.archivedDisciplineCategories))
                     .put("soberUntil", state.soberUntil)
+                    .put("soberStarted", state.soberStarted)
+                    .put("soberSessionStarted", state.soberSessionStarted)
                     .put("soberPausedMs", state.soberPausedMs)
                     .put("soberVaultPaid", state.soberVaultPaid)
                     .put("soberPaidOn", state.soberPaidOn)
@@ -728,6 +745,8 @@ final class FocusStore {
                         .put("name", a.name)
                         .put("startedMs", a.startedMs)
                         .put("targetHours", a.targetHours)
+                        .put("extraTargetMinutes", a.extraTargetMinutes)
+                        .put("customReward", a.customReward)
                         .put("rewardMinutes", a.rewardMinutes)
                         .put("completedCount", a.completedCount)
                         .put("relapseCount", a.relapseCount)
@@ -758,6 +777,7 @@ final class FocusStore {
                         .put("done", todo.done)
                         .put("claimed", todo.claimed)
                         .put("createdDate", todo.createdDate)
+                        .put("scheduledDate", todo.scheduledDate)
                         .put("doneDate", todo.doneDate)
                         .put("createdMs", todo.createdMs));
             }

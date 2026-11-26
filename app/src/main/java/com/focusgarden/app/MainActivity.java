@@ -449,16 +449,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
             var app = getApplicationContext();
             timerBackgroundBusy = true;
             new Thread(() -> {
-                boolean saved = mode.save(app, uri);
+                String saved = mode.save(app, uri);
                 main.post(() -> {
                     timerBackgroundBusy = false;
                     if (isDestroyed() || isFinishing()) return;
-                    if (saved) {
-                        mode.selectId(state, FocusState.TIMER_BG_CUSTOM);
+                    if (saved != null) {
+                        mode.useImported(app, state, saved);
                         FocusStore.get(app).save();
                         if (changed != null) changed.run();
                     }
-                    toast(saved ? "已更新" + mode.label + "背景" : "无法读取该图片，请换一张重试");
+                    toast(saved != null ? "已添加" + mode.label + "背景" : "无法读取该图片，请换一张重试");
                 });
             }, "focus-timer-background").start();
             return;
@@ -515,15 +515,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
             timerBackgroundBusy = false;
             toast("无法打开系统图片选择器");
         }
-    }
-
-    void resetTimerBackground(TimerAppearance.Mode mode, Runnable onChanged) {
-        if (timerBackgroundBusy) {
-            toast("正在载入图片");
-            return;
-        }
-        mode.reset(this);
-        onChanged.run();
     }
 
     boolean pickBlockImage(String id, Runnable onFinished) {
@@ -1082,7 +1073,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout vaultTag = row(this);
         vaultTag.setBackground(touch(this, 0x26ffffff, 10));
         vaultTag.setPadding(dp(this, 10), dp(this, 5), dp(this, 10), dp(this, 5));
-        vaultTag.setContentDescription("查看储蓄罐规则、自律指数与卡牌详情");
+        vaultTag.setContentDescription("查看储蓄罐规则与卡牌详情");
         vaultTag.addView(text(this, layFlat ? "躺平 · 储蓄冻结" : "上限 " + state.vaultCapacityMinutes() + " 分 · 不清零",
                 11, ON_ACCENT, false));
         space(vaultTag, 4);
@@ -1255,7 +1246,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         LinearLayout budgetSub = row(this);
         homeLimitedSub = text(this, layFlat
-                ? "躺平模式全天免限 · 今日暂停兑换时间"
+                ? "躺平模式 · 受限额度放开，今日暂停兑换"
                 : "今日已使用 " + duration(day.limitedMs), 12, MUTED, false);
         weight(budgetSub, homeLimitedSub);
         budgetSub.addView(text(this, layFlat ? "明日 04:00 恢复" : "共限制 " + limitedPkgs.size() + " 个应用",
@@ -1282,7 +1273,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         soberTitleLine.addView(text(this, "目的模式", 15, INK, true));
         space(soberTitleLine, 2);
         soberTitleLine.addView(infoIcon(this, "目的模式",
-                "先扣等额时长，期间仅可用所选应用，提前结束退回未用时长。"));
+                "期间可用所选应用，仅按受限目标应用的实际使用扣费。"));
         space(soberTitleLine, 6);
         homeSoberBadge = text(this, "", 11, MUTED, true);
         homeSoberBadge.setPadding(dp(this, 8), dp(this, 3), dp(this, 8), dp(this, 3));
@@ -1343,8 +1334,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void showVaultInfoDialog() {
-        LocalDate d = FocusState.today();
-        int curScore = state.disciplineScore(d);
         String chestNote = state.hasPendingIndulgentReward()
                 ? " · 待领宝箱 " + state.pendingIndulgentRewards + " 个" : "";
         String cardSummary = "放纵卡 " + state.indulgentPasses + "/" + FocusState.MAX_INDULGENT_CARDS
@@ -1355,7 +1344,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 "时间储蓄罐 · " + shortMinutes(state.vaultMs) + " / " + state.vaultCapacityMinutes() + " 分钟",
                 "储蓄罐内时长每日凌晨 04:00 不清零，当前上限 " + state.vaultCapacityMinutes()
                         + " 分钟（可在时间商店使用储蓄扩容卡提升至 " + FocusState.MAX_VAULT_MINUTES + " 分钟）。\n\n"
-                        + "今日自律指数：" + curScore + "%\n" + cardSummary + "\n" + progressInfo,
+                        + cardSummary + "\n" + progressInfo,
                 "知道了");
     }
 
@@ -2194,23 +2183,29 @@ public final class MainActivity extends Activity implements SensorEventListener 
         TextView start = primaryButton(this, "确认开始");
         gap(sheetBody, 10);
         sheetBody.addView(start, -1, -2);
-        start.setOnClickListener(v -> {
+        Runnable startSession = () -> {
             long now = System.currentTimeMillis();
             TimerReceiver.advance(this, now);
             if (state.active() || state.offlineActive() || state.soberActive(now)) {
                 timerConfirmation.dismiss();
                 return;
             }
-            haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+            haptic(start, state.hapticFeedback, HapticKind.CONFIRM);
             timerConfirmation.dismiss();
             setTimerTabMode(mode);
             if (mode == 0) state.startOffline(now, categories.selected());
             else state.start(minutes, 0, 1, now, categories.selected());
             changed();
             onStarted.run();
+        };
+        start.setOnClickListener(v -> {
+            if (mode == 0) startSession.run();
+            else OnboardingUi.showMascotPrompt(this, R.drawable.dialog_mascot_countdown,
+                    "倒计时不可暂停", "开始后需等待计时自然结束。确认开始 " + minutes + " 分钟吗？",
+                    "再想想", "开始倒计时", startSession);
         });
         timerConfirmation = bottomSheet(this, "选择计时分类",
-                action + " · " + disciplineStopHint(mode) + "。计时期间仅可使用已设为正向学习的应用。", sheetBody, false);
+                action + " · " + disciplineStopHint(mode) + "。计时期间可用正向学习和全局白名单应用。", sheetBody, false);
         timerConfirmation.setOnDismissListener(dialog -> {
             if (timerConfirmation == dialog) timerConfirmation = null;
         });
@@ -2477,7 +2472,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 LinearLayout infoCol = column(this);
                 infoCol.addView(text(this, a.name, 13, INK, true));
                 TextView clockTv = text(this,
-                        formatAbstinenceElapsed(elapsed) + " / " + FocusSheets.formatAbstinenceTarget(a.targetHours),
+                        formatAbstinenceElapsed(elapsed) + " / " + FocusSheets.formatAbstinenceTarget(a),
                         11, reached ? BLUE : MUTED, false);
                 clockTv.setFontFeatureSettings("tnum");
                 infoCol.addView(clockTv);
@@ -2569,7 +2564,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (layFlat) {
                 long remReset = Math.max(0L, FocusState.nextResetMs(now, zone) - now);
                 setTextIfChanged(homeCreditBig, formatHmsCountdown(remReset));
-                setTextIfChanged(homeLimitedSub, "躺平模式全天免限 · 今日暂停兑换时间");
+                setTextIfChanged(homeLimitedSub, "躺平模式 · 受限额度放开，今日暂停兑换");
             } else {
                 setTextIfChanged(homeCreditBig, shortMinutes(state.creditMs));
                 setTextIfChanged(homeLimitedSub, "今日已使用 " + duration(day == null ? 0 : day.limitedMs));
@@ -2607,7 +2602,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (abstinenceDashboard != null) abstinenceDashboard.update(now);
         for (AbstinenceTicker ticker : liveAbstinenceTickers) {
             setTextIfChanged(ticker.clockView(), formatAbstinenceElapsed(state.abstinenceElapsedMs(ticker.item(), now))
-                    + " / " + FocusSheets.formatAbstinenceTarget(ticker.item().targetHours));
+                    + " / " + FocusSheets.formatAbstinenceTarget(ticker.item()));
         }
 
         if (homeTimerIdleRow != null && homeTimerStopWatchRunRow != null && homeTimerCountdownRunRow != null) {
@@ -2762,7 +2757,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 }
             }
             if (redeemVoucherCaptionTv != null) {
-                String cap = layFlat ? "躺平模式生效中 · 全天应用免限，今日暂停兑换"
+                String cap = layFlat ? "躺平模式 · 受限额度放开，今日暂停兑换"
                         : s.readySourceCount() > 0 ? s.readySourceCount() + " 项正向行为已产生奖励"
                         : "完成正向行为后可在此一键领取";
                 setTextIfChanged(redeemVoucherCaptionTv, cap);
@@ -2903,6 +2898,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
             FocusSheets.showAppPicker(this, state, ruleCategory == 0, this::changed);
         });
         pages.addView(addRule, -1, -2);
+        gap(pages, 8);
+        TextView allowlist = secondaryButton(this, "全局白名单 · " + state.globalAllowlist.size() + " 个应用");
+        allowlist.setOnClickListener(v -> SoberModeUi.showGlobalAllowlist(this, state, this::changed));
+        pages.addView(allowlist, -1, -2);
         gap(pages, 22);
 
         pages.addView(text(this, "时段与兑换", 18, INK, true));
@@ -2918,7 +2917,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout sleepCopy = column(this);
         sleepCopy.addView(text(this, "睡眠时段", 16, INK, true));
         weight(sleepTop, sleepCopy);
-        SwitchView sleepSw = new SwitchView(this, state.bedtime);
+        SwitchView sleepSw = new SwitchView(this, state.bedtime && !state.bedtimeSuspended(FocusState.today().toString()));
         sleepSw.setContentDescription("启用睡眠时段");
         sleepSw.setOnToggleListener(on -> {
             long tNow = System.currentTimeMillis();
@@ -2929,6 +2928,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 return;
             }
             sleepSw.setChecked(true, false);
+            if (state.isLayFlat()) {
+                FocusSheets.confirmSuspendBedtime(this, state, this::changed);
+                return;
+            }
             int cost = state.earlySleepConfigCostMinutes(true, state.earlySleepRewardMinutes,
                     state.earlySleepRewardMinutes, false);
             boolean forcePaid = state.isSleepLocked(tNow, tZone);
@@ -3697,9 +3700,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void settleSober(boolean pause) {
         long now = System.currentTimeMillis();
         ZoneId zone = ZoneId.systemDefault();
+        boolean prepaid = state.soberStarted == 0;
         long refunded = pause ? state.pauseSober(now, zone) : state.stopSober(now, zone);
         soberChanged();
-        if (refunded > 0) toast("已退回 " + SoberModeUi.clockText(refunded));
+        if (prepaid && refunded > 0) toast("已退回 " + SoberModeUi.clockText(refunded));
     }
 
     private void toast(String message) {
@@ -3869,7 +3873,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                             homeBudgetCard,
                             R.drawable.guide_mascot_point,
                             "管理限制的应用",
-                            "新朋友见面礼 40 分钟已到账啦！点这里添加你想限制的娱乐应用～",
+                            "见面礼 60 分钟和 1 张躺平卡已到账！点这里添加你想限制的娱乐应用～",
                             20, 2));
                 }
                 if (homeDisciplineCardView != null) {

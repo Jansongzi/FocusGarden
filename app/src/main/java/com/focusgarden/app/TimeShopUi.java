@@ -2134,7 +2134,7 @@ pill.setSingleLine(true);
                 });
             } else {
                 infoDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
-                        "躺平卡（全天免限）",
+                        "躺平卡（放开受限额度）",
                         full ? "当前已持有上限 2 张躺平卡，可前往「背包 → 卡牌」或「设置 → 模式切换」开启使用。"
                                 : "每 2 张金色放纵卡可在下方合成台合成为 1 张紫色躺平卡。\n\n当前放纵卡："
                                 + state.indulgentPasses + "/2 张。",
@@ -3126,18 +3126,18 @@ pill.setSingleLine(true);
                         new ShopIllustrationView(activity, ShopIllustrationView.Kind.CARD, "lay_flat_card", 0f),
                         "躺平卡 × " + state.layFlatCards + "/" + FocusState.MAX_LAY_FLAT_CARDS,
                         layActive ? "生效中 · 明日04:00恢复"
-                                : "全天免限 · 暂停当日兑换",
+                                : "受限额度放开 · 暂停当日兑换",
                         layActive ? "生效中" : canLay ? "开启免限" : "暂无",
                         canLay, PURPLE, () -> confirmDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
-                                "消耗 1 张躺平卡开启全天免限？",
-                                "开启后今天一整天所有应用不受限制；储蓄罐冻结保持不变，明日 04:00 恢复正常模式。",
+                                "消耗 1 张躺平卡开启躺平？",
+                                "开启后放开受限应用额度，早睡锁机继续生效。时间消费仅从储蓄罐扣除，明日 04:00 恢复正常模式。",
                                 "取消", "立即躺平", false, () -> {
                                     if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
                                         suppressClose[0] = true;
                                         if (sheetRef[0] != null) sheetRef[0].dismiss();
                                         onUpdated.run();
-                                        Toast.makeText(activity, "已开启躺平模式，今日全天免限", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(activity, "已开启躺平模式，今日放开受限应用额度", Toast.LENGTH_SHORT).show();
                                         if (onGoHome != null) onGoHome.run();
                                         else activity.returnToHome();
                                     }

@@ -156,7 +156,7 @@ final class AbstinenceUi {
             addView(header);
             gap(this, 19);
 
-            String target = "目标 " + FocusSheets.formatAbstinenceTarget(item.targetHours);
+            String target = "目标 " + FocusSheets.formatAbstinenceTarget(item);
             String stage = String.format(Locale.ROOT, "第 %02d 阶段 · %s", item.completedCount + 1, target);
             addView(sectionHeading(activity, "当前目标", stage));
             gap(this, 10);
@@ -220,7 +220,7 @@ final class AbstinenceUi {
             stats.setBackground(shape(activity, SURFACE_SUBTLE, 14));
             progress = addStat(stats, "阶段完成度", INK, true);
             longest = addStat(stats, "历史最长", INK, true);
-            addStat(stats, "本阶奖励", BLUE, false).setText("+" + item.rewardMinutes + " 分钟");
+            addStat(stats, "本阶奖励", BLUE, false).setText(item.rewardLabel());
             goal.addView(stats);
 
             saving = item.dailySavingYuan > 0.001 ? text(activity, "", 12, MUTED, false) : null;
@@ -522,7 +522,7 @@ final class AbstinenceUi {
         chartCard.setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 16), dp(activity, 14));
         LinearLayout chHead = row(activity);
         weight(chHead, text(activity, "各轮坚持趋势", 16, INK, true));
-        chHead.addView(text(activity, "目标 " + FocusSheets.formatAbstinenceTarget(item.targetHours), 12, MUTED, false));
+        chHead.addView(text(activity, "目标 " + FocusSheets.formatAbstinenceTarget(item), 12, MUTED, false));
         chartCard.addView(chHead);
         gap(chartCard, 10);
         AbstinenceTrendChartView chartView = new AbstinenceTrendChartView(
@@ -629,23 +629,24 @@ final class AbstinenceUi {
         LinearLayout rInfo = column(activity);
         rInfo.addView(text(activity, "阶段激励结算", 16, INK, true));
         gap(rInfo, 2);
-        rInfo.addView(text(activity, "当前目标 " + FocusSheets.formatAbstinenceTarget(item.targetHours)
-                + " · 奖励 +" + item.rewardMinutes + " 分钟", 12, MUTED, false));
+        rInfo.addView(text(activity, "当前目标 " + FocusSheets.formatAbstinenceTarget(item)
+                + " · 奖励 " + item.rewardLabel(), 12, MUTED, false));
         weight(rHead, rInfo);
         rewCard.addView(rHead);
         gap(rewCard, 12);
 
-        // Two clean economic stat pills
-        LinearLayout statRow = row(activity);
-        statRow.addView(statTile(activity, "累计实得", item.totalEarnedMinutes + " 分钟", BLUE),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        space(statRow, 10);
-        statRow.addView(statTile(activity, "今日额度剩余",
-                        (capLeft / FocusState.MINUTE) + "/" + state.habitDailyCapMinutes + " 分",
-                        capLeft > 0L ? GREEN : AMBER),
-                new LinearLayout.LayoutParams(0, -2, 1f));
-        rewCard.addView(statRow);
-        gap(rewCard, 12);
+        if (item.customReward.isEmpty()) {
+            LinearLayout statRow = row(activity);
+            statRow.addView(statTile(activity, "累计实得", item.totalEarnedMinutes + " 分钟", BLUE),
+                    new LinearLayout.LayoutParams(0, -2, 1f));
+            space(statRow, 10);
+            statRow.addView(statTile(activity, "今日额度剩余",
+                            (capLeft / FocusState.MINUTE) + "/" + state.habitDailyCapMinutes + " 分",
+                            capLeft > 0L ? GREEN : AMBER),
+                    new LinearLayout.LayoutParams(0, -2, 1f));
+            rewCard.addView(statRow);
+            gap(rewCard, 12);
+        }
 
         if (guardRem > 0L) {
             rewCard.addView(text(activity, "防回溯护盾生效中（剩 " + formatSummaryDuration(guardRem) + "），期满后可正常领取。",
@@ -653,7 +654,16 @@ final class AbstinenceUi {
             gap(rewCard, 10);
         }
 
-        if (canClaim) {
+        if (canClaim && !item.customReward.isEmpty()) {
+            TextView claim = primaryButton(activity, "标记奖励已领取");
+            claim.setOnClickListener(v -> {
+                if (!state.claimCustomAbstinenceReward(item.id, System.currentTimeMillis(), zone)) return;
+                haptic(v, state.hapticFeedback, HapticKind.CONFIRM);
+                syncData.run();
+                Toast.makeText(activity, "已记录奖励 · " + item.customReward, Toast.LENGTH_SHORT).show();
+            });
+            rewCard.addView(claim, -1, -2);
+        } else if (canClaim) {
             boolean blocked = state.isLayFlat() || capLeft <= 0L;
             String btnText = state.isLayFlat() ? "躺平模式今日暂停"
                     : capLeft <= 0L ? "今日戒断额度已满（明日 04:00 后可领）"

@@ -42,17 +42,7 @@ final class SoberModeUi {
         if (!canStart(activity, state)) return;
 
         LinearLayout body = column(activity);
-        int spendableMin = (int) (state.totalSpendableMs() / FocusState.MINUTE);
         body.addView(text(activity, "可支配 " + duration(state.totalSpendableMs()), 15, INK, true));
-        if (spendableMin < 1) {
-            gap(body, 10);
-            TextView tip = text(activity,
-                    "可用时长与储蓄罐均不足 1 分钟，请先通过自律模式或打卡赚取时长后再开启目的模式",
-                    12, AMBER, false);
-            tip.setBackground(cardBg(activity, AMBER_SOFT, amberStroke(), 12));
-            tip.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
-            body.addView(tip, -1, -2);
-        }
         gap(body, 14);
         body.addView(text(activity, "目的应用", 13, INK_SUB, true));
         gap(body, 8);
@@ -85,7 +75,7 @@ final class SoberModeUi {
 
         appBtn.setOnClickListener(v -> {
             tapHaptic(v);
-            pickApps(activity, chosen, picked -> {
+            pickApps(activity, "选择目的应用", false, chosen, picked -> {
                 chosen.clear();
                 chosen.putAll(picked);
                 refreshChosenUi.run();
@@ -97,14 +87,12 @@ final class SoberModeUi {
 
         body.addView(text(activity, "使用时长（分钟）", 13, INK_SUB, true));
         gap(body, 8);
-        String defaultMin = String.valueOf(Math.max(1, Math.min(10, spendableMin)));
+        String defaultMin = "10";
         EditText minutes = styledInput(activity, "1–" + FocusState.MAX_SOBER_MINUTES, defaultMin, InputType.TYPE_CLASS_NUMBER);
         minutes.setFilters(new InputFilter[]{new InputFilter.LengthFilter(3)});
         body.addView(minutes, -1, -2);
         gap(body, 14);
-        TextView start = spendableMin >= 1
-                ? primaryButton(activity, "开启目的模式")
-                : pillButton(activity, "可支配时间不足", BLUE_DISABLED_BG, BLUE_DISABLED_TEXT, 14, 46);
+        TextView start = primaryButton(activity, "开启目的模式");
         body.addView(start, -1, -2);
         gap(body, 7);
         TextView appearance = secondaryButton(activity, "计时背景");
@@ -116,7 +104,7 @@ final class SoberModeUi {
 
         Dialog sheet = bottomSheet(activity, "开启目的模式", null, body, true,
                 "目的模式",
-                "先扣等额时长，期间仅可用所选应用，提前退出自动退回未用时长。");
+                "期间可用所选应用，仅按受限目标应用的实际使用扣费。");
         start.setOnClickListener(v -> {
             if (chosen.isEmpty()) {
                 message(activity, "请先选择至少一个目的应用");
@@ -188,7 +176,7 @@ final class SoberModeUi {
         body.addView(finish, -1, -2);
         Dialog sheet = bottomSheet(activity, "目的模式已暂停", null, body, true,
                 "目的模式",
-                "未用时长已退回，继续时重新扣除剩余时长。");
+                "继续后按受限目标应用的实际使用扣费。");
         resume.setOnClickListener(v -> {
             if (!canStart(activity, state)) return;
             if (!hasAnyLaunchablePurposeApp(activity, state)) {
@@ -222,7 +210,18 @@ final class SoberModeUi {
                 && activity.getPackageManager().getLaunchIntentForPackage(state.soberPackage) != null;
     }
 
-    private static void pickApps(MainActivity activity, Map<String, String> initialSelected,
+    static void showGlobalAllowlist(MainActivity activity, FocusState state, Runnable onChanged) {
+        Map<String, String> existing = new LinkedHashMap<>();
+        for (String pkg : state.globalAllowlist) existing.put(pkg, pkg);
+        pickApps(activity, "全局白名单", true, existing, picked -> {
+            state.globalAllowlist.clear();
+            state.globalAllowlist.addAll(picked.keySet());
+            onChanged.run();
+        });
+    }
+
+    private static void pickApps(MainActivity activity, String title, boolean allowEmpty,
+                                 Map<String, String> initialSelected,
                                  Consumer<Map<String, String>> onPicked) {
         List<AppCatalog.Entry> apps = AppCatalog.launchable(activity);
         if (apps.isEmpty()) {
@@ -283,7 +282,7 @@ final class SoberModeUi {
 
         TextView confirm = primaryButton(activity, "");
         Runnable refreshConfirm = () -> {
-            if (selected.isEmpty()) {
+            if (!allowEmpty && selected.isEmpty()) {
                 confirm.setText("请勾选至少一个应用");
                 confirm.setBackground(shape(activity, BLUE_DISABLED_BG, 14));
                 confirm.setTextColor(BLUE_DISABLED_TEXT);
@@ -309,7 +308,7 @@ final class SoberModeUi {
             @Override public void afterTextChanged(Editable s) {}
         });
 
-        Dialog picker = bottomSheet(activity, "选择目的应用", null, body, false);
+        Dialog picker = bottomSheet(activity, title, allowEmpty ? "目的模式之外，所选应用免于拦截和额度扣费。" : null, body, false);
         list.setOnItemClickListener((parent, row, position, id) -> {
             tapHaptic(row);
             AppCatalog.Entry entry = filtered.get(position);
@@ -319,7 +318,7 @@ final class SoberModeUi {
             refreshConfirm.run();
         });
         confirm.setOnClickListener(v -> {
-            if (selected.isEmpty()) {
+            if (!allowEmpty && selected.isEmpty()) {
                 haptic(v, true, HapticKind.REJECT);
                 message(activity, "请先勾选至少一个目的应用");
                 return;

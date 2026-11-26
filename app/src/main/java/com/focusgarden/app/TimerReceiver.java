@@ -37,7 +37,7 @@ public final class TimerReceiver extends BroadcastReceiver {
                 : FocusState.Transition.NONE;
         boolean resetChanged = store.state.syncResetDay(now, zone);
         boolean sleepCompleted = store.state.evaluateEarlySleep(now, zone);
-        boolean soberPaused = store.state.soberActive(now) && store.state.bedtimeAt(now, zone)
+        boolean soberPaused = store.state.soberActive(now) && store.state.isSleepLocked(now, zone)
                 && store.state.pauseSober(now, zone) > 0;
         boolean soberExpired = store.state.expireSober(now, zone);
         FocusState.Transition t2 = store.state.advance(now, zone);

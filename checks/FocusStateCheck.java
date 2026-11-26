@@ -35,6 +35,7 @@ final class FocusStateCheck {
         equal(true, state.setColorTheme(FocusState.PALETTE_SAGE));
         checkAppThemePurchase(noon);
         checkFreshInstallAndOnboarding(noon);
+        checkScopedRules(noon);
         equal(3, FocusState.INDULGENT_UNLOCK_DAYS);
         equal(5, FocusState.MAX_INDULGENT_CARDS);
         equal(2, FocusState.INDULGENT_CARDS_PER_LAY_FLAT);
@@ -164,26 +165,24 @@ final class FocusStateCheck {
         equal(true, capTest.isVaultFull());
         equal(0L, capTest.depositToVault(10 * MINUTE, noon + 1_000, UTC));
 
-        // Sober mode spends earned time (credit first, then vault) and refuses when insufficient
+        // Purpose sessions charge only time spent in selected LIMITED apps.
         extra.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
-        equal(false, extra.startSober(VIDEO, "Video", 30, noon, UTC));
-        equal(false, extra.soberActive(noon));
-        extra.creditMs = 0L;
-        equal(BUDGET, extra.restriction(VIDEO, noon, UTC));
         extra.creditMs = 4 * MINUTE;
         extra.vaultMs = 15 * MINUTE;
-        equal(true, extra.startSober(VIDEO, "Video", 10, noon, UTC));
+        var targets = java.util.Map.of(VIDEO, "Video", "test.unconfigured", "Documents");
+        equal(true, extra.startSober(targets, 30, noon, UTC));
+        equal(4 * MINUTE, extra.creditMs);
+        equal(15 * MINUTE, extra.vaultMs);
+        equal(NONE, extra.restriction("test.unconfigured", noon + MINUTE, UTC));
+        equal(SOBER, extra.restriction(STUDY, noon + MINUTE, UTC));
+        extra.addUsage("test.unconfigured", noon, noon + 10 * MINUTE, UTC);
+        equal(4 * MINUTE, extra.creditMs);
+        extra.addUsage(VIDEO, noon + 10 * MINUTE, noon + 16 * MINUTE, UTC);
         equal(0L, extra.creditMs);
-        equal(9 * MINUTE, extra.vaultMs);
-        equal(true, extra.soberActive(noon + 5 * MINUTE));
-        equal(NONE, extra.restriction(VIDEO, noon + 5 * MINUTE, UTC));
-        equal(FocusState.Restriction.SOBER, extra.restriction(STUDY, noon + 5 * MINUTE, UTC));
-        equal(FocusState.Restriction.SOBER, extra.restriction("test.unconfigured", noon + 5 * MINUTE, UTC));
-        extra.addUsage(VIDEO, noon + 9 * MINUTE, noon + 11 * MINUTE, UTC);
-        equal(0L, extra.used(VIDEO, "2026-11-22"));
-        equal(0L, extra.creditMs);
-        equal(false, extra.soberActive(noon + 10 * MINUTE));
-        equal(BUDGET, extra.restriction(VIDEO, noon + 10 * MINUTE, UTC));
+        equal(13 * MINUTE, extra.vaultMs);
+        equal(6 * MINUTE, extra.used(VIDEO, "2026-11-22"));
+        equal(0L, extra.stopSober(noon + 16 * MINUTE, UTC));
+        equal(BUDGET, extra.restriction(VIDEO, noon + 16 * MINUTE, UTC));
         checkSoberRefund(noon);
 
         // Early sleep requires bedtime=true AND claim window (1h before sleepStart or 4h after sleepEnd)
@@ -431,8 +430,8 @@ final class FocusStateCheck {
         eco.rules.remove("study1");
         equal(10, eco.ruleChangeCostMinutes(null, true));
         equal(0, eco.ruleChangeCostMinutes(limitedRule, false));
-        equal(15, eco.ruleChangeCostMinutes(limitedRule, true));
-        equal(15, eco.removeRuleCostMinutes(limitedRule));
+        equal(45, eco.ruleChangeCostMinutes(limitedRule, true));
+        equal(45, eco.removeRuleCostMinutes(limitedRule));
 
         // Batch app classification costs
         var batch = new FocusState();
@@ -769,22 +768,27 @@ final class FocusStateCheck {
         equal(10 * MINUTE, state.soberRemaining(noon - MINUTE));
         equal(false, state.startSober(STUDY, "Study", 1, noon + 100, UTC));
         equal(8 * MINUTE, state.pauseSober(noon + 2 * MINUTE, UTC));
-        equal(2 * MINUTE, state.creditMs);
+        equal(4 * MINUTE, state.creditMs);
         equal(15 * MINUTE, state.vaultMs);
-        equal(2 * MINUTE, state.day(FocusState.date(noon, UTC)).spentMs);
         equal(0L, state.pauseSober(noon + 2 * MINUTE, UTC));
         equal(true, state.resumeSober(noon + 3 * MINUTE, UTC));
-        equal(5 * MINUTE, state.stopSober(noon + 6 * MINUTE, UTC));
-        equal(0L, state.creditMs);
-        equal(14 * MINUTE, state.vaultMs);
-        equal(5 * MINUTE, state.day(FocusState.date(noon, UTC)).spentMs);
-        equal(1 * MINUTE, FocusState.usageOutsideSober(noon, noon + 6 * MINUTE, state.soberWindows));
         equal(0L, state.stopSober(noon + 6 * MINUTE, UTC));
+        equal(4 * MINUTE, state.creditMs);
+        equal(15 * MINUTE, state.vaultMs);
         equal(false, state.resumeSober(noon + 7 * MINUTE, UTC));
         equal(true, state.startSober(VIDEO, "Video", 1, noon + 8 * MINUTE, UTC));
         equal(true, state.expireSober(noon + 9 * MINUTE, UTC));
         equal(false, state.soberActive(noon + 9 * MINUTE));
-        equal(13 * MINUTE, state.vaultMs);
+
+        var oldPrepaid = new FocusState();
+        oldPrepaid.soberApps.put(VIDEO, "Video");
+        oldPrepaid.soberUntil = noon + 10 * MINUTE;
+        oldPrepaid.soberWindows.add(new FocusState.SoberWindow(noon, oldPrepaid.soberUntil));
+        oldPrepaid.soberVaultPaid = 4 * MINUTE;
+        oldPrepaid.soberPaidOn = FocusState.date(noon, UTC);
+        equal(7 * MINUTE, oldPrepaid.stopSober(noon + 3 * MINUTE, UTC));
+        equal(4 * MINUTE, oldPrepaid.vaultMs);
+        equal(3 * MINUTE, oldPrepaid.creditMs);
 
         var legacy = new FocusState();
         legacy.soberUntil = noon + 5 * MINUTE;
@@ -802,7 +806,7 @@ final class FocusStateCheck {
         chosen2.put(VIDEO, "Video");
         chosen2.put("test.docs", "Docs");
         equal(true, multi.startSober(chosen2, 10, noon, UTC));
-        equal(10 * MINUTE, multi.creditMs);
+        equal(20 * MINUTE, multi.creditMs);
         equal(true, multi.isSoberAllowed(VIDEO));
         equal(true, multi.isSoberAllowed("test.docs"));
         equal(false, multi.isSoberAllowed("com.android.launcher3"));
@@ -814,11 +818,11 @@ final class FocusStateCheck {
 
         equal(7 * MINUTE, multi.pauseSober(noon + 3 * MINUTE, UTC));
         equal(2, multi.soberApps.size());
-        equal(17 * MINUTE, multi.creditMs);
+        equal(20 * MINUTE, multi.creditMs);
         equal(true, multi.resumeSober(noon + 4 * MINUTE, UTC));
-        equal(10 * MINUTE, multi.creditMs);
+        equal(20 * MINUTE, multi.creditMs);
         equal(true, multi.isSoberAllowed("test.docs"));
-        equal(5 * MINUTE, multi.stopSober(noon + 6 * MINUTE, UTC));
+        equal(0L, multi.stopSober(noon + 6 * MINUTE, UTC));
         equal(0, multi.soberApps.size());
         equal("", multi.soberPackage);
         equal("", multi.soberSummaryLabel());
@@ -840,14 +844,14 @@ final class FocusStateCheck {
         equal(BUDGET, restrictedSober.restriction(VIDEO, noon, UTC));
         equal(true, restrictedSober.startSober(VIDEO, "Video", 10, noon, UTC));
         equal(0L, restrictedSober.creditMs);
-        equal(10 * MINUTE, restrictedSober.vaultMs);
+        equal(20 * MINUTE, restrictedSober.vaultMs);
         equal(NONE, restrictedSober.restriction(VIDEO, noon + MINUTE, UTC));
         equal(FocusState.Restriction.SOBER, restrictedSober.restriction("com.android.launcher3", noon + MINUTE, UTC));
         restrictedSober.addUsage(VIDEO, noon, noon + 3 * MINUTE, UTC);
         String todayStr = FocusState.date(noon, UTC);
-        equal(0L, restrictedSober.day(todayStr).limitedMs);
+        equal(3 * MINUTE, restrictedSober.day(todayStr).limitedMs);
         equal(0L, restrictedSober.creditMs);
-        equal(7 * MINUTE, restrictedSober.stopSober(noon + 3 * MINUTE, UTC));
+        equal(0L, restrictedSober.stopSober(noon + 3 * MINUTE, UTC));
         equal(17 * MINUTE, restrictedSober.vaultMs);
         equal(BUDGET, restrictedSober.restriction(VIDEO, noon + 4 * MINUTE, UTC));
 
@@ -882,9 +886,9 @@ final class FocusStateCheck {
         equal(FocusState.RateMode.LAY_FLAT, cards.rateMode);
         equal(FocusState.RateMode.SCHOLAR, cards.previousMode);
         equal(1, cards.layFlatCards);
-        // Everything unrestricted during LAY_FLAT (even bedtime & zero-budget restricted app)
+        // Ordinary budgets are open in LAY_FLAT while bedtime lock still applies.
         cards.bedtime = true;
-        equal(NONE, cards.restriction(VIDEO, at("2026-11-21T01:00:00Z"), UTC));
+        equal(BEDTIME, cards.restriction(VIDEO, at("2026-11-21T01:00:00Z"), UTC));
         cards.addUsage(VIDEO, nov20 + 20 * MINUTE, nov20 + 25 * MINUTE, UTC);
         equal(0L, cards.creditMs);
         equal(5 * MINUTE, cards.used(VIDEO, "2026-11-20"));
@@ -970,12 +974,12 @@ final class FocusStateCheck {
         // Sleep schedule range bounds & max 10h validation
         equal(true, FocusState.isValidSleepStart(21 * 60));
         equal(true, FocusState.isValidSleepStart(23 * 60 + 30));
-        equal(false, FocusState.isValidSleepStart(20 * 60 + 59));
-        equal(false, FocusState.isValidSleepStart(23 * 60 + 31));
+        equal(true, FocusState.isValidSleepStart(20 * 60 + 59));
+        equal(true, FocusState.isValidSleepStart(23 * 60 + 31));
         equal(true, FocusState.isValidSleepEnd(5 * 60));
         equal(true, FocusState.isValidSleepEnd(8 * 60 + 30));
-        equal(false, FocusState.isValidSleepEnd(4 * 60 + 59));
-        equal(false, FocusState.isValidSleepEnd(8 * 60 + 31));
+        equal(true, FocusState.isValidSleepEnd(4 * 60 + 59));
+        equal(true, FocusState.isValidSleepEnd(8 * 60 + 31));
         equal(600, FocusState.sleepDurationMinutes(21 * 60, 7 * 60));
         equal(true, FocusState.isValidSleepDuration(21 * 60, 7 * 60));
         equal(601, FocusState.sleepDurationMinutes(21 * 60, 7 * 60 + 1));
@@ -987,11 +991,11 @@ final class FocusStateCheck {
         equal(330, FocusState.sleepDurationMinutes(23 * 60 + 30, 5 * 60));
         equal(true, FocusState.isValidSleepSchedule(23 * 60 + 30, 5 * 60));
         equal(false, FocusState.isValidSleepSchedule(21 * 60, 8 * 60 + 30));
-        equal(false, FocusState.isValidSleepSchedule(20 * 60 + 30, 6 * 60));
-        equal(FocusState.SLEEP_START_MIN_MINUTE, FocusState.clampSleepStart(18 * 60));
-        equal(FocusState.SLEEP_START_MAX_MINUTE, FocusState.clampSleepStart(23 * 60 + 55));
-        equal(FocusState.SLEEP_END_MIN_MINUTE, FocusState.clampSleepEnd(4 * 60 + 30));
-        equal(FocusState.SLEEP_END_MAX_MINUTE, FocusState.clampSleepEnd(9 * 60));
+        equal(true, FocusState.isValidSleepSchedule(20 * 60 + 30, 6 * 60));
+        equal(18 * 60, FocusState.clampSleepStart(18 * 60));
+        equal(23 * 60 + 55, FocusState.clampSleepStart(23 * 60 + 55));
+        equal(4 * 60 + 30, FocusState.clampSleepEnd(4 * 60 + 30));
+        equal(9 * 60, FocusState.clampSleepEnd(9 * 60));
 
         // 3. Abstinence lifecycle + anti-reclaim edit guard + calendar relapse diary + permanent stats
         var abs = new FocusState();
@@ -1416,6 +1420,53 @@ final class FocusStateCheck {
         equal(0L, ac.claimAbstinence("backfill", at("2026-11-27T10:00:00Z"), UTC));
     }
 
+    private static void checkScopedRules(long noon) {
+        var state = new FocusState();
+        state.globalAllowlist.add(VIDEO);
+        state.putRule(VIDEO, new FocusState.Rule("Video", LIMITED));
+        equal(NONE, state.restriction(VIDEO, noon, UTC));
+        state.addUsage(VIDEO, noon, noon + MINUTE, UTC);
+        equal(0L, state.day(FocusState.date(noon, UTC)).spentMs);
+        equal(true, state.startSober("test.free", "Free", 5, noon, UTC));
+        equal(SOBER, state.restriction(VIDEO, noon + MINUTE, UTC));
+        state.stopSober(noon + 2 * MINUTE, UTC);
+
+        long night = at("2026-11-22T23:30:00Z");
+        long reset = at("2026-11-23T04:00:00Z");
+        state.enableBedtime(noon, UTC);
+        state.layFlatCards = 1;
+        state.creditMs = 60 * MINUTE;
+        state.vaultMs = 5 * MINUTE;
+        equal(true, state.activateLayFlatMode(noon, UTC));
+        equal(BEDTIME, state.restriction("test.other", night, UTC));
+        equal(NONE, state.restriction(VIDEO, night, UTC));
+        equal(false, state.spendTime(6 * MINUTE, "CONFIG", "test", "", night, UTC));
+        equal(true, state.spendTime(2 * MINUTE, "CONFIG", "test", "", night, UTC));
+        equal(60 * MINUTE, state.creditMs);
+        equal(3 * MINUTE, state.vaultMs);
+        equal(true, state.exitActiveSleepLock(night, UTC));
+        equal(3 * MINUTE, state.vaultMs);
+        equal(false, state.isSleepLocked(reset - 1, UTC));
+        equal(true, state.isSleepLocked(reset, UTC));
+
+        var planned = new FocusState();
+        LocalDate today = FocusState.logicDate(reset - 1, UTC);
+        equal(false, planned.scheduleTodo("t1", "Today", 5, today, reset - 1, UTC));
+        equal(true, planned.scheduleTodo("t2", "Tomorrow", 5, today.plusDays(1), reset - 1, UTC));
+        planned.toggleTodo("t2", today);
+        equal(false, planned.todos.get("t2").done);
+        planned.toggleTodo("t2", FocusState.logicDate(reset, UTC));
+        equal(true, planned.todos.get("t2").done);
+
+        planned.addAbstinenceTrackedMinutes("g", "Book", noon, 95, 15, "", 0, 0,
+                java.util.List.of(), noon, "一本书");
+        equal(false, planned.canClaimAbstinence(planned.abstinences.get("g"), noon + 94 * MINUTE));
+        equal(0L, planned.claimAbstinence("g", noon + 95 * MINUTE, UTC));
+        equal(true, planned.claimCustomAbstinenceReward("g", noon + 95 * MINUTE, UTC));
+        equal(false, planned.claimCustomAbstinenceReward("g", noon + 96 * MINUTE, UTC));
+        equal(0L, planned.creditMs);
+    }
+
     private static void checkFreshInstallAndOnboarding(long noon) {
         FocusState fresh = new FocusState();
         fresh.applyFreshInstallDefaults(noon, UTC);
@@ -1424,7 +1475,8 @@ final class FocusStateCheck {
         equal(50, fresh.learningPercent);
         equal(50, fresh.focusPercent);
         equal(50, fresh.offlinePercent);
-        equal(40L * MINUTE, fresh.creditMs);
+        equal(60L * MINUTE, fresh.creditMs);
+        equal(1, fresh.layFlatCards);
         equal("2026-11-22", fresh.lastResetDate);
         equal(FocusState.PALETTE_SAGE, fresh.colorTheme);
         equal(true, fresh.isShopItemOwned(ShopCatalog.SAGE_APP_THEME));
@@ -1450,7 +1502,8 @@ final class FocusStateCheck {
 
         // Same-day reset check preserves initial 40m credit; crossing 04:00 resets it as normal
         equal(false, fresh.syncResetDay(noon + 60_000L, UTC));
-        equal(40L * MINUTE, fresh.creditMs);
+        equal(60L * MINUTE, fresh.creditMs);
+        equal(1, fresh.layFlatCards);
         equal(true, fresh.syncResetDay(at("2026-11-23T04:05:00Z"), UTC));
         equal(0L, fresh.creditMs);
     }

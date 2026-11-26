@@ -66,6 +66,13 @@ public final class KeepAliveService extends Service implements SensorEventListen
         }
     };
 
+    private final Runnable notificationTick = new Runnable() {
+        @Override public void run() {
+            refreshNotification();
+            main.postDelayed(this, 15_000L);
+        }
+    };
+
     private static boolean shouldStayAlive(FocusState state) {
         return state.floatingBall || state.offlineRunning() || state.active();
     }
@@ -91,6 +98,8 @@ public final class KeepAliveService extends Service implements SensorEventListen
         updateFloatingBall();
         main.removeCallbacks(heartbeatTick);
         main.postDelayed(heartbeatTick, HEARTBEAT_MS);
+        main.removeCallbacks(notificationTick);
+        main.postDelayed(notificationTick, 15_000L);
         return START_STICKY;
     }
 
@@ -119,14 +128,18 @@ public final class KeepAliveService extends Service implements SensorEventListen
         String title = state.offlineRunning() ? "自律模式 · 正计时进行中"
                 : state.active() ? "自律模式 · 倒计时进行中"
                 : "松时后台守护中";
-        String body = state.offlineRunning()
+        String body = state.isLayFlat() ? "受限应用额度不限"
+                : "受限应用剩余 " + GardenUi.duration(state.creditMs);
+        String sub = state.offlineRunning()
                 ? "已持续自律 " + GardenUi.duration(state.offlineElapsed(System.currentTimeMillis()))
                 : "轻触返回松时";
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(title)
                 .setContentText(body)
+                .setStyle(new Notification.BigTextStyle().bigText(body + "\n" + sub))
                 .setContentIntent(FocusWidget.openApp(this))
+                .setOnlyAlertOnce(true)
                 .setOngoing(true)
                 .build();
     }
@@ -382,6 +395,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
 
     @Override public void onDestroy() {
         main.removeCallbacks(heartbeatTick);
+        main.removeCallbacks(notificationTick);
         removeFloatingBall();
         if (stepListenerActive && sensorManager != null) {
             sensorManager.unregisterListener(this);

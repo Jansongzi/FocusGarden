@@ -198,7 +198,7 @@ final class SleepLockUi extends Dialog {
         weight(bottomRow, delayBtn);
         space(bottomRow, 10);
 
-        TextView exitBtn = glassButton(activity, "主动退出 (35分)", 0x42f04438, 0x70ff8a80);
+        TextView exitBtn = glassButton(activity, state.isLayFlat() ? "暂停至重置" : "主动退出 (35分)", 0x42f04438, 0x70ff8a80);
         exitBtn.setOnClickListener(v -> handleExitLock(v));
         weight(bottomRow, exitBtn);
         content.addView(bottomRow, -1, -2);
@@ -232,7 +232,8 @@ final class SleepLockUi extends Dialog {
     void reloadBackground() {
         hasPhotoBackdrop = TimerAppearance.Mode.SLEEP.showIn(state, backdropPhoto);
         backdropPhoto.setVisibility(hasPhotoBackdrop ? View.VISIBLE : View.GONE);
-        FocusState.BlockAppearance builtIn = FocusState.builtInBlockAppearance(state.sleepLockBackgroundId);
+        FocusState.BlockAppearance builtIn = FocusState.builtInBlockAppearance(
+                TimerAppearance.Mode.SLEEP.currentForSession(activity, state));
         if (builtIn != null && !builtIn.sleepText().isEmpty()) {
             promptView.setText(builtIn.displayText(FocusState.Restriction.BEDTIME));
             promptView.setVisibility(View.VISIBLE);
@@ -249,7 +250,8 @@ final class SleepLockUi extends Dialog {
             infoDialog(activity, R.drawable.ic_shield, RED_SOFT, RED,
                     "可支配时间不足 " + FocusState.SLEEP_CONFIG_COST_MINUTES + " 分钟",
                     "早睡锁机期间修改延后必须消耗 " + FocusState.SLEEP_CONFIG_COST_MINUTES
-                            + " 分钟自由时间。\n\n当前可支配时间（可用 + 储蓄罐）：" + duration(state.totalSpendableMs()) + "。",
+                            + " 分钟自由时间。\n\n" + (state.isLayFlat() ? "储蓄罐余额：" : "当前可支配时间：")
+                            + duration(state.totalSpendableMs()) + "。",
                     "继续早睡");
             return;
         }
@@ -263,7 +265,7 @@ final class SleepLockUi extends Dialog {
             }
             confirmDialog(activity, R.drawable.ic_clock, AMBER_SOFT, AMBER,
                     "消耗 35 分钟延后入睡时间？",
-                    "入睡时间将修改为 " + clock(newStart) + "。\n\n本次操作将立即扣除 35 分钟自由时间（优先扣可用，不足扣储蓄罐），且本轮早睡挑战判定失败、明天不可领取奖励。",
+                    "入睡时间将修改为 " + clock(newStart) + "。\n\n" + (state.isLayFlat() ? "仅从储蓄罐扣除 35 分钟" : "扣除 35 分钟自由时间") + "，本轮早睡挑战不可领奖。",
                     "取消", "消耗 35 分钟延后", true, () -> {
                         long now = System.currentTimeMillis();
                         if (state.delayActiveSleepLock(newStart, state.sleepEnd, now, ZoneId.systemDefault())) {
@@ -280,6 +282,10 @@ final class SleepLockUi extends Dialog {
     }
 
     private void handleExitLock(View v) {
+        if (state.isLayFlat()) {
+            FocusSheets.confirmSuspendBedtime(activity, state, onStateChanged);
+            return;
+        }
         long costMs = FocusState.SLEEP_CONFIG_COST_MINUTES * FocusState.MINUTE;
         if (!state.canAfford(costMs)) {
             haptic(v, state.hapticFeedback, HapticKind.REJECT);

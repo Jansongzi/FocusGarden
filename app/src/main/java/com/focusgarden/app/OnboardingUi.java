@@ -617,6 +617,13 @@ final class OnboardingUi {
 
     /** Pop-out angry chibi modal shown when the configured sleep span exceeds 10 hours. */
     static void showSleepTooLongDialog(Activity activity) {
+        showMascotPrompt(activity, R.drawable.guide_mascot_sleep_angry,
+                "请调整睡眠时段", "入睡和起床时间需要不同，锁机最长 10 小时。",
+                null, "知道啦", null);
+    }
+
+    static void showMascotPrompt(Activity activity, int imageRes, String title, String detail,
+                                 String cancel, String confirm, Runnable onConfirm) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCancelable(true);
@@ -648,25 +655,36 @@ final class OnboardingUi {
         copyCol.setMinimumHeight(dp(activity, 82));
         copyCol.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView titleTv = text(activity, "不能睡这么久啦！", 19, INK, true);
+        TextView titleTv = text(activity, title, 19, INK, true);
         titleTv.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
         copyCol.addView(titleTv);
         gap(copyCol, 6);
 
-        TextView subTv = text(activity, "睡眠时间不能超过 10 小时哦～", 13, INK_SUB, false);
+        TextView subTv = text(activity, detail, 13, INK_SUB, false);
         subTv.setLineSpacing(dp(activity, 2.5f), 1.08f);
         subTv.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
         copyCol.addView(subTv);
         card.addView(copyCol, -1, -2);
         gap(card, 16);
 
-        TextView okBtn = pillButton(activity, "知道啦", BLUE, ON_ACCENT, 14, 46);
-        okBtn.setTextSize(15f);
+        TextView okBtn = pillButton(activity, confirm, BLUE, ON_ACCENT, 14, 46);
+        okBtn.setTextSize(14f);
         okBtn.setOnClickListener(v -> {
             tapHaptic(v);
             dialog.dismiss();
+            if (onConfirm != null) onConfirm.run();
         });
-        card.addView(okBtn, -1, -2);
+        if (cancel == null) {
+            card.addView(okBtn, -1, -2);
+        } else {
+            LinearLayout actions = row(activity);
+            TextView cancelBtn = pillButton(activity, cancel, SURFACE_SUBTLE, INK_SUB, 14, 46);
+            cancelBtn.setOnClickListener(v -> dialog.dismiss());
+            weight(actions, cancelBtn);
+            space(actions, 8);
+            weight(actions, okBtn);
+            card.addView(actions);
+        }
 
         FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(-1, -2);
         cardLp.topMargin = dp(activity, 24);
@@ -686,7 +704,7 @@ final class OnboardingUi {
         stage.addView(footShadow, shadowLp);
 
         ImageView mascotImg = new ImageView(activity);
-        mascotImg.setImageResource(R.drawable.guide_mascot_sleep_angry);
+        mascotImg.setImageResource(imageRes);
         mascotImg.setScaleType(ImageView.ScaleType.FIT_CENTER);
         mascotImg.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         mascotImg.setOutlineProvider(null);
