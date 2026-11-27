@@ -93,6 +93,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff161013 : 0xfffaf1f4;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff17120e : 0xfffbf4ec;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff110f1a : 0xfff5f3fc;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff14110d : 0xfff5efe4;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff0c151c : 0xffeef6f9;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff12110f : 0xfff4f0e8;
                 default -> isDark() ? 0xff141210 : 0xfffaf7f1;
             };
         }
@@ -102,6 +105,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff21181c : 0xfffffbf8;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff221b15 : 0xfffffdf8;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff1b1729 : 0xfffdfcff;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff1e1913 : 0xfffdfaf3;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff13202a : 0xfff8fcfe;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff1c1a17 : 0xfffdfaf4;
                 default -> isDark() ? 0xff1c1915 : 0xfffffcf6;
             };
         }
@@ -111,6 +117,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff3d2d34 : 0xfff8dce6;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff403226 : 0xfffce9d4;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff362f4f : 0xffeae4ff;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff3b3126 : 0xffe1d4c0;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff263e4f : 0xffcfe4ec;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff39342c : 0xffded5c4;
                 default -> isDark() ? 0xff302921 : 0xffefe6d7;
             };
         }
@@ -120,6 +129,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff261c21 : 0xfffffbf8;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff261f18 : 0xfffffdf8;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff201b30 : 0xfffdfcff;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff231d16 : 0xfffdfaf3;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff162631 : 0xfff8fcfe;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff211e1a : 0xfffdfaf4;
                 default -> isDark() ? 0xff201c17 : 0xfffffcf6;
             };
         }
@@ -129,6 +141,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff402f37 : 0xfff3d4df;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff453528 : 0xfff5ddc2;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff3c3357 : 0xffdfd6fa;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff3f3529 : 0xffe1d4c0;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff294456 : 0xffcfe4ec;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff3d372e : 0xffded5c4;
                 default -> isDark() ? 0xff332c24 : 0xffefe8dc;
             };
         }
@@ -138,6 +153,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff261c21 : 0xfffffbf8;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff261f18 : 0xfffffdf8;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff201b30 : 0xfffdfcff;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff241e17 : 0xfffdfaf3;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff162631 : 0xfff8fcfe;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff211e1a : 0xfffdfaf4;
                 default -> isDark() ? 0xff231e19 : 0xfffffcf6;
             };
         }
@@ -147,6 +165,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff402f37 : 0xfff3d4df;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff453528 : 0xfff5ddc2;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff3c3357 : 0xffdfd6fa;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff3f3529 : 0xffe1d4c0;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff294456 : 0xffcfe4ec;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff3d372e : 0xffded5c4;
                 default -> isDark() ? 0xff373028 : 0xffebe2d4;
             };
         }
@@ -160,6 +181,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff9e506a : 0xffe49cb1;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xffb36119 : 0xffec994b;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff6950c9 : 0xffa692f5;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff8a5228 : 0xffc99364;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff167b80 : 0xff75c8cb;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff91621d : 0xffd4a962;
                 default -> isDark() ? 0xff3d5478 : 0xffabc4e6;
             };
         }
@@ -169,6 +193,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff2b2025 : 0xfffffbf8;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff2c231b : 0xfffffdf8;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff241f36 : 0xfffdfcff;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff282119 : 0xfffdfaf3;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff1a2b38 : 0xfff8fcfe;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff26231e : 0xfffdfaf4;
                 default -> isDark() ? 0xff29241e : 0xfffaf6ee;
             };
         }
@@ -179,6 +206,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xfffaf1f4 : 0xff332229;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xfffbf4ec : 0xff332418;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xfff5f3fc : 0xff211b33;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xfff5efe4 : 0xff2d241b;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xffeef8fb : 0xff142834;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xfff5efe4 : 0xff23201b;
                 default -> isDark() ? 0xfff3efe8 : 0xff393d46;
             };
         }
@@ -188,6 +218,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xffe8c6d2 : 0xffa64d69;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xffeccaa8 : 0xffad530b;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xffd5cbff : 0xff5a3fd1;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xffe2c5a6 : 0xff9b5d2e;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xffa3e0e3 : 0xff0e8a8c;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xffe6cc9c : 0xffb47824;
                 default -> isDark() ? 0xffdfc9aa : 0xff79664d;
             };
         }
@@ -197,6 +230,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff947d87 : 0xff997f8a;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff968271 : 0xff9a826e;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff8b81a6 : 0xff877ea1;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff928270 : 0xff948270;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff688b99 : 0xff7b99a8;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff8c8375 : 0xff8d8476;
                 default -> isDark() ? 0xff9c9182 : 0xffa39885;
             };
         }
@@ -206,6 +242,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff38222c : 0xfff8dce6;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff3a2717 : 0xfffce9d4;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff2d234a : 0xffeae4ff;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff352619 : 0xfff3e3cf;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff14343c : 0xffd7f1f2;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff332917 : 0xfff5e8ce;
                 default -> isDark() ? 0xff1c2f50 : 0xffe6effd;
             };
         }
@@ -215,6 +254,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xffea9bb3 : 0xffa64d69;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xfff5a85b : 0xffad530b;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xffb39dff : 0xff5a3fd1;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xffd99b62 : 0xff9b5d2e;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff3cd6cf : 0xff0e8a8c;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xffeab558 : 0xffb47824;
                 default -> isDark() ? 0xff6ea4ff : 0xff3278f6;
             };
         }
@@ -224,6 +266,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xffea9bb3 : 0xffa64d69;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xfff5a85b : 0xffad530b;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xffb39dff : 0xff5a3fd1;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xffd99b62 : 0xff9b5d2e;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff3cd6cf : 0xff0e8a8c;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xffeab558 : 0xffb47824;
                 default -> 0xff3278f6;
             };
         }
@@ -233,6 +278,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff2a2025 : 0xfff2e6eb;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff2a2119 : 0xfff3eae0;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff231e34 : 0xffece8f7;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff272019 : 0xffeae0d2;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff192935 : 0xffe4eef2;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff24211c : 0xffe9e3d7;
                 default -> isDark() ? 0xff28231d : 0xffedeae4;
             };
         }
@@ -242,6 +290,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff7a646e : 0xffb098a2;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff7d6958 : 0xffb29d8a;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff73698f : 0xffa39ab8;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff786958 : 0xffa89784;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff5a7b89 : 0xff8eaab7;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff787064 : 0xffa39a8c;
                 default -> isDark() ? 0xff7e7467 : 0xffa39885;
             };
         }
@@ -251,6 +302,9 @@ final class TimeShopUi {
                 case FocusState.PALETTE_SAKURA -> isDark() ? 0xff47353d : 0xffe3cdd6;
                 case FocusState.PALETTE_INDULGENT -> isDark() ? 0xff4f3e2f : 0xffe4d2be;
                 case FocusState.PALETTE_LAY_FLAT -> isDark() ? 0xff423a5c : 0xffd7cff0;
+                case FocusState.PALETTE_JOURNAL -> isDark() ? 0xff45392c : 0xffdccbb4;
+                case FocusState.PALETTE_AURORA -> isDark() ? 0xff2c485c : 0xffc2dde6;
+                case FocusState.PALETTE_STUDY -> isDark() ? 0xff423c33 : 0xffd9cfbe;
                 default -> isDark() ? 0xff3b342c : 0xffdfd8cc;
             };
         }
@@ -596,18 +650,98 @@ final class TimeShopUi {
         }
 
         private void drawTheme(Canvas canvas, float w, float h, Context ctx) {
-            int[] colors = ShopCatalog.appTheme(key).swatches();
-            float radius = dp(ctx, 6);
-            paint.setColor(colors[1]);
-            canvas.drawRoundRect(w * .16f, h * .15f, w * .84f, h * .86f, radius, radius, paint);
-            float edge = dp(ctx, 2);
-            paint.setColor(colors[3]);
-            canvas.drawRoundRect(w * .16f + edge, h * .15f + edge, w * .84f - edge, h * .86f - edge,
-                    radius, radius, paint);
-            paint.setColor(colors[0]);
-            canvas.drawRoundRect(w * .25f, h * .26f, w * .75f, h * .44f, radius, radius, paint);
-            paint.setColor(colors[2]);
-            canvas.drawRoundRect(w * .25f, h * .51f, w * .75f, h * .72f, radius, radius, paint);
+            ShopCatalog.AppTheme theme = ShopCatalog.appTheme(key);
+            if (theme == null) return;
+            ThemePreviewTokens t = previewTokens(theme.palette(), isDark());
+            float left = w * 0.16f;
+            float right = w * 0.84f;
+            float top = h * 0.12f;
+            float bot = h * 0.88f;
+            float cardR = dp(ctx, Math.max(4f, t.cardRadiusDp() * 0.42f));
+
+            rect.set(left, top, right, bot);
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(t.paper());
+            canvas.drawRoundRect(rect, cardR, cardR, paint);
+
+            path.reset();
+            path.addRoundRect(rect, cardR, cardR, Path.Direction.CW);
+            canvas.save();
+            canvas.clipPath(path);
+
+            // Top sky wash
+            paint.setShader(new LinearGradient(0f, top, 0f, top + (bot - top) * 0.48f,
+                    RedeemUi.withAlpha(t.heroStart(), isDark() ? 115 : 85),
+                    t.heroStart() & 0x00ffffff, Shader.TileMode.CLAMP));
+            canvas.drawRect(left, top, right, top + (bot - top) * 0.48f, paint);
+            paint.setShader(null);
+
+            // Miniature atmosphere motif
+            switch (theme.palette()) {
+                case FocusState.PALETTE_SAKURA -> {
+                    RedeemUi.drawSakuraPetal(canvas, path2, accentPaint, w * 0.34f, top + dp(ctx, 10), dp(ctx, 3.8f), -25f, 0.85f, t.accent());
+                    RedeemUi.drawSakuraPetal(canvas, path2, accentPaint, w * 0.64f, top + dp(ctx, 14), dp(ctx, 3.2f), 32f, 0.9f, t.heroStart());
+                }
+                case FocusState.PALETTE_JOURNAL -> {
+                    paint.setColor(RedeemUi.withAlpha(t.accent(), 72));
+                    float step = dp(ctx, 7);
+                    for (float gx = left + dp(ctx, 6); gx < right - dp(ctx, 4); gx += step) {
+                        for (float gy = top + dp(ctx, 5); gy < top + dp(ctx, 19); gy += step) {
+                            canvas.drawCircle(gx, gy, dp(ctx, 0.9f), paint);
+                        }
+                    }
+                }
+                case FocusState.PALETTE_AURORA -> {
+                    int[] cols = {0xff2dd4bf, 0xff38bdf8, 0xffa78bfa};
+                    RedeemUi.drawAuroraCurve(canvas, path2, strokePaint,
+                            left, top + dp(ctx, 14), w * 0.5f, top + dp(ctx, 4), right, top + dp(ctx, 12),
+                            0f, 1f, dp(ctx, 3), 0.7f, dp(ctx, 3.5f), cols, 175);
+                    RedeemUi.drawPrismDiamond(canvas, path2, accentPaint, w * 0.68f, top + dp(ctx, 9), dp(ctx, 2.8f), 15f, 0xff99f6e4);
+                }
+                case FocusState.PALETTE_STUDY -> {
+                    paint.setShader(new RadialGradient(w * 0.46f, top + dp(ctx, 3), dp(ctx, 26),
+                            new int[]{0x88f5c45e, 0x00f5c45e}, new float[]{0f, 1f}, Shader.TileMode.CLAMP));
+                    canvas.drawCircle(w * 0.46f, top + dp(ctx, 3), dp(ctx, 26), paint);
+                    paint.setShader(null);
+                }
+                default -> {
+                    paint.setColor(isDark() ? 0x88e2e8f0 : 0xbbffffff);
+                    canvas.drawCircle(w * 0.36f, top + dp(ctx, 11), dp(ctx, 4.2f), paint);
+                    canvas.drawCircle(w * 0.44f, top + dp(ctx, 12), dp(ctx, 3.2f), paint);
+                    canvas.drawCircle(w * 0.64f, top + dp(ctx, 9), dp(ctx, 3.4f), paint);
+                }
+            }
+
+            // Inner miniature Home card
+            float pad = dp(ctx, 5);
+            float miniTop = h * 0.38f;
+            inner.set(left + pad, miniTop, right - pad, bot - pad);
+            float innerR = dp(ctx, Math.max(3f, t.cardRadiusDp() * 0.28f));
+            paint.setColor(t.card());
+            canvas.drawRoundRect(inner, innerR, innerR, paint);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setColor(t.border());
+            strokePaint.setStrokeWidth(dp(ctx, 0.9f));
+            canvas.drawRoundRect(inner, innerR, innerR, strokePaint);
+
+            // Mini lines & pill inside card
+            paint.setColor(t.ink());
+            rect.set(inner.left + dp(ctx, 5), inner.top + dp(ctx, 6), inner.left + dp(ctx, 21), inner.top + dp(ctx, 9.5f));
+            canvas.drawRoundRect(rect, dp(ctx, 1.5f), dp(ctx, 1.5f), paint);
+            paint.setColor(t.accentSoft());
+            rect.set(inner.left + dp(ctx, 5), inner.top + dp(ctx, 13), inner.right - dp(ctx, 16), inner.top + dp(ctx, 16));
+            canvas.drawRoundRect(rect, dp(ctx, 1.5f), dp(ctx, 1.5f), paint);
+            paint.setColor(t.accent());
+            rect.set(inner.right - dp(ctx, 17), inner.bottom - dp(ctx, 11), inner.right - dp(ctx, 4.5f), inner.bottom - dp(ctx, 4.5f));
+            canvas.drawRoundRect(rect, dp(ctx, 3.2f), dp(ctx, 3.2f), paint);
+
+            canvas.restore();
+
+            rect.set(left, top, right, bot);
+            strokePaint.setColor(t.border());
+            strokePaint.setStrokeWidth(dp(ctx, 1.2f));
+            canvas.drawRoundRect(rect, cardR, cardR, strokePaint);
         }
 
         private void drawCard(Canvas canvas, float w, float h, Context ctx) {
@@ -1390,24 +1524,86 @@ final class TimeShopUi {
             ShopCatalog.RedeemEffectPalette fx = ShopCatalog.redeemEffect(key);
             float cx = w * 0.5f;
             float cy = h * 0.48f;
-            float r = Math.min(w, h) * 0.28f;
-
-            paint.setStyle(Paint.Style.FILL);
+            float r = Math.min(w, h) * 0.30f;
             int[] cs = fx.colors();
+            String kind = fx.shapeKind();
+
+            paint.setShader(null);
+            paint.setStyle(Paint.Style.FILL);
             int c0 = cs[0] & 0x00ffffff;
-            paint.setShader(new LinearGradient(cx - r, cy - r, cx + r, cy + r,
-                    0x55000000 | c0, 0x22000000 | c0, Shader.TileMode.CLAMP));
-            canvas.drawCircle(cx, cy, r * 1.15f, paint);
+            int c1 = cs[1 % cs.length] & 0x00ffffff;
+            paint.setShader(new RadialGradient(cx, cy, r * 1.32f,
+                    new int[]{0x48000000 | c0, 0x1c000000 | c1, 0x00000000 | c1},
+                    new float[]{0f, 0.58f, 1f}, Shader.TileMode.CLAMP));
+            canvas.drawCircle(cx, cy, r * 1.30f, paint);
             paint.setShader(null);
 
-            strokePaint.setStyle(Paint.Style.STROKE);
-            strokePaint.setStrokeWidth(dp(ctx, 1.4f));
-            strokePaint.setColor(cs[0]);
-            canvas.drawCircle(cx, cy, r * 0.92f, strokePaint);
+            if ("comet".equals(kind)) {
+                path.reset();
+                path.moveTo(cx - r * 0.96f, cy + r * 0.58f);
+                path.quadTo(cx - r * 0.14f, cy + r * 0.18f, cx + r * 0.58f, cy - r * 0.44f);
+                strokePaint.setStyle(Paint.Style.STROKE);
+                strokePaint.setStrokeCap(Paint.Cap.ROUND);
+                strokePaint.setStrokeWidth(dp(ctx, 5.5f));
+                strokePaint.setColor(0x55000000 | c0);
+                canvas.drawPath(path, strokePaint);
+                strokePaint.setStrokeWidth(dp(ctx, 2.2f));
+                strokePaint.setColor(cs[1 % cs.length]);
+                canvas.drawPath(path, strokePaint);
 
-            drawSpark(canvas, cx, cy, dp(ctx, 10f), cs[0]);
-            drawSpark(canvas, cx - r * 0.65f, cy - r * 0.55f, dp(ctx, 5f), cs[1 % cs.length]);
-            drawSpark(canvas, cx + r * 0.68f, cy + r * 0.48f, dp(ctx, 4.5f), cs[2 % cs.length]);
+                float hx = cx + r * 0.58f;
+                float hy = cy - r * 0.44f;
+                paint.setColor(0x66000000 | c1);
+                canvas.drawCircle(hx, hy, dp(ctx, 6.5f), paint);
+                RedeemUi.drawFourStar(canvas, path, accentPaint, hx, hy, dp(ctx, 7.5f), 0xffffffff);
+                RedeemUi.drawFourStar(canvas, path, accentPaint, cx - r * 0.52f, cy - r * 0.32f, dp(ctx, 3.8f), cs[1 % cs.length]);
+                RedeemUi.drawFourStar(canvas, path, accentPaint, cx + r * 0.18f, cy + r * 0.54f, dp(ctx, 3.4f), cs[2 % cs.length]);
+            } else if ("petal".equals(kind)) {
+                path.reset();
+                path.moveTo(cx - r * 0.90f, cy + r * 0.35f);
+                path.quadTo(cx, cy - r * 0.45f, cx + r * 0.92f, cy + r * 0.10f);
+                strokePaint.setStyle(Paint.Style.STROKE);
+                strokePaint.setStrokeCap(Paint.Cap.ROUND);
+                strokePaint.setStrokeWidth(dp(ctx, 1.3f));
+                strokePaint.setColor(0x66000000 | (cs[2 % cs.length] & 0x00ffffff));
+                canvas.drawPath(path, strokePaint);
+
+                RedeemUi.drawSakuraPetal(canvas, path, accentPaint, cx - r * 0.42f, cy + r * 0.16f, dp(ctx, 6.2f), -32f, 0.85f, cs[1 % cs.length]);
+                RedeemUi.drawSakuraPetal(canvas, path, accentPaint, cx + r * 0.08f, cy - r * 0.18f, dp(ctx, 7.6f), 20f, 0.92f, cs[0]);
+                RedeemUi.drawSakuraPetal(canvas, path, accentPaint, cx + r * 0.54f, cy + r * 0.32f, dp(ctx, 5.4f), 64f, 0.72f, cs[2 % cs.length]);
+                paint.setColor(0xfffde68a);
+                canvas.drawCircle(cx - r * 0.15f, cy + r * 0.52f, dp(ctx, 1.6f), paint);
+                canvas.drawCircle(cx + r * 0.52f, cy - r * 0.48f, dp(ctx, 1.4f), paint);
+            } else if ("aurora".equals(kind)) {
+                RedeemUi.drawAuroraCurve(canvas, path, strokePaint,
+                        cx - r * 1.05f, cy + r * 0.42f, cx - r * 0.05f, cy - r * 0.70f, cx + r * 1.05f, cy - r * 0.18f,
+                        0f, 1f, dp(ctx, 4.2f), 0.7f, dp(ctx, 7.5f), cs, 118);
+                RedeemUi.drawAuroraCurve(canvas, path, strokePaint,
+                        cx - r * 1.05f, cy + r * 0.42f, cx - r * 0.05f, cy - r * 0.70f, cx + r * 1.05f, cy - r * 0.18f,
+                        0f, 1f, dp(ctx, 4.2f), 0.7f, dp(ctx, 2.6f), cs, 220);
+                RedeemUi.drawPrismDiamond(canvas, path, accentPaint, cx + r * 0.42f, cy - r * 0.38f, dp(ctx, 5.2f), 14f, cs[0]);
+                RedeemUi.drawPrismDiamond(canvas, path, accentPaint, cx - r * 0.36f, cy - r * 0.06f, dp(ctx, 6.2f), -18f, cs[1 % cs.length]);
+                RedeemUi.drawPrismDiamond(canvas, path, accentPaint, cx + r * 0.06f, cy + r * 0.48f, dp(ctx, 4.4f), 28f, cs[2 % cs.length]);
+            } else {
+                path.reset();
+                path.moveTo(cx - r * 0.85f, cy + r * 0.45f);
+                path.quadTo(cx, cy - r * 0.35f, cx + r * 0.82f, cy - r * 0.30f);
+                strokePaint.setStyle(Paint.Style.STROKE);
+                strokePaint.setStrokeCap(Paint.Cap.ROUND);
+                strokePaint.setStrokeWidth(dp(ctx, 2.2f));
+                strokePaint.setColor(0x66ffdd83);
+                canvas.drawPath(path, strokePaint);
+
+                float[][] orbs = {{cx - r * 0.50f, cy + r * 0.25f, 4.6f}, {cx, cy - r * 0.08f, 6.2f}, {cx + r * 0.52f, cy - r * 0.32f, 4.2f}};
+                for (int i = 0; i < orbs.length; i++) {
+                    float ox = orbs[i][0], oy = orbs[i][1], or = dp(ctx, orbs[i][2]);
+                    paint.setColor(cs[i % cs.length]);
+                    canvas.drawCircle(ox, oy, or, paint);
+                    paint.setColor(0xaaffffff);
+                    canvas.drawCircle(ox - or * 0.26f, oy - or * 0.26f, or * 0.34f, paint);
+                }
+                RedeemUi.drawFourStar(canvas, path, accentPaint, cx + r * 0.56f, cy - r * 0.36f, dp(ctx, 6.2f), 0xfffffbeb);
+            }
         }
 
         private void drawSpark(Canvas canvas, float sx, float sy, float r, int color) {
@@ -1662,17 +1858,20 @@ final class TimeShopUi {
     }
 
     private static final class ShopFlyOverlay extends View {
+        private final FocusState state;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private final Path spark = new Path();
+        private final Path ribbon = new Path();
         private final int[] tmpLoc = new int[2];
         private ValueAnimator animator;
         private float sx, sy, cx, cy, tx, ty;
         private int accentColor = ShopColors.blue();
         private Runnable pendingDone;
 
-        ShopFlyOverlay(Context context) {
+        ShopFlyOverlay(Context context, FocusState state) {
             super(context);
+            this.state = state;
             setVisibility(GONE);
             setClickable(false);
             setFocusable(false);
@@ -1737,26 +1936,78 @@ final class TimeShopUi {
             if (animator == null) return;
             float p = (float) animator.getAnimatedValue();
             Context ctx = getContext();
+            ShopCatalog.RedeemEffectPalette fx = ShopCatalog.redeemEffect(
+                    state == null ? "default" : state.equippedRedeemEffect);
+            int[] fxColors = fx.colors();
+            String fxShape = fx.shapeKind();
 
-            // Phase 1 (0..0.30): sparkle burst at origin & lift into gift bag
+            // Stage 1 (0..0.35): themed sparkle burst at origin
             if (p <= 0.35f) {
                 float u = p / 0.35f;
-                int a = Math.round(255f * (1f - u));
-                int col = (a << 24) | (accentColor & 0x00ffffff);
+                int a = Math.round(235f * (1f - u));
+                paint.setShader(null);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(ctx, 2.0f - 1.1f * u));
+                paint.setColor(RedeemUi.withAlpha(fxColors[0], Math.round(a * 0.72f)));
+                canvas.drawCircle(sx, sy, dp(ctx, 10 + 24 * u), paint);
                 for (int i = 0; i < 6; i++) {
                     double ang = i * Math.PI / 3.0;
-                    float dist = dp(ctx, 18 + 26 * u);
-                    drawStar(canvas, sx + (float) Math.cos(ang) * dist,
-                            sy + (float) Math.sin(ang) * dist, dp(ctx, 4.5f), col);
+                    float dist = dp(ctx, 16 + 28 * u);
+                    int col = RedeemUi.withAlpha(fxColors[i % fxColors.length], a);
+                    drawThemedParticle(canvas, sx + (float) Math.cos(ang) * dist,
+                            sy + (float) Math.sin(ang) * dist, dp(ctx, 4.8f), u * 110f, fxShape, col);
                 }
             }
 
-            // Phase 2 (0.20..1.0): kraft paper gift bag arcs smoothly into top-right Backpack
+            // Stage 2 (0.18..1.0): themed trail + kraft gift bag flying to Backpack
             float moveT = p <= 0.18f ? 0f : Math.min(1f, (p - 0.18f) / 0.82f);
             float omt = 1f - moveT;
             float x = omt * omt * sx + 2f * omt * moveT * cx + moveT * moveT * tx;
             float y = (omt * omt * sy + 2f * omt * moveT * cy + moveT * moveT * ty)
                     - (p < 0.18f ? dp(ctx, 16) * (p / 0.18f) : 0f);
+
+            if (moveT > 0.03f && moveT < 0.96f) {
+                float fade = moveT < 0.75f ? 1f : Math.max(0f, (0.96f - moveT) / 0.21f);
+                if ("aurora".equals(fxShape)) {
+                    RedeemUi.drawAuroraCurve(canvas, ribbon, paint, sx, sy, cx, cy, tx, ty,
+                            Math.max(0f, moveT - 0.34f), moveT, dp(ctx, 5.5f), moveT * 6f,
+                            dp(ctx, 7.5f), fxColors, Math.round(115f * fade));
+                    RedeemUi.drawAuroraCurve(canvas, ribbon, paint, sx, sy, cx, cy, tx, ty,
+                            Math.max(0f, moveT - 0.34f), moveT, dp(ctx, 5.5f), moveT * 6f,
+                            dp(ctx, 2.8f), fxColors, Math.round(195f * fade));
+                }
+                for (int step = 5; step >= 1; step--) {
+                    float tt = Math.max(0f, moveT - step * 0.038f);
+                    float txPos = RedeemUi.quadBezier(sx, cx, tx, tt);
+                    float tyPos = RedeemUi.quadBezier(sy, cy, ty, tt);
+                    if ("petal".equals(fxShape)) {
+                        txPos += (float) Math.sin(tt * 8f + step) * dp(ctx, 7);
+                    }
+                    int a = Math.round(215f * (1f - step * 0.14f) * fade);
+                    int col = RedeemUi.withAlpha(fxColors[step % fxColors.length], a);
+                    drawThemedParticle(canvas, txPos, tyPos, dp(ctx, 4.4f - step * 0.45f),
+                            moveT * 220f + step * 35f, fxShape, col);
+                }
+            }
+
+            // Stage 3 (0.76..1.0): convergence burst at Backpack target
+            if (moveT > 0.76f) {
+                float u = (moveT - 0.76f) / 0.24f;
+                int a = Math.round(210f * (1f - u));
+                paint.setShader(null);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(dp(ctx, 2.0f - u));
+                paint.setColor(RedeemUi.withAlpha(fxColors[0], a));
+                canvas.drawCircle(tx, ty, dp(ctx, 8 + 20 * u), paint);
+                for (int i = 0; i < 6; i++) {
+                    double ang = i * Math.PI / 3.0 + 0.3;
+                    float dist = dp(ctx, 20 * u);
+                    int col = RedeemUi.withAlpha(fxColors[i % fxColors.length], a);
+                    drawThemedParticle(canvas, tx + (float) Math.cos(ang) * dist,
+                            ty + (float) Math.sin(ang) * dist, dp(ctx, 3.8f), u * 140f, fxShape, col);
+                }
+            }
+
             float scale = p < 0.18f ? (0.6f + 0.45f * (p / 0.18f)) : (1.05f - 0.72f * moveT);
             int bagAlpha = moveT < 0.78f ? 255 : Math.round(255f * Math.max(0f, (1f - moveT) / 0.22f));
 
@@ -1766,6 +2017,7 @@ final class TimeShopUi {
 
             float bw = dp(ctx, 32);
             float bh = dp(ctx, 36);
+            paint.setShader(null);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeWidth(dp(ctx, 2));
             paint.setColor((bagAlpha << 24) | 0x00a67c52);
@@ -1782,21 +2034,24 @@ final class TimeShopUi {
             paint.setColor((bagAlpha << 24) | 0x008f6a40);
             canvas.drawRoundRect(rect, dp(ctx, 6), dp(ctx, 6), paint);
 
-            drawStar(canvas, 0f, bh * 0.04f, dp(ctx, 6.5f), (bagAlpha << 24) | (accentColor & 0x00ffffff));
+            drawThemedParticle(canvas, 0f, bh * 0.04f, dp(ctx, 6.2f), 0f, fxShape,
+                    (bagAlpha << 24) | (fxColors[0] & 0x00ffffff));
             canvas.restore();
         }
 
-        private void drawStar(Canvas canvas, float x, float y, float r, int color) {
-            spark.reset();
-            spark.moveTo(x, y - r);
-            spark.quadTo(x, y, x + r, y);
-            spark.quadTo(x, y, x, y + r);
-            spark.quadTo(x, y, x - r, y);
-            spark.quadTo(x, y, x, y - r);
-            spark.close();
-            paint.setStyle(Paint.Style.FILL);
-            paint.setColor(color);
-            canvas.drawPath(spark, paint);
+        private void drawThemedParticle(Canvas canvas, float x, float y, float r, float deg,
+                                        String fxShape, int color) {
+            switch (fxShape) {
+                case "petal" -> RedeemUi.drawSakuraPetal(canvas, spark, paint, x, y, r * 1.1f, deg, 0.85f, color);
+                case "aurora" -> RedeemUi.drawPrismDiamond(canvas, spark, paint, x, y, r, deg, color);
+                case "comet" -> RedeemUi.drawFourStar(canvas, spark, paint, x, y, r * 1.15f, color);
+                default -> {
+                    paint.setShader(null);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(color);
+                    canvas.drawCircle(x, y, r * 0.85f, paint);
+                }
+            }
         }
     }
 
@@ -2013,7 +2268,7 @@ final class TimeShopUi {
 
         scrollBody.addView(interior, -1, -2);
 
-        ShopFlyOverlay flyOverlay = new ShopFlyOverlay(activity);
+        ShopFlyOverlay flyOverlay = new ShopFlyOverlay(activity, state);
         overlayHost.addView(sheet, new FrameLayout.LayoutParams(-1, -1));
         overlayHost.addView(flyOverlay, new FrameLayout.LayoutParams(-1, -1));
         overlayHost.setFocusableInTouchMode(true);
@@ -2312,11 +2567,20 @@ final class TimeShopUi {
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_obsidian"),
                                 ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
 
-                addShelfSection(activity, shelfContentWrap, "应用主题",
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.DEFAULT_APP_THEME),
-                                ShopIllustrationView.Kind.THEME, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME),
-                                ShopIllustrationView.Kind.THEME, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                List<ShopCatalog.AppTheme> buyThemes = new ArrayList<>();
+                for (ShopCatalog.AppTheme th : ShopCatalog.appThemes()) {
+                    if (th.costMinutes() > 0) buyThemes.add(th);
+                }
+                for (int i = 0; i < buyThemes.size(); i += 2) {
+                    ShelfItem left = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(buyThemes.get(i).id()),
+                            ShopIllustrationView.Kind.THEME, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
+                    ShelfItem right = (i + 1 < buyThemes.size())
+                            ? buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(buyThemes.get(i + 1).id()),
+                                    ShopIllustrationView.Kind.THEME, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase)
+                            : null;
+                    if (i == 0) addShelfSection(activity, shelfContentWrap, "应用主题", left, right);
+                    else addShelfRowWithPlank(activity, shelfContentWrap, left, right);
+                }
 
                 addShelfSection(activity, shelfContentWrap, "兑换粒子动效",
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("fx_starlight"),
@@ -2538,10 +2802,11 @@ final class TimeShopUi {
             list.add(buildPermanentCandidate(activity, state, s.id(), ShopIllustrationView.Kind.PIGGY,
                     GROUP_PIGGY, busy, flyOverlay, bagTarget, onUpdated));
         }
-        list.add(buildPermanentCandidate(activity, state, ShopCatalog.DEFAULT_APP_THEME,
-                ShopIllustrationView.Kind.THEME, GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
-        list.add(buildPermanentCandidate(activity, state, ShopCatalog.SAKURA_APP_THEME,
-                ShopIllustrationView.Kind.THEME, GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
+        for (ShopCatalog.AppTheme th : ShopCatalog.appThemes()) {
+            if (th.costMinutes() <= 0) continue;
+            list.add(buildPermanentCandidate(activity, state, th.id(),
+                    ShopIllustrationView.Kind.THEME, GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
+        }
         for (ShopCatalog.RedeemEffectPalette fx : ShopCatalog.purchasableRedeemEffects()) {
             list.add(buildPermanentCandidate(activity, state, fx.id(), ShopIllustrationView.Kind.EFFECT,
                     GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
@@ -3352,11 +3617,11 @@ final class TimeShopUi {
         if (entry.type() == ShopCatalog.ItemType.PIGGY_SKIN) {
             content.addView(buildLivePiggyPreviewStage(activity, entry.id(),
                     state.vaultCapacityMinutes(), entry.name()));
+        } else if (entry.type() == ShopCatalog.ItemType.APP_THEME) {
+            content.addView(buildLiveThemePreviewStage(activity, entry.id(), entry.name()));
         } else {
-            ShopIllustrationView.Kind artKind = entry.type() == ShopCatalog.ItemType.APP_THEME
-                    ? ShopIllustrationView.Kind.THEME : ShopIllustrationView.Kind.EFFECT;
             FrameLayout artWrap = new FrameLayout(activity);
-            artWrap.addView(new ShopIllustrationView(activity, artKind, entry.id(), 0f),
+            artWrap.addView(new ShopIllustrationView(activity, ShopIllustrationView.Kind.EFFECT, entry.id(), 0f),
                     new FrameLayout.LayoutParams(dp(activity, 96), dp(activity, 92), Gravity.CENTER));
             content.addView(artWrap, -1, -2);
         }
@@ -3453,18 +3718,24 @@ final class TimeShopUi {
 
         String typeDesc = switch (entry.type()) {
             case PIGGY_SKIN -> "装备后将替换首页小猪/摆件的专属动态造型与互动特效（含自配动态水波/意境粒子），可随时在「背包 → 外观」切换。";
-            case REDEEM_EFFECT -> "装备后将在兑换页收获时间兑换券时绽放专属动画粒子效果。";
-            case APP_THEME -> "装备后切换应用配色。";
+            case REDEEM_EFFECT -> "装备后将在兑换领取、每日签到、存入储蓄罐、待办打勾与商店购入时绽放专属主题粒子动效，可随时在「背包 → 外观」切换。";
+            case APP_THEME -> "装备后将同步更换全局浅/深色配色、顶部动态意境天幕（流云/落樱/极光/灯影/点阵）、卡片材质圆角与兑换券暗纹，可随时在「背包 → 外观」或设置中切换。";
             default -> "";
         };
 
-        boolean useLivePiggyPreview = entry.type() == ShopCatalog.ItemType.PIGGY_SKIN;
-        View previewView = useLivePiggyPreview
+        boolean useLivePreview = entry.type() == ShopCatalog.ItemType.PIGGY_SKIN
+                || entry.type() == ShopCatalog.ItemType.REDEEM_EFFECT
+                || entry.type() == ShopCatalog.ItemType.APP_THEME;
+        View previewView = entry.type() == ShopCatalog.ItemType.PIGGY_SKIN
                 ? buildLivePiggyPreviewStage(activity, entry.id(), state.vaultCapacityMinutes(), entry.name())
+                : entry.type() == ShopCatalog.ItemType.REDEEM_EFFECT
+                ? buildLiveEffectPreviewStage(activity, entry.id(), entry.name())
+                : entry.type() == ShopCatalog.ItemType.APP_THEME
+                ? buildLiveThemePreviewStage(activity, entry.id(), entry.name())
                 : new ShopIllustrationView(activity, kind, entry.id(), 0f);
 
         LinearLayout content = buildDetailBody(activity,
-                previewView, useLivePiggyPreview,
+                previewView, useLivePreview,
                 entry.subtitle() + "\n\n" + typeDesc,
                 layFlat, spendableMins, entry.costMinutes(),
                 Math.max(0, spendableMins - entry.costMinutes()),
@@ -3592,6 +3863,264 @@ final class TimeShopUi {
         };
         preview.setOnClickListener(burstTap);
         stage.setOnClickListener(burstTap);
+        return stage;
+    }
+
+    private static LinearLayout buildLiveEffectPreviewStage(MainActivity activity, String effectId,
+                                                            String itemName) {
+        LinearLayout stage = column(activity);
+        stage.setGravity(Gravity.CENTER_HORIZONTAL);
+        stage.setClipChildren(false);
+        stage.setClipToPadding(false);
+        stage.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        stage.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+
+        ShopCatalog.RedeemEffectPalette fx = ShopCatalog.redeemEffect(effectId);
+        boolean[] nightBg = {isDark()};
+
+        FrameLayout previewBox = new FrameLayout(activity);
+        previewBox.setClipChildren(false);
+        previewBox.setClipToPadding(false);
+
+        TextView miniBtn = text(activity, "领取 +15分", 11, BLUE, true);
+        miniBtn.setGravity(Gravity.CENTER);
+        miniBtn.setPadding(dp(activity, 12), dp(activity, 7), dp(activity, 12), dp(activity, 7));
+        miniBtn.setBackground(touchCard(activity, BLUE_SOFT, blueStroke(), 10));
+        FrameLayout.LayoutParams btnLp = new FrameLayout.LayoutParams(-2, -2, Gravity.START | Gravity.BOTTOM);
+        btnLp.leftMargin = dp(activity, 14);
+        btnLp.bottomMargin = dp(activity, 14);
+        previewBox.addView(miniBtn, btnLp);
+
+        RedeemUi.RedeemCoinView miniCoin = new RedeemUi.RedeemCoinView(activity);
+        FrameLayout.LayoutParams coinLp = new FrameLayout.LayoutParams(
+                dp(activity, 34), dp(activity, 34), Gravity.END | Gravity.TOP);
+        coinLp.rightMargin = dp(activity, 16);
+        coinLp.topMargin = dp(activity, 16);
+        previewBox.addView(miniCoin, coinLp);
+
+        RedeemUi.RedeemAnimOverlay animOverlay = new RedeemUi.RedeemAnimOverlay(activity);
+        previewBox.addView(animOverlay, new FrameLayout.LayoutParams(-1, -1));
+        previewBox.setContentDescription("实时预览「" + itemName + "」，轻点重播粒子特效");
+        stage.addView(previewBox, -1, dp(activity, 142));
+
+        gap(stage, 8);
+        LinearLayout controls = row(activity);
+        controls.setGravity(Gravity.CENTER);
+        TextView replayChip = text(activity, "重播动效", 10, BLUE, true);
+        replayChip.setGravity(Gravity.CENTER);
+        replayChip.setPadding(dp(activity, 12), dp(activity, 4), dp(activity, 12), dp(activity, 4));
+        replayChip.setBackground(touchCard(activity, BLUE_SOFT, blueStroke(), 9));
+
+        TextView bgToggleChip = text(activity, "", 10, INK_SUB, true);
+        bgToggleChip.setGravity(Gravity.CENTER);
+        bgToggleChip.setPadding(dp(activity, 12), dp(activity, 4), dp(activity, 12), dp(activity, 4));
+
+        Runnable syncBg = () -> {
+            if (nightBg[0]) {
+                previewBox.setBackground(cardBg(activity, 0xff111827, 0xff28354e, 14));
+                miniBtn.setTextColor(0xff93c5fd);
+                miniBtn.setBackground(touchCard(activity, 0xff1e293b, 0xff3b527a, 10));
+                bgToggleChip.setText("切换浅色底");
+                bgToggleChip.setBackground(touchCard(activity, BLUE_SOFT, blueStroke(), 9));
+                bgToggleChip.setTextColor(BLUE);
+            } else {
+                previewBox.setBackground(cardBg(activity, CARD, BORDER, 14));
+                miniBtn.setTextColor(BLUE);
+                miniBtn.setBackground(touchCard(activity, BLUE_SOFT, blueStroke(), 10));
+                bgToggleChip.setText("夜幕底试看");
+                bgToggleChip.setBackground(touchCard(activity, CARD, BORDER, 9));
+                bgToggleChip.setTextColor(INK_SUB);
+            }
+        };
+        syncBg.run();
+
+        Runnable[] bounceCoin = new Runnable[1];
+        bounceCoin[0] = () -> {
+            if (previewBox.isAttachedToWindow()) CardCraftUi.bouncePill(miniCoin);
+        };
+        Runnable playNow = () -> {
+            if (!previewBox.isAttachedToWindow() || miniBtn.getWidth() <= 0 || miniCoin.getWidth() <= 0) return;
+            previewBox.removeCallbacks(bounceCoin[0]);
+            int textCol = nightBg[0] ? fx.colors()[1 % fx.colors().length] : fx.colors()[0];
+            animOverlay.playBurst(miniBtn, miniCoin, "+15 分钟", textCol, effectId);
+            previewBox.postDelayed(bounceCoin[0], 620L);
+        };
+
+        controls.addView(replayChip);
+        space(controls, 8);
+        controls.addView(bgToggleChip);
+        stage.addView(controls, -2, -2);
+
+        gap(stage, 4);
+        TextView hint = text(activity, "轻点画布可随时重播「" + fx.subtitle() + "」", 10, MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        stage.addView(hint, -1, -2);
+
+        View.OnClickListener replayTap = v -> {
+            tapHaptic(v);
+            playNow.run();
+        };
+        previewBox.setOnClickListener(replayTap);
+        miniBtn.setOnClickListener(replayTap);
+        replayChip.setOnClickListener(replayTap);
+        bgToggleChip.setOnClickListener(v -> {
+            tapHaptic(v);
+            nightBg[0] = !nightBg[0];
+            syncBg.run();
+            playNow.run();
+        });
+        Runnable initialAutoPlay = playNow;
+        previewBox.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {
+                v.postDelayed(initialAutoPlay, 220L);
+            }
+
+            @Override public void onViewDetachedFromWindow(View v) {
+                v.removeCallbacks(initialAutoPlay);
+                v.removeCallbacks(bounceCoin[0]);
+                animOverlay.cancel();
+            }
+        });
+        return stage;
+    }
+
+    private static LinearLayout buildLiveThemePreviewStage(MainActivity activity, String themeId,
+                                                           String itemName) {
+        LinearLayout stage = column(activity);
+        stage.setGravity(Gravity.CENTER_HORIZONTAL);
+        stage.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        stage.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+
+        ShopCatalog.AppTheme theme = ShopCatalog.appTheme(themeId);
+        int palette = theme == null ? FocusState.PALETTE_BLUE : theme.palette();
+        boolean[] previewDark = {isDark()};
+
+        FrameLayout frame = new FrameLayout(activity);
+        frame.setClipToOutline(true);
+
+        ThemeAtmosphereView sky = new ThemeAtmosphereView(activity);
+        frame.addView(sky, new FrameLayout.LayoutParams(-1, dp(activity, 112), Gravity.TOP));
+
+        LinearLayout innerCol = column(activity);
+        innerCol.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+        LinearLayout topHead = row(activity);
+        TextView headTitle = text(activity, theme == null ? itemName : theme.name(), 12, INK, true);
+        weight(topHead, headTitle);
+        TextView headChip = text(activity, "松时", 10, BLUE, true);
+        headChip.setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 8), dp(activity, 3));
+        topHead.addView(headChip);
+        innerCol.addView(topHead);
+        gap(innerCol, 8);
+
+        LinearLayout miniCard = column(activity);
+        miniCard.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+        LinearLayout cardRow = row(activity);
+        LinearLayout numCol = column(activity);
+        TextView bigVal = text(activity, "28 分", 17, INK, true);
+        TextView subVal = text(activity, "时间储蓄 · " + (theme == null ? "" : theme.subtitle()), 10, MUTED, false);
+        numCol.addView(bigVal);
+        gap(numCol, 2);
+        numCol.addView(subVal);
+        weight(cardRow, numCol);
+        TextView miniAction = text(activity, "存入", 11, ON_ACCENT, true);
+        miniAction.setGravity(Gravity.CENTER);
+        miniAction.setPadding(dp(activity, 12), dp(activity, 6), dp(activity, 12), dp(activity, 6));
+        cardRow.addView(miniAction);
+        miniCard.addView(cardRow);
+        innerCol.addView(miniCard);
+        gap(innerCol, 8);
+
+        LinearLayout miniVoucher = row(activity);
+        miniVoucher.setPadding(dp(activity, 10), dp(activity, 7), dp(activity, 10), dp(activity, 7));
+        TextView voucherLeft = text(activity, "待领取时长", 10, ON_ACCENT, true);
+        weight(miniVoucher, voucherLeft);
+        TextView voucherRight = text(activity, "+15 分钟", 10, ON_ACCENT, true);
+        miniVoucher.addView(voucherRight);
+        innerCol.addView(miniVoucher);
+
+        frame.addView(innerCol, new FrameLayout.LayoutParams(-1, -2));
+        stage.addView(frame, -1, -2);
+
+        gap(stage, 8);
+        LinearLayout modeRow = row(activity);
+        modeRow.setGravity(Gravity.CENTER);
+        TextView lightChip = text(activity, "浅色预览", 10, INK_SUB, true);
+        lightChip.setGravity(Gravity.CENTER);
+        lightChip.setPadding(dp(activity, 14), dp(activity, 4), dp(activity, 14), dp(activity, 4));
+        TextView darkChip = text(activity, "深色预览", 10, INK_SUB, true);
+        darkChip.setGravity(Gravity.CENTER);
+        darkChip.setPadding(dp(activity, 14), dp(activity, 4), dp(activity, 14), dp(activity, 4));
+        modeRow.addView(lightChip);
+        space(modeRow, 8);
+        modeRow.addView(darkChip);
+        stage.addView(modeRow, -2, -2);
+
+        Runnable syncPreview = () -> {
+            ThemePreviewTokens t = previewTokens(palette, previewDark[0]);
+            GradientDrawable fBg = new GradientDrawable();
+            fBg.setColor(t.paper());
+            fBg.setCornerRadius(dp(activity, t.cardRadiusDp()));
+            fBg.setStroke(dp(activity, 1), t.border());
+            frame.setBackground(fBg);
+
+            GradientDrawable cBg = new GradientDrawable();
+            cBg.setColor(t.card());
+            cBg.setCornerRadius(dp(activity, t.cardRadiusDp()));
+            cBg.setStroke(dp(activity, 1), t.border());
+            miniCard.setBackground(cBg);
+
+            headTitle.setTextColor(t.ink());
+            headChip.setTextColor(t.accent());
+            GradientDrawable chipBg = new GradientDrawable();
+            chipBg.setColor(t.accentSoft());
+            chipBg.setCornerRadius(dp(activity, 8));
+            headChip.setBackground(chipBg);
+
+            bigVal.setTextColor(t.ink());
+            subVal.setTextColor(t.muted());
+            miniAction.setTextColor(palette == FocusState.PALETTE_SAGE && !previewDark[0] ? 0xff203621 : ON_ACCENT);
+            GradientDrawable actBg = new GradientDrawable();
+            actBg.setColor(t.accent());
+            actBg.setCornerRadius(dp(activity, Math.max(8, t.cardRadiusDp() - 5)));
+            miniAction.setBackground(actBg);
+
+            GradientDrawable vBg = new GradientDrawable(
+                    GradientDrawable.Orientation.TL_BR, new int[]{t.heroStart(), t.heroEnd()});
+            vBg.setCornerRadius(dp(activity, Math.max(10, t.cardRadiusDp() - 2)));
+            miniVoucher.setBackground(vBg);
+
+            sky.setThemeState(palette, previewDark[0], true, true);
+
+            lightChip.setTextColor(!previewDark[0] ? BLUE : INK_SUB);
+            lightChip.setBackground(touchCard(activity, !previewDark[0] ? BLUE_SOFT : CARD,
+                    !previewDark[0] ? blueStroke() : BORDER, 9));
+            darkChip.setTextColor(previewDark[0] ? BLUE : INK_SUB);
+            darkChip.setBackground(touchCard(activity, previewDark[0] ? BLUE_SOFT : CARD,
+                    previewDark[0] ? blueStroke() : BORDER, 9));
+        };
+        syncPreview.run();
+
+        lightChip.setOnClickListener(v -> {
+            if (!previewDark[0]) return;
+            tapHaptic(v);
+            previewDark[0] = false;
+            syncPreview.run();
+        });
+        darkChip.setOnClickListener(v -> {
+            if (previewDark[0]) return;
+            tapHaptic(v);
+            previewDark[0] = true;
+            syncPreview.run();
+        });
+        frame.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {
+                sky.setThemeState(palette, previewDark[0], true, true);
+            }
+
+            @Override public void onViewDetachedFromWindow(View v) {
+                sky.setThemeState(palette, previewDark[0], false, false);
+            }
+        });
         return stage;
     }
 

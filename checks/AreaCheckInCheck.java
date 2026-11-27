@@ -11,9 +11,43 @@ final class AreaCheckInCheck {
 
     public static void main(String[] args) {
         checkLocationDrift();
+        checkSparseCenterLocation();
         checkRewardRollover();
         checkLayFlat();
-        System.out.println("PASS: area location drift, stale samples, 04:00 rollover and shared reward deduplication");
+        System.out.println("PASS: area drift, sparse indoor fixes, 04:00 rollover and shared reward deduplication");
+    }
+
+    private static void checkSparseCenterLocation() {
+        var sparse = new AreaCheckIn.Sampler(null, 100, ELAPSED);
+        equal(null, sparse.accept("network", fix(6, 10, ELAPSED - 100), ELAPSED));
+        equal(null, sparse.accept("network", new AreaCheckIn.Fix(0, 0, 10, ELAPSED, true), ELAPSED));
+        equal(null, sparse.preciseCenter(ELAPSED));
+        var precise = fix(0, 22, ELAPSED);
+        equal(null, sparse.accept("fused", precise, ELAPSED));
+        equal(null, sparse.accept("gps", precise, ELAPSED + 800));
+        equal(null, sparse.accept("network", fix(240, 160, ELAPSED + 1_000), ELAPSED + 1_000));
+        equal(precise, sparse.preciseCenter(ELAPSED + 2_000).fix());
+        equal(null, sparse.preciseCenter(ELAPSED + 5_001));
+        equal(22.0, sparse.bestAccuracy());
+
+        var mixed = new AreaCheckIn.Sampler(null, 100, ELAPSED);
+        equal(null, mixed.accept("network", fix(45, 45, ELAPSED), ELAPSED));
+        equal(null, mixed.preciseCenter(ELAPSED + 2_000));
+        equal(null, mixed.accept("gps", fix(250, 50, ELAPSED + 2_000), ELAPSED + 2_000));
+        var latest = fix(48, 50, ELAPSED + 8_000);
+        equal(latest, mixed.accept("network", latest, ELAPSED + 8_000).fix());
+
+        var conflicting = new AreaCheckIn.Sampler(null, 100, ELAPSED);
+        equal(null, conflicting.accept("fused", precise, ELAPSED));
+        equal(null, conflicting.accept("gps", fix(80, 12, ELAPSED + 1_000), ELAPSED + 1_000));
+        equal(null, conflicting.preciseCenter(ELAPSED + 2_000));
+
+        var point = new AreaCheckIn.Point("test", "宿舍", 0, 0, 10, 100);
+        var arrival = new AreaCheckIn.Sampler(point, point.radiusMeters(), ELAPSED);
+        equal(null, arrival.accept("fused", precise, ELAPSED));
+        equal(null, arrival.preciseCenter(ELAPSED + 2_000));
+        equal(AreaCheckIn.Match.INSIDE,
+                arrival.accept("gps", fix(2, 12, ELAPSED + 2_100), ELAPSED + 2_100).match());
     }
 
     private static void checkLocationDrift() {
@@ -33,25 +67,25 @@ final class AreaCheckInCheck {
 
         var sample = new AreaCheckIn.Sampler(point, point.radiusMeters(), ELAPSED);
         // Cached readings, duplicate provider callbacks, and an isolated jump cannot complete a check-in.
-        equal(null, sample.accept(fix(0, 10, ELAPSED - 1), ELAPSED));
-        equal(null, sample.accept(fix(15, 10, ELAPSED), ELAPSED));
-        equal(null, sample.accept(fix(15, 10, ELAPSED + 100), ELAPSED + 100));
-        equal(null, sample.accept(fix(170, 10, ELAPSED + 1_000), ELAPSED + 1_000));
-        equal(null, sample.accept(fix(15, 10, ELAPSED + 2_000), ELAPSED + 2_000));
-        equal(null, sample.accept(fix(87, 10, ELAPSED + 3_000), ELAPSED + 3_000));
-        equal(null, sample.accept(fix(13, 10, ELAPSED + 4_000), ELAPSED + 4_000));
-        var inside = sample.accept(fix(14, 12, ELAPSED + 5_000), ELAPSED + 5_000);
+        equal(null, sample.accept("gps", fix(0, 10, ELAPSED - 1), ELAPSED));
+        equal(null, sample.accept("gps", fix(15, 10, ELAPSED), ELAPSED));
+        equal(null, sample.accept("gps", fix(15, 10, ELAPSED + 100), ELAPSED + 100));
+        equal(null, sample.accept("gps", fix(170, 10, ELAPSED + 1_000), ELAPSED + 1_000));
+        equal(null, sample.accept("gps", fix(15, 10, ELAPSED + 2_000), ELAPSED + 2_000));
+        equal(null, sample.accept("gps", fix(87, 10, ELAPSED + 3_000), ELAPSED + 3_000));
+        equal(null, sample.accept("gps", fix(13, 10, ELAPSED + 4_000), ELAPSED + 4_000));
+        var inside = sample.accept("gps", fix(14, 12, ELAPSED + 5_000), ELAPSED + 5_000);
         equal(AreaCheckIn.Match.INSIDE, inside.match());
 
         var outside = new AreaCheckIn.Sampler(point, 100, ELAPSED);
-        equal(null, outside.accept(fix(170, 8, ELAPSED), ELAPSED));
-        equal(AreaCheckIn.Match.OUTSIDE, outside.accept(fix(172, 9, ELAPSED + 1_000), ELAPSED + 1_000).match());
+        equal(null, outside.accept("gps", fix(170, 8, ELAPSED), ELAPSED));
+        equal(AreaCheckIn.Match.OUTSIDE, outside.accept("gps", fix(172, 9, ELAPSED + 1_000), ELAPSED + 1_000).match());
 
         var capture = new AreaCheckIn.Sampler(null, 120, ELAPSED);
-        equal(null, capture.accept(fix(0, 200, ELAPSED), ELAPSED));
-        equal(null, capture.accept(fix(0, 8, ELAPSED + 1_000), ELAPSED + 1_000));
-        equal(null, capture.accept(fix(80, 8, ELAPSED + 2_000), ELAPSED + 2_000));
-        var center = capture.accept(fix(81, 6, ELAPSED + 3_000), ELAPSED + 3_000).fix();
+        equal(null, capture.accept("gps", fix(0, 200, ELAPSED), ELAPSED));
+        equal(null, capture.accept("gps", fix(0, 8, ELAPSED + 1_000), ELAPSED + 1_000));
+        equal(null, capture.accept("gps", fix(80, 8, ELAPSED + 2_000), ELAPSED + 2_000));
+        var center = capture.accept("gps", fix(81, 6, ELAPSED + 3_000), ELAPSED + 3_000).fix();
         equal(6.0, center.accuracyMeters());
         var edited = area.savePoint(point, "自习室", 120, center, ELAPSED + 3_000);
         equal(point.id(), edited.id());

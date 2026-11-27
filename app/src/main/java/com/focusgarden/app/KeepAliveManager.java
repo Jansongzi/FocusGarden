@@ -23,6 +23,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.Process;
 import android.provider.Settings;
+import android.util.AtomicFile;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Toast;
 
@@ -137,7 +138,7 @@ final class KeepAliveManager {
     }
 
     static File wallpaperFile(Context context) {
-        return new File(context.getFilesDir(), "keepalive_wallpaper.jpg");
+        return new File(FocusStore.imageDirectory(context), "keepalive_wallpaper.jpg");
     }
 
     static boolean isLiveWallpaperActive(Context context) {
@@ -172,10 +173,15 @@ final class KeepAliveManager {
             }
             if (bmp == null) return false;
 
-            File out = wallpaperFile(context);
-            try (FileOutputStream fos = new FileOutputStream(out)) {
-                bmp.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+            AtomicFile out = new AtomicFile(wallpaperFile(context));
+            FileOutputStream fos = null;
+            try {
+                fos = out.startWrite();
+                if (!bmp.compress(Bitmap.CompressFormat.JPEG, 90, fos)) return false;
+                out.finishWrite(fos);
+                fos = null;
             } finally {
+                if (fos != null) out.failWrite(fos);
                 bmp.recycle();
             }
             return true;
@@ -314,7 +320,7 @@ final class KeepAliveManager {
             Map<String, Long> totals = queryTodayUsageTotals(app, tracked, soberWindows);
             if (totals.isEmpty()) return;
             MAIN.post(() -> {
-                if (!soberWindows.equals(state.soberWindows)) return;
+                if (FocusStore.get(app).state != state || !soberWindows.equals(state.soberWindows)) return;
                 if (applyUsageTotals(app, state, totals) && onUpdated != null) onUpdated.run();
             });
         });

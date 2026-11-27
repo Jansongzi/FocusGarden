@@ -189,6 +189,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private View insightsGuideTarget;
     private View rulesGuideTarget;
     private LayFlatAuraView layFlatAuraOverlay;
+    private ThemeAtmosphereView themeAtmosphereView;
     private final List<AbstinenceTicker> liveAbstinenceTickers = new ArrayList<>();
     private final Runnable onboardingTrigger = this::maybeTriggerOnboarding;
 
@@ -205,6 +206,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private Dialog sleepProtectionPrompt;
     private EarlyWakeUi earlyWakeUi;
     private AreaCheckInUi areaCheckInUi;
+    private BackupUi backupUi;
+    private boolean reloadingBackup;
     private EarlyWakeStepMonitor wakeSteps;
     private long sleepLockEndsAt;
 
@@ -255,6 +258,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         state = FocusStore.get(this).state;
+        backupUi = new BackupUi(this, saved);
         earlyWakeUi = new EarlyWakeUi(this, state, this::changed);
         areaCheckInUi = new AreaCheckInUi(this, state, this::changed);
         wakeSteps = new EarlyWakeStepMonitor(this);
@@ -299,6 +303,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     @Override protected void onSaveInstanceState(Bundle out) {
+        super.onSaveInstanceState(out);
+        if (reloadingBackup) return;
+        backupUi.saveInstance(out);
         out.putInt("tab", tab);
         out.putInt("rulesParentTab", rulesParentTab);
         out.putBoolean("rulesFromSettings", rulesFromSettings);
@@ -314,7 +321,6 @@ public final class MainActivity extends Activity implements SensorEventListener 
         out.putString("requestedBlockImage", requestedBlockImage);
         out.putString("selectedAbstinenceId", selectedAbstinenceId);
         out.putStringArrayList("expandedRedeemCards", new ArrayList<>(state.expandedRedeemCards));
-        super.onSaveInstanceState(out);
     }
 
     @Override protected void onStart() {
@@ -367,6 +373,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         resumed = false;
         hideSleepProtection();
         syncLayFlatAura();
+        syncThemeAtmosphere();
         main.removeCallbacks(clock);
         main.removeCallbacks(onboardingTrigger);
         cancelRedeemAnimations();
@@ -402,6 +409,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     boolean canShowAutomaticUpdate() {
         return isResumedForUpdate() && hasWindowFocus()
                 && !earlyWakeUi.isShowing() && !areaCheckInUi.isShowing()
+                && !backupUi.blocksOtherPrompts()
                 && !isOnboardingActive() && !hasPendingOnboardingForCurrentScreen();
     }
 
@@ -418,6 +426,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (layFlatAuraOverlay != null) layFlatAuraOverlay.release();
         cancelVaultToggleAnimator();
         updatePanel.dismiss();
+        backupUi.destroy();
         earlyWakeUi.destroy();
         areaCheckInUi.destroy();
         if (sleepLockUi != null) sleepLockUi.dismiss();
@@ -477,6 +486,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (backupUi.handleResult(requestCode, resultCode, data)) return;
         if (requestCode == REQ_PICK_FOCUS_BACKGROUND
                 || requestCode == REQ_PICK_PURPOSE_BACKGROUND
                 || requestCode == REQ_PICK_SLEEP_BACKGROUND) {
@@ -583,6 +593,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     boolean blockImageBusy() {
         return requestedBlockImage != null || loadingBlockImage != null;
+    }
+
+    boolean imageImportInProgress() {
+        return timerBackgroundBusy || blockImageBusy();
     }
 
     private void finishBlockImageSelection() {
@@ -756,6 +770,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void render() {
+        themeAtmosphereView = null;
         homeScrim = null;
         homeFloatingSettings = null;
         homeFloatingActions = null;
@@ -797,6 +812,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         scroll.addView(pages, -1, -2);
 
         FrameLayout contentStage = new FrameLayout(this);
+        themeAtmosphereView = new ThemeAtmosphereView(this);
+        FrameLayout.LayoutParams atmosLp = new FrameLayout.LayoutParams(-1, topInset + dp(this, 240));
+        atmosLp.gravity = Gravity.TOP;
+        contentStage.addView(themeAtmosphereView, atmosLp);
         contentStage.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         if (tab == 0) {
             homeScrim = new View(this);
@@ -978,8 +997,22 @@ public final class MainActivity extends Activity implements SensorEventListener 
         layFlatAuraOverlay.setAuraState(state != null && state.isLayFlatAuraVisible(), resumed, isDark());
     }
 
+    private void syncThemeAtmosphere() {
+        if (themeAtmosphereView == null || state == null) return;
+        if (themeAtmosphereView.getLayoutParams() instanceof FrameLayout.LayoutParams lp) {
+            int desiredH = topInset + dp(this, 240);
+            if (lp.height != desiredH) {
+                lp.height = desiredH;
+                themeAtmosphereView.setLayoutParams(lp);
+            }
+        }
+        themeAtmosphereView.setThemeState(state.effectiveColorTheme(), isDark(),
+                state.themeAtmosphereMotion, resumed && tab != RULES_PAGE);
+    }
+
     private void redraw() {
         syncLayFlatAura();
+        syncThemeAtmosphere();
         clearHomeRefs();
         pages.removeAllViews();
         int side = tab == 0 ? 0 : dp(this, 16);
@@ -1142,6 +1175,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
             case FocusState.PALETTE_SAKURA -> 0xffa64d69;
             case FocusState.PALETTE_INDULGENT -> 0xffad530b;
             case FocusState.PALETTE_LAY_FLAT -> 0xff5b3fd6;
+            case FocusState.PALETTE_JOURNAL -> 0xff9b5d2e;
+            case FocusState.PALETTE_AURORA -> 0xff0e8a8c;
+            case FocusState.PALETTE_STUDY -> 0xffb47824;
             default -> BLUE;
         };
         LinearLayout vaultBtns = row(this);
@@ -1153,6 +1189,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_SAKURA -> 0xffcb6f8a;
                     case FocusState.PALETTE_INDULGENT -> 0xffd16d16;
                     case FocusState.PALETTE_LAY_FLAT -> 0xff7659ea;
+                    case FocusState.PALETTE_JOURNAL -> 0xffc17d47;
+                    case FocusState.PALETTE_AURORA -> 0xff1ea1a4;
+                    case FocusState.PALETTE_STUDY -> 0xffc9892e;
                     default -> 0xff397ce8;
                 },
                 switch (colorTheme()) {
@@ -1160,6 +1199,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_SAKURA -> 0xff873953;
                     case FocusState.PALETTE_INDULGENT -> 0xff8f4104;
                     case FocusState.PALETTE_LAY_FLAT -> 0xff4832ae;
+                    case FocusState.PALETTE_JOURNAL -> 0xff9b5d2e;
+                    case FocusState.PALETTE_AURORA -> 0xff0d7477;
+                    case FocusState.PALETTE_STUDY -> 0xff9b6318;
                     default -> 0xff0948a8;
                 },
                 isSageTheme() ? 0xff203621 : ON_ACCENT);
@@ -1182,6 +1224,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 TimerReceiver.changed(this);
                 updateHomeLive();
                 if (homePiggyBank != null) homePiggyBank.playDepositBurst();
+                if (redeemAnimOverlay != null && homePiggyBank != null) {
+                    redeemAnimOverlay.playBurst(depositBtn, homePiggyBank, "+" + duration(moved),
+                            BLUE, state.equippedRedeemEffect);
+                }
                 toast(state.isVaultFull()
                         ? "已存入 " + duration(moved) + "，储蓄罐已满 " + state.vaultCapacityMinutes() + " 分钟"
                         : "已存入 " + duration(moved) + " 到时间储蓄罐");
@@ -1199,6 +1245,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_SAKURA -> 0xffe8b7c6;
                     case FocusState.PALETTE_INDULGENT -> 0xfff0c8a0;
                     case FocusState.PALETTE_LAY_FLAT -> 0xffb6a7f2;
+                    case FocusState.PALETTE_JOURNAL -> 0xffe3ceb5;
+                    case FocusState.PALETTE_AURORA -> 0xffb4e0e2;
+                    case FocusState.PALETTE_STUDY -> 0xffe6d2b0;
                     default -> 0xff9cb9eb;
                 },
                 withdrawInk);
@@ -2329,6 +2378,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
             haptic(view, state.hapticFeedback, HapticKind.CONFIRM);
             changed();
             toast("签到成功，已领取 10 分钟可用时长");
+            if (view != null) {
+                view.post(() -> {
+                    View signInTarget = homeBudgetCard != null ? homeBudgetCard : homePiggyBank;
+                    if (redeemAnimOverlay != null && view.isAttachedToWindow()
+                            && signInTarget != null && signInTarget.isAttachedToWindow()) {
+                        redeemAnimOverlay.playBurst(view, signInTarget, "+10 分钟",
+                                GREEN, state.equippedRedeemEffect);
+                    }
+                });
+            }
         } else {
             tapHaptic(view);
             CheckInUi.show(this, state);
@@ -2361,6 +2420,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_SAKURA -> 0xffd67b96;
                     case FocusState.PALETTE_INDULGENT -> 0xffde7a22;
                     case FocusState.PALETTE_LAY_FLAT -> 0xff8368ee;
+                    case FocusState.PALETTE_JOURNAL -> 0xffc17d47;
+                    case FocusState.PALETTE_AURORA -> 0xff1ea1a4;
+                    case FocusState.PALETTE_STUDY -> 0xffc9892e;
                     default -> 0xffa6bddc;
                 },
                 switch (colorTheme()) {
@@ -2368,6 +2430,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_SAKURA -> 0xffa64d69;
                     case FocusState.PALETTE_INDULGENT -> 0xffad530b;
                     case FocusState.PALETTE_LAY_FLAT -> 0xff5a3fd1;
+                    case FocusState.PALETTE_JOURNAL -> 0xff9b5d2e;
+                    case FocusState.PALETTE_AURORA -> 0xff0d7477;
+                    case FocusState.PALETTE_STUDY -> 0xff9b6318;
                     default -> 0xff718eb7;
                 },
                 switch (colorTheme()) {
@@ -2375,6 +2440,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     case FocusState.PALETTE_SAKURA -> 0xfffffbf8;
                     case FocusState.PALETTE_INDULGENT -> 0xfffffdf8;
                     case FocusState.PALETTE_LAY_FLAT -> 0xfffdfcff;
+                    case FocusState.PALETTE_JOURNAL -> 0xfffdfaf3;
+                    case FocusState.PALETTE_AURORA -> 0xfff8fcfe;
+                    case FocusState.PALETTE_STUDY -> 0xfffdfaf4;
                     default -> 0xfff8f5ec;
                 });
         content.addView(enterBtn, dp(this, 100), -2);
@@ -2564,8 +2632,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     11, mature ? BLUE : AMBER, true));
             tRow.setOnClickListener(v -> {
                 haptic(v, state.hapticFeedback, HapticKind.NAV);
+                boolean completing = !todo.done;
+                float[] popXy = new float[2];
+                boolean canPop = completing && redeemAnimOverlay != null && redeemAnimOverlay.centerOf(box, popXy);
                 state.toggleTodo(id, today);
                 changed();
+                if (canPop && redeemAnimOverlay != null) {
+                    redeemAnimOverlay.post(() -> {
+                        if (redeemAnimOverlay != null && redeemAnimOverlay.isAttachedToWindow()) {
+                            redeemAnimOverlay.playPopAtCoords(popXy[0], popXy[1], null, BLUE, state.equippedRedeemEffect);
+                        }
+                    });
+                }
             });
             body.addView(tRow);
             gap(body, 6);
@@ -3801,6 +3879,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         this::changed, reopenSettings),
                 () -> FocusSheets.showRateSettings(this, state, this::changed, reopenSettings),
                 () -> TimeShopUi.showTimeShopSheet(this, state, this::changed, reopenSettings),
+                () -> backupUi.showSettings(reopenSettings),
                 () -> FocusSheets.showDebugSheet(this, state, this::changed, reopenSettings),
                 () -> FocusSheets.showFeedbackSheet(this, reopenSettings),
                 () -> updatePanel.open(reopenSettings));
@@ -3841,7 +3920,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
     }
 
     private void updateSleepProtection(long now) {
-        if (!resumed || isOnboardingActive() || hasPendingOnboardingForCurrentScreen()) return;
+        if (!resumed || backupUi.blocksOtherPrompts() || isOnboardingActive()
+                || hasPendingOnboardingForCurrentScreen()) return;
         if (earlyWakeUi.isShowing()) return;
         ZoneId zone = ZoneId.systemDefault();
         long key = state.sleepProtectionPromptKey(now, zone);
@@ -3984,6 +4064,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
         main.postDelayed(onboardingTrigger, Math.max(0L, delayMs));
     }
 
+    void resumeStartupPrompts() {
+        scheduleOnboardingCheck(120L);
+    }
+
+    void onBackupRestored() {
+        reloadingBackup = true;
+        state = FocusStore.get(this).state;
+        TimerReceiver.changed(this);
+        FocusService.refreshConnected();
+        recreate();
+    }
+
     void returnToHome() {
         rulesFromSettings = false;
         if (tab != 0) {
@@ -4042,6 +4134,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 || isOnboardingActive() || windowHost == null) {
             return;
         }
+        if (backupUi.offerInitialRestore()) return;
         long now = System.currentTimeMillis();
         if ((sleepLockUi != null && sleepLockUi.isShowing())
                 || (soberTimer != null && soberTimer.isShowing())

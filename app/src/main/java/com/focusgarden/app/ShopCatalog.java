@@ -73,13 +73,22 @@ final class ShopCatalog {
     static final String DEFAULT_APP_THEME = "app_theme_blue";
     static final String SAGE_APP_THEME = "app_theme_sage";
     static final String SAKURA_APP_THEME = "app_theme_sakura";
+    static final String JOURNAL_APP_THEME = "app_theme_journal";
+    static final String AURORA_APP_THEME = "app_theme_aurora";
+    static final String STUDY_APP_THEME = "app_theme_study";
     private static final List<AppTheme> APP_THEMES = List.of(
-            new AppTheme(SAGE_APP_THEME, FocusState.PALETTE_SAGE, "青苔留白", "森系暖白", 0,
+            new AppTheme(SAGE_APP_THEME, FocusState.PALETTE_SAGE, "青苔留白", "林隙晨光 · 宣纸静雅", 0,
                     new int[]{0xff7fa47b, 0xff4e754d, 0xffdfebcb, 0xfff9f6ed}),
-            new AppTheme(DEFAULT_APP_THEME, FocusState.PALETTE_BLUE, "晴空蓝", "经典清爽", 60,
+            new AppTheme(DEFAULT_APP_THEME, FocusState.PALETTE_BLUE, "晴空蓝", "晴云漫游 · 清夜微星", 60,
                     new int[]{0xff1a6bff, 0xff1153d6, 0xffeaf2ff, 0xfff3f5f9}),
-            new AppTheme(SAKURA_APP_THEME, FocusState.PALETTE_SAKURA, "春日柔粉", "樱花配色", 120,
-                    new int[]{0xffd67b96, 0xffa64d69, 0xfff8dce6, 0xfffffbf8}));
+            new AppTheme(SAKURA_APP_THEME, FocusState.PALETTE_SAKURA, "春日柔粉", "落樱花笺 · 夜樱萤光", 120,
+                    new int[]{0xffd67b96, 0xffa64d69, 0xfff8dce6, 0xfffffbf8}),
+            new AppTheme(JOURNAL_APP_THEME, FocusState.PALETTE_JOURNAL, "复古手账", "点阵牛皮纸 · 焦糖墨韵", 120,
+                    new int[]{0xffc17d47, 0xff9b5d2e, 0xfff3e3cf, 0xfff5efe4}),
+            new AppTheme(AURORA_APP_THEME, FocusState.PALETTE_AURORA, "冰川极光", "冰雾流幕 · 极光星钻", 180,
+                    new int[]{0xff2ab3b5, 0xff0e8a8c, 0xffd7f1f2, 0xffeef6f9}),
+            new AppTheme(STUDY_APP_THEME, FocusState.PALETTE_STUDY, "暖灯书房", "台灯光晕 · 静夜墨金", 180,
+                    new int[]{0xffd2953b, 0xffb47824, 0xfff5e8ce, 0xfff4f0e8}));
 
     static List<AppTheme> appThemes() {
         return APP_THEMES;
@@ -215,17 +224,17 @@ final class ShopCatalog {
 
     private static final List<RedeemEffectPalette> REDEEM_EFFECTS = Collections.unmodifiableList(Arrays.asList(
             new RedeemEffectPalette(
-                    "default", "暖金流光", "经典金色时间微粒", 0,
-                    new int[]{0xfff3d184, 0xffffe599, 0xffe2b14c, 0xff6299ff}, "circle"),
+                    "default", "暖金流光", "暖金光珠 · 星尘拖尾", 0,
+                    new int[]{0xfff5b942, 0xffffdd83, 0xffd9921e, 0xfffff3c4}, "gold_orb"),
             new RedeemEffectPalette(
-                    "fx_starlight", "星河蓝焰", "蓝银星芒动效", 60,
-                    new int[]{0xff5fa8ff, 0xff9ecaff, 0xffd7ecff, 0xff3278f6}, "star"),
+                    "fx_starlight", "星河蓝焰", "彗星蓝焰 · 星芒尾迹", 60,
+                    new int[]{0xff2563eb, 0xff38bdf8, 0xff6366f1, 0xffbae6fd}, "comet"),
             new RedeemEffectPalette(
-                    "fx_sakura", "樱花纷飞", "柔和樱花动效", 60,
-                    new int[]{0xffffb3cb, 0xffffd6e4, 0xffffeff4, 0xfff584aa}, "petal"),
+                    "fx_sakura", "樱花纷飞", "落樱花瓣 · 乘风翻飞", 60,
+                    new int[]{0xffec4899, 0xfff472b6, 0xfff9a8d4, 0xfffde2ee}, "petal"),
             new RedeemEffectPalette(
-                    "fx_aurora", "极光彩粒", "极光星尘动效", 80,
-                    new int[]{0xff5eead4, 0xffa78bfa, 0xff60a5fa, 0xffe0f2fe}, "star")
+                    "fx_aurora", "极光彩粒", "流动极光带 · 棱镜碎钻", 80,
+                    new int[]{0xff14b8a6, 0xff3b82f6, 0xff8b5cf6, 0xff99f6e4}, "aurora")
     ));
 
     private static final List<WishStyle> WISH_STYLES = Collections.unmodifiableList(Arrays.asList(

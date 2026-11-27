@@ -8,6 +8,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.IOException;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -16,7 +18,7 @@ import java.util.Map;
 
 final class FocusStore {
     private static FocusStore instance;
-    final FocusState state = new FocusState();
+    FocusState state = new FocusState();
     private final Context appContext;
     private final SharedPreferences preferences;
 
@@ -27,10 +29,12 @@ final class FocusStore {
 
     private FocusStore(Context context) {
         this.appContext = context.getApplicationContext();
-        preferences = appContext.getSharedPreferences("focus_garden", Context.MODE_PRIVATE);
+        preferences = preferences(appContext);
         boolean needSave = false;
         try {
-            needSave = load(new JSONObject(preferences.getString("state", "{}")));
+            JSONObject root = new JSONObject(preferences.getString("state", "{}"));
+            if (root.length() == 0) preferences.edit().putBoolean("offer_backup_restore", true).apply();
+            needSave = load(root, state, imageDirectory(appContext));
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not read saved state", e);
         }
@@ -38,7 +42,73 @@ final class FocusStore {
         if (needSave) save();
     }
 
-    private boolean load(JSONObject root) throws JSONException {
+    private static SharedPreferences preferences(Context context) {
+        return context.getSharedPreferences("focus_garden", Context.MODE_PRIVATE);
+    }
+
+    static File imageDirectory(Context context) {
+        return imageDirectory(context, preferences(context).getString("image_generation", ""));
+    }
+
+    private static File imageDirectory(Context context, String generation) {
+        return generation.isEmpty() ? context.getFilesDir() : new File(context.getFilesDir(), generation);
+    }
+
+    record SavedSnapshot(String stateJson, long capturedAt, File imageDirectory) {}
+
+    static SavedSnapshot savedSnapshot(Context context) {
+        Map<String, ?> values = preferences(context).getAll();
+        return new SavedSnapshot((String) values.get("state"),
+                values.get("state_saved_at") instanceof Long time ? time : 0L,
+                imageDirectory(context, values.get("image_generation") instanceof String dir ? dir : ""));
+    }
+
+    boolean shouldOfferRestore() {
+        return preferences.getBoolean("offer_backup_restore", false);
+    }
+
+    void dismissRestoreOffer() {
+        preferences.edit().remove("offer_backup_restore").apply();
+    }
+
+    static FocusState decodeBackup(JSONObject root, File images) throws JSONException {
+        if (root.getLong("credit") < 0 || root.getLong("vaultMs") < 0
+                || root.getLong("vaultMs") > FocusState.MAX_VAULT_MS || root.getLong("firstSeenMs") <= 0) {
+            throw new JSONException("Invalid backup balances");
+        }
+        LocalDate.parse(root.getString("lastResetDate"));
+        root.getJSONObject("days");
+        root.getJSONObject("rules");
+        root.getJSONObject("areaCheckIn");
+        root.getJSONArray("earlyWake");
+        FocusState restored = new FocusState();
+        load(root, restored, images);
+        return restored;
+    }
+
+    boolean restoreBackup(FocusState restored, long capturedAt, File images, long now, ZoneId zone)
+            throws IOException, JSONException {
+        long lastCapture = preferences.getLong("last_restored_capture", 0L);
+        if (FocusBackupRestore.rollsBackRewards(state, restored, capturedAt, lastCapture)) return false;
+        FocusBackupRestore.prepare(restored, now, zone);
+        String restoredJson = encode(restored).toString();
+        String previousJson = preferences.getString("state", null);
+        String previousImages = preferences.getString("image_generation", "");
+        long previousSavedAt = preferences.getLong("state_saved_at", 0L);
+        boolean previousOffer = shouldOfferRestore();
+        if (!preferences.edit().putString("state", restoredJson).putLong("state_saved_at", now)
+                .putString("image_generation", images.getName()).putLong("last_restored_capture", capturedAt)
+                .remove("offer_backup_restore").commit()) {
+            preferences.edit().putString("state", previousJson).putLong("state_saved_at", previousSavedAt)
+                    .putString("image_generation", previousImages).putLong("last_restored_capture", lastCapture)
+                    .putBoolean("offer_backup_restore", previousOffer).apply();
+            throw new IOException("Cannot commit restored data");
+        }
+        state = restored;
+        return true;
+    }
+
+    private static boolean load(JSONObject root, FocusState state, File images) throws JSONException {
         boolean isFreshInstall = root.length() == 0 || (!root.has("credit") && root.optLong("firstSeenMs") == 0L);
         if (isFreshInstall) {
             state.applyFreshInstallDefaults(System.currentTimeMillis(), java.time.ZoneId.systemDefault());
@@ -273,20 +343,21 @@ final class FocusStore {
 
         state.timeAwarenessBar = root.optBoolean("timeAwarenessBar", true);
         state.layFlatAuraEffect = root.optBoolean("layFlatAuraEffect", true);
-        loadBlockAppearances(root);
+        state.themeAtmosphereMotion = root.optBoolean("themeAtmosphereMotion", true);
+        loadBlockAppearances(root, state, images);
         String focusBg = root.optString("focusTimerBackgroundId", "");
         if (!state.setFocusTimerBackgroundId(focusBg)) {
-            state.focusTimerBackgroundId = TimerAppearance.Mode.FOCUS.hasCustom(appContext)
+            state.focusTimerBackgroundId = TimerAppearance.Mode.FOCUS.hasCustom(images)
                     ? FocusState.TIMER_BG_CUSTOM : FocusState.BUILTIN_FULL_1;
         }
         String purposeBg = root.optString("purposeTimerBackgroundId", "");
         if (!state.setPurposeTimerBackgroundId(purposeBg)) {
-            state.purposeTimerBackgroundId = TimerAppearance.Mode.PURPOSE.hasCustom(appContext)
+            state.purposeTimerBackgroundId = TimerAppearance.Mode.PURPOSE.hasCustom(images)
                     ? FocusState.TIMER_BG_CUSTOM : FocusState.BUILTIN_FULL_1;
         }
         String sleepBg = root.optString("sleepLockBackgroundId", "");
         if (!state.setSleepLockBackgroundId(sleepBg)) {
-            state.sleepLockBackgroundId = TimerAppearance.Mode.SLEEP.hasCustom(appContext)
+            state.sleepLockBackgroundId = TimerAppearance.Mode.SLEEP.hasCustom(images)
                     ? FocusState.TIMER_BG_CUSTOM : FocusState.SLEEP_BG_AURORA;
         }
 
@@ -671,7 +742,7 @@ final class FocusStore {
         return o == null ? java.util.Collections.emptyIterator() : o.keys();
     }
 
-    private void loadBlockAppearances(JSONObject root) {
+    private static void loadBlockAppearances(JSONObject root, FocusState state, File images) {
         int catalogVer = root.optInt("builtInBlockCatalogVersion", 0);
         JSONArray entries = root.optJSONArray("blockAppearances");
         state.blockAppearances.clear();
@@ -689,7 +760,7 @@ final class FocusStore {
                 String sleepText = item.optString("sleepText", "");
                 if (catalogVer < 1 && FocusState.LEGACY_DEFAULT_BLOCK_APPEARANCE.equals(id)
                         && !full && square == 50 && zoom == 100 && textSize == 27
-                        && text.trim().isEmpty() && sleepText.isEmpty() && !BlockImage.hasCustom(appContext, id)) {
+                        && text.trim().isEmpty() && sleepText.isEmpty() && !BlockImage.hasCustom(images, id)) {
                     continue;
                 }
                 state.blockAppearances.put(id, new FocusState.BlockAppearance(id, full, square, zoom, textSize,
@@ -729,284 +800,289 @@ final class FocusStore {
             for (var entry : state.days.entrySet()) {
                 if (entry.getKey().compareTo(eventCutoff) < 0) entry.getValue().events.clear();
             }
-
-            JSONArray blockAppearances = new JSONArray();
-            for (FocusState.BlockAppearance appearance : state.blockAppearances.values()) {
-                if (appearance.builtIn()) continue;
-                blockAppearances.put(new JSONObject()
-                        .put("id", appearance.id()).put("fullImage", appearance.fullImage())
-                        .put("squarePercent", appearance.squarePercent()).put("fullZoom", appearance.fullZoom())
-                        .put("textSize", appearance.textSize()).put("text", appearance.text())
-                        .put("sleepText", appearance.sleepText()));
-            }
-
-            JSONArray soberWindows = new JSONArray();
-            for (FocusState.SoberWindow window : state.soberWindows) {
-                soberWindows.put(new JSONArray().put(window.start()).put(window.end()));
-            }
-            JSONObject shopPaidJson = new JSONObject();
-            for (Map.Entry<String, Integer> entry : state.shopItemPaidMinutes.entrySet()) {
-                if (entry.getValue() != null && entry.getValue() > 0) {
-                    shopPaidJson.put(entry.getKey(), entry.getValue());
-                }
-            }
-            JSONObject root = new JSONObject()
-                    .put("credit", state.creditMs)
-                    .put("creditRemainder", state.creditRemainder)
-                    .put("vaultMs", state.vaultMs)
-                    .put("vaultStepMinutes", state.vaultStepMinutes)
-                    .put("vaultExpansionCount", state.vaultExpansionCount)
-                    .put("streakProtectCards", state.streakProtectCards)
-                    .put("vaultExpandCards", state.vaultExpandCards)
-                    .put("indulgentPaidMinutes", state.indulgentPaidMinutes)
-                    .put("ownedShopItems", new JSONArray(state.ownedShopItems))
-                    .put("shopItemPaidMinutes", shopPaidJson)
-                    .put("equippedPiggySkin", state.equippedPiggySkin)
-                    .put("equippedRedeemEffect", state.equippedRedeemEffect)
-                    .put("rateMode", state.rateMode.name())
-                    .put("previousMode", state.previousMode.name())
-                    .put("modeSwitchDate", state.modeSwitchDate)
-                    .put("indulgentActiveDate", state.indulgentActiveDate)
-                    .put("layFlatActiveDate", state.layFlatActiveDate)
-                    .put("indulgentPasses", state.indulgentPasses)
-                    .put("pendingIndulgentRewards", state.pendingIndulgentRewards)
-                    .put("layFlatCards", state.layFlatCards)
-                    .put("disciplinedProgress", state.disciplinedProgress)
-                    .put("totalDisciplineSessions", state.totalDisciplineSessions)
-                    .put("disciplinedDays", new JSONArray(state.disciplinedDays))
-                    .put("lastResetDate", state.lastResetDate)
-                    .put("learningPercent", state.learningPercent)
-                    .put("focusPercent", state.focusPercent)
-                    .put("offlinePercent", state.offlinePercent)
-                    .put("bedtime", state.bedtime)
-                    .put("earlyWake", writeEarlyWake(state.earlyWake))
-                    .put("areaCheckIn", writeAreaCheckIn(state.areaCheckIn))
-                    .put("earlySleepWakeDates", new JSONArray(state.earlySleepWakeDates))
-                    .put("sleepStart", state.sleepStart)
-                    .put("pendingLearningMs", state.pendingLearningMs)
-                    .put("sleepEnd", state.sleepEnd)
-                    .put("acknowledgedSleepProtectionEnd", state.acknowledgedSleepProtectionEnd)
-                    .put("sleepTargetEndMs", state.sleepTargetEndMs)
-                    .put("sleepLockBypassEndMs", state.sleepLockBypassEndMs)
-                    .put("bedtimeSuspendedOn", state.bedtimeSuspendedOn)
-                    .put("globalAllowlist", new JSONArray(state.globalAllowlist))
-                    .put("earlySleepPendingClaimDate", state.earlySleepPendingClaimDate)
-                    .put("earlySleepRewardMinutes", state.earlySleepRewardMinutes)
-                    .put("todoDailyCapMinutes", state.todoDailyCapMinutes)
-                    .put("habitDailyCapMinutes", state.habitDailyCapMinutes)
-                    .put("stepDailyCapMinutes", state.stepDailyCapMinutes)
-                    .put("themeMode", state.themeMode)
-                    .put("colorTheme", state.colorTheme)
-                    .put("freeConfigUsedKeys", new JSONArray(state.freeConfigUsedKeys))
-                    .put("presetWork", state.presetWork)
-                    .put("pomodoroWork", state.pomodoroWork)
-                    .put("pomodoroRest", state.pomodoroRest)
-                    .put("pomodoroRounds", state.pomodoroRounds)
-                    .put("phaseEnd", state.phaseEnd)
-                    .put("phaseRewardCursor", state.phaseRewardCursor)
-                    .put("phaseDuration", state.phaseDuration)
-                    .put("phaseEligibleMs", state.phaseEligibleMs)
-                    .put("pausedRemaining", state.pausedRemaining)
-                    .put("workMinutes", state.workMinutes)
-                    .put("restMinutes", state.restMinutes)
-                    .put("roundsLeft", state.roundsLeft)
-                    .put("inBreak", state.inBreak)
-                    .put("countdownCategory", state.countdownCategory.id())
-                    .put("offlineStartMs", state.offlineStartMs)
-                    .put("offlineSessionStarted", state.offlineSessionStarted)
-                    .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
-                    .put("offlineEligibleAccumulatedMs", state.offlineEligibleAccumulatedMs)
-                    .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
-                    .put("stopwatchCategory", state.stopwatchCategory.id())
-                    .put("customDisciplineCategories", new JSONObject(state.customDisciplineCategories))
-                    .put("archivedDisciplineCategories", new JSONArray(state.archivedDisciplineCategories))
-                    .put("soberUntil", state.soberUntil)
-                    .put("soberStarted", state.soberStarted)
-                    .put("soberSessionStarted", state.soberSessionStarted)
-                    .put("soberPausedMs", state.soberPausedMs)
-                    .put("soberVaultPaid", state.soberVaultPaid)
-                    .put("soberPaidOn", state.soberPaidOn)
-                    .put("soberPackage", state.soberPackage)
-                    .put("soberApp", state.soberSummaryLabel())
-                    .put("soberApps", new JSONObject(state.soberApps))
-                    .put("soberWindows", soberWindows)
-                    .put("stepsPerReward", state.stepsPerReward)
-                    .put("stepRewardMinutes", state.stepRewardMinutes)
-                    .put("stepBaselineDate", state.stepBaselineDate)
-                    .put("stepLastCounter", state.stepLastCounter)
-                    .put("firstSeenMs", state.firstSeenMs)
-                    .put("floatingBall", state.floatingBall)
-                    .put("excludeFromRecents", state.excludeFromRecents)
-                    .put("guardSettingsDuringFocus", state.guardSettingsDuringFocus)
-                    .put("hapticFeedback", state.hapticFeedback)
-                    .put("vaultCardCollapsed", state.vaultCardCollapsed)
-                    .put("rewardsSeeded", state.rewardsSeeded)
-                    .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
-                    .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
-                    .put("timeAwarenessBar", state.timeAwarenessBar)
-                    .put("layFlatAuraEffect", state.layFlatAuraEffect)
-                    .put("builtInBlockCatalogVersion", state.builtInBlockCatalogVersion)
-                    .put("blockAppearances", blockAppearances)
-                    .put("enabledBlockAppearances", new JSONArray(state.enabledBlockAppearances))
-                    .put("lastBlockAppearance", state.lastBlockAppearance)
-                    .put("lastBedtimeBlockAppearance", state.lastBedtimeBlockAppearance)
-                    .put("focusTimerBackgroundId", state.focusTimerBackgroundId)
-                    .put("purposeTimerBackgroundId", state.purposeTimerBackgroundId)
-                    .put("sleepLockBackgroundId", state.sleepLockBackgroundId)
-                    .put("earlySleepDays", new JSONArray(state.earlySleepDays))
-                    .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
-                    .put("heartbeats", new JSONArray(state.heartbeats))
-                    .put("hiddenCards", new JSONArray(state.hiddenCards))
-                    .put("expandedRedeemCards", new JSONArray(state.expandedRedeemCards))
-                    .put("completedGuides", new JSONArray(state.completedGuides));
-
-            JSONObject rules = new JSONObject();
-            for (var entry : state.rules.entrySet()) {
-                FocusState.Rule rule = entry.getValue();
-                rules.put(entry.getKey(), new JSONObject()
-                        .put("label", rule.label())
-                        .put("category", rule.category().name()));
-            }
-
-            JSONObject habits = new JSONObject();
-            for (var entry : state.habits.entrySet()) {
-                FocusState.Habit habit = entry.getValue();
-                habits.put(entry.getKey(), new JSONObject()
-                        .put("name", habit.name)
-                        .put("reward", habit.rewardMinutes)
-                        .put("createdMs", habit.createdMs)
-                        .put("checkIns", new JSONArray(habit.checkIns)));
-            }
-
-            JSONObject abstinences = new JSONObject();
-            for (var entry : state.abstinences.entrySet()) {
-                FocusState.Abstinence a = entry.getValue();
-                JSONArray runsArr = new JSONArray();
-                for (FocusState.AbstinenceRun run : a.runs) {
-                    runsArr.put(new JSONObject()
-                            .put("startedMs", run.startedMs())
-                            .put("endedMs", run.endedMs())
-                            .put("relapsed", run.relapsed())
-                            .put("triggerTag", run.triggerTag())
-                            .put("note", run.note()));
-                }
-                abstinences.put(entry.getKey(), new JSONObject()
-                        .put("name", a.name)
-                        .put("startedMs", a.startedMs)
-                        .put("targetHours", a.targetHours)
-                        .put("extraTargetMinutes", a.extraTargetMinutes)
-                        .put("customReward", a.customReward)
-                        .put("rewardMinutes", a.rewardMinutes)
-                        .put("completedCount", a.completedCount)
-                        .put("relapseCount", a.relapseCount)
-                        .put("longestMs", a.longestMs)
-                        .put("rewardClaimed", a.rewardClaimed)
-                        .put("reason", a.reason)
-                        .put("dailySavingYuan", a.dailySavingYuan)
-                        .put("iconIndex", a.iconIndex)
-                        .put("createdMs", a.createdMs)
-                        .put("rewardGuardUntilMs", a.rewardGuardUntilMs)
-                        .put("totalEarnedMinutes", a.totalEarnedMinutes)
-                        .put("previousStartedMs", a.previousStartedMs)
-                        .put("previousStartedForDate", a.previousStartedForDate)
-                        .put("previouslyClaimedTargetHours", a.previouslyClaimedTargetHours)
-                        .put("relapseDates", new JSONArray(a.relapseDates))
-                        .put("diaryNotes", new JSONObject(a.diaryNotes))
-                        .put("diaryTriggers", new JSONObject(a.diaryTriggers))
-                        .put("linkedPackages", new JSONArray(a.linkedPackages))
-                        .put("runs", runsArr));
-            }
-
-            JSONObject todos = new JSONObject();
-            for (var entry : state.todos.entrySet()) {
-                FocusState.Todo todo = entry.getValue();
-                todos.put(entry.getKey(), new JSONObject()
-                        .put("title", todo.title)
-                        .put("reward", todo.rewardMinutes)
-                        .put("done", todo.done)
-                        .put("claimed", todo.claimed)
-                        .put("createdDate", todo.createdDate)
-                        .put("scheduledDate", todo.scheduledDate)
-                        .put("doneDate", todo.doneDate)
-                        .put("createdMs", todo.createdMs));
-            }
-
-            JSONObject rewards = new JSONObject();
-            for (var entry : state.rewards.entrySet()) {
-                FocusState.Reward r = entry.getValue();
-                rewards.put(entry.getKey(), new JSONObject()
-                        .put("title", r.title)
-                        .put("subtitle", r.subtitle)
-                        .put("costMinutes", r.costMinutes)
-                        .put("iconIndex", r.iconIndex)
-                        .put("colorIndex", r.colorIndex)
-                        .put("repeatable", r.repeatable)
-                        .put("redeemedCount", r.redeemedCount)
-                        .put("lastRedeemedMs", r.lastRedeemedMs));
-            }
-
-            JSONArray wishVouchers = new JSONArray();
-            for (FocusState.WishVoucher v : state.wishVouchers) {
-                wishVouchers.put(new JSONObject()
-                        .put("id", v.id)
-                        .put("rewardId", v.rewardId)
-                        .put("title", v.title)
-                        .put("subtitle", v.subtitle)
-                        .put("costMinutes", v.costMinutes)
-                        .put("iconIndex", v.iconIndex)
-                        .put("colorIndex", v.colorIndex)
-                        .put("issuedMs", v.issuedMs)
-                        .put("used", v.used)
-                        .put("usedMs", v.usedMs));
-            }
-
-            JSONObject days = new JSONObject();
-            for (var entry : state.days.entrySet()) {
-                FocusState.Day day = entry.getValue();
-                JSONArray events = new JSONArray();
-                for (FocusState.Event ev : day.events) {
-                    events.put(new JSONObject()
-                            .put("time", ev.timeMs())
-                            .put("type", ev.type())
-                            .put("title", ev.title())
-                            .put("detail", ev.detail())
-                            .put("delta", ev.deltaMs()));
-                }
-                JSONObject categoryMs = new JSONObject();
-                for (var category : day.disciplineCategoryMs.entrySet()) {
-                    categoryMs.put(category.getKey(), category.getValue());
-                }
-                days.put(entry.getKey(), new JSONObject()
-                        .put("learning", day.learningMs)
-                        .put("limited", day.limitedMs)
-                        .put("focus", day.focusMs)
-                        .put("offline", day.offlineMs)
-                        .put("signedIn", day.signedIn)
-                        .put("disciplineCategoryMs", categoryMs)
-                        .put("earned", day.earnedMs)
-                        .put("spent", day.spentMs)
-                        .put("checkIns", day.checkIns)
-                        .put("learningEarned", day.learningEarnedMs)
-                        .put("focusEarned", day.focusEarnedMs)
-                        .put("offlineEarned", day.offlineEarnedMs)
-                        .put("todoEarned", day.todoEarnedMs)
-                        .put("habitEarned", day.habitEarnedMs)
-                        .put("wakeEarned", day.wakeEarnedMs)
-                        .put("areaEarned", day.areaEarnedMs)
-                        .put("steps", day.steps)
-                        .put("stepsClaimed", day.stepsClaimed)
-                        .put("stepsEarned", day.stepsEarnedMs)
-                        .put("rewardSpent", day.rewardSpentMs)
-                        .put("configSpent", day.configSpentMs)
-                        .put("usage", new JSONObject(day.usage))
-                        .put("events", events));
-            }
-
-            root.put("rules", rules).put("habits", habits).put("abstinences", abstinences)
-                    .put("todos", todos).put("rewards", rewards).put("wishVouchers", wishVouchers).put("days", days);
-            preferences.edit().putString("state", root.toString()).apply();
+            preferences.edit().putString("state", encode(state).toString())
+                    .putLong("state_saved_at", System.currentTimeMillis()).apply();
         } catch (JSONException e) {
             Log.e("FocusStore", "Could not save state", e);
         }
+    }
+
+    static JSONObject encode(FocusState state) throws JSONException {
+        JSONArray blockAppearances = new JSONArray();
+        for (FocusState.BlockAppearance appearance : state.blockAppearances.values()) {
+            if (appearance.builtIn()) continue;
+            blockAppearances.put(new JSONObject()
+                    .put("id", appearance.id()).put("fullImage", appearance.fullImage())
+                    .put("squarePercent", appearance.squarePercent()).put("fullZoom", appearance.fullZoom())
+                    .put("textSize", appearance.textSize()).put("text", appearance.text())
+                    .put("sleepText", appearance.sleepText()));
+        }
+
+        JSONArray soberWindows = new JSONArray();
+        for (FocusState.SoberWindow window : state.soberWindows) {
+            soberWindows.put(new JSONArray().put(window.start()).put(window.end()));
+        }
+        JSONObject shopPaidJson = new JSONObject();
+        for (Map.Entry<String, Integer> entry : state.shopItemPaidMinutes.entrySet()) {
+            if (entry.getValue() != null && entry.getValue() > 0) {
+                shopPaidJson.put(entry.getKey(), entry.getValue());
+            }
+        }
+        JSONObject root = new JSONObject()
+                .put("credit", state.creditMs)
+                .put("creditRemainder", state.creditRemainder)
+                .put("vaultMs", state.vaultMs)
+                .put("vaultStepMinutes", state.vaultStepMinutes)
+                .put("vaultExpansionCount", state.vaultExpansionCount)
+                .put("streakProtectCards", state.streakProtectCards)
+                .put("vaultExpandCards", state.vaultExpandCards)
+                .put("indulgentPaidMinutes", state.indulgentPaidMinutes)
+                .put("ownedShopItems", new JSONArray(state.ownedShopItems))
+                .put("shopItemPaidMinutes", shopPaidJson)
+                .put("equippedPiggySkin", state.equippedPiggySkin)
+                .put("equippedRedeemEffect", state.equippedRedeemEffect)
+                .put("rateMode", state.rateMode.name())
+                .put("previousMode", state.previousMode.name())
+                .put("modeSwitchDate", state.modeSwitchDate)
+                .put("indulgentActiveDate", state.indulgentActiveDate)
+                .put("layFlatActiveDate", state.layFlatActiveDate)
+                .put("indulgentPasses", state.indulgentPasses)
+                .put("pendingIndulgentRewards", state.pendingIndulgentRewards)
+                .put("layFlatCards", state.layFlatCards)
+                .put("disciplinedProgress", state.disciplinedProgress)
+                .put("totalDisciplineSessions", state.totalDisciplineSessions)
+                .put("disciplinedDays", new JSONArray(state.disciplinedDays))
+                .put("lastResetDate", state.lastResetDate)
+                .put("learningPercent", state.learningPercent)
+                .put("focusPercent", state.focusPercent)
+                .put("offlinePercent", state.offlinePercent)
+                .put("bedtime", state.bedtime)
+                .put("earlyWake", writeEarlyWake(state.earlyWake))
+                .put("areaCheckIn", writeAreaCheckIn(state.areaCheckIn))
+                .put("earlySleepWakeDates", new JSONArray(state.earlySleepWakeDates))
+                .put("sleepStart", state.sleepStart)
+                .put("pendingLearningMs", state.pendingLearningMs)
+                .put("sleepEnd", state.sleepEnd)
+                .put("acknowledgedSleepProtectionEnd", state.acknowledgedSleepProtectionEnd)
+                .put("sleepTargetEndMs", state.sleepTargetEndMs)
+                .put("sleepLockBypassEndMs", state.sleepLockBypassEndMs)
+                .put("bedtimeSuspendedOn", state.bedtimeSuspendedOn)
+                .put("globalAllowlist", new JSONArray(state.globalAllowlist))
+                .put("earlySleepPendingClaimDate", state.earlySleepPendingClaimDate)
+                .put("earlySleepRewardMinutes", state.earlySleepRewardMinutes)
+                .put("todoDailyCapMinutes", state.todoDailyCapMinutes)
+                .put("habitDailyCapMinutes", state.habitDailyCapMinutes)
+                .put("stepDailyCapMinutes", state.stepDailyCapMinutes)
+                .put("themeMode", state.themeMode)
+                .put("colorTheme", state.colorTheme)
+                .put("freeConfigUsedKeys", new JSONArray(state.freeConfigUsedKeys))
+                .put("presetWork", state.presetWork)
+                .put("pomodoroWork", state.pomodoroWork)
+                .put("pomodoroRest", state.pomodoroRest)
+                .put("pomodoroRounds", state.pomodoroRounds)
+                .put("phaseEnd", state.phaseEnd)
+                .put("phaseRewardCursor", state.phaseRewardCursor)
+                .put("phaseDuration", state.phaseDuration)
+                .put("phaseEligibleMs", state.phaseEligibleMs)
+                .put("pausedRemaining", state.pausedRemaining)
+                .put("workMinutes", state.workMinutes)
+                .put("restMinutes", state.restMinutes)
+                .put("roundsLeft", state.roundsLeft)
+                .put("inBreak", state.inBreak)
+                .put("countdownCategory", state.countdownCategory.id())
+                .put("offlineStartMs", state.offlineStartMs)
+                .put("offlineSessionStarted", state.offlineSessionStarted)
+                .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
+                .put("offlineEligibleAccumulatedMs", state.offlineEligibleAccumulatedMs)
+                .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
+                .put("stopwatchCategory", state.stopwatchCategory.id())
+                .put("customDisciplineCategories", new JSONObject(state.customDisciplineCategories))
+                .put("archivedDisciplineCategories", new JSONArray(state.archivedDisciplineCategories))
+                .put("soberUntil", state.soberUntil)
+                .put("soberStarted", state.soberStarted)
+                .put("soberSessionStarted", state.soberSessionStarted)
+                .put("soberPausedMs", state.soberPausedMs)
+                .put("soberVaultPaid", state.soberVaultPaid)
+                .put("soberPaidOn", state.soberPaidOn)
+                .put("soberPackage", state.soberPackage)
+                .put("soberApp", state.soberSummaryLabel())
+                .put("soberApps", new JSONObject(state.soberApps))
+                .put("soberWindows", soberWindows)
+                .put("stepsPerReward", state.stepsPerReward)
+                .put("stepRewardMinutes", state.stepRewardMinutes)
+                .put("stepBaselineDate", state.stepBaselineDate)
+                .put("stepLastCounter", state.stepLastCounter)
+                .put("firstSeenMs", state.firstSeenMs)
+                .put("floatingBall", state.floatingBall)
+                .put("excludeFromRecents", state.excludeFromRecents)
+                .put("guardSettingsDuringFocus", state.guardSettingsDuringFocus)
+                .put("hapticFeedback", state.hapticFeedback)
+                .put("vaultCardCollapsed", state.vaultCardCollapsed)
+                .put("rewardsSeeded", state.rewardsSeeded)
+                .put("freeLearningSlotUsed", state.freeLearningSlotUsed)
+                .put("freeHabitSlotUsed", state.freeHabitSlotUsed)
+                .put("timeAwarenessBar", state.timeAwarenessBar)
+                .put("layFlatAuraEffect", state.layFlatAuraEffect)
+                .put("themeAtmosphereMotion", state.themeAtmosphereMotion)
+                .put("builtInBlockCatalogVersion", state.builtInBlockCatalogVersion)
+                .put("blockAppearances", blockAppearances)
+                .put("enabledBlockAppearances", new JSONArray(state.enabledBlockAppearances))
+                .put("lastBlockAppearance", state.lastBlockAppearance)
+                .put("lastBedtimeBlockAppearance", state.lastBedtimeBlockAppearance)
+                .put("focusTimerBackgroundId", state.focusTimerBackgroundId)
+                .put("purposeTimerBackgroundId", state.purposeTimerBackgroundId)
+                .put("sleepLockBackgroundId", state.sleepLockBackgroundId)
+                .put("earlySleepDays", new JSONArray(state.earlySleepDays))
+                .put("earlySleepFailed", new JSONArray(state.earlySleepFailed))
+                .put("heartbeats", new JSONArray(state.heartbeats))
+                .put("hiddenCards", new JSONArray(state.hiddenCards))
+                .put("expandedRedeemCards", new JSONArray(state.expandedRedeemCards))
+                .put("completedGuides", new JSONArray(state.completedGuides));
+
+        JSONObject rules = new JSONObject();
+        for (var entry : state.rules.entrySet()) {
+            FocusState.Rule rule = entry.getValue();
+            rules.put(entry.getKey(), new JSONObject()
+                    .put("label", rule.label())
+                    .put("category", rule.category().name()));
+        }
+
+        JSONObject habits = new JSONObject();
+        for (var entry : state.habits.entrySet()) {
+            FocusState.Habit habit = entry.getValue();
+            habits.put(entry.getKey(), new JSONObject()
+                    .put("name", habit.name)
+                    .put("reward", habit.rewardMinutes)
+                    .put("createdMs", habit.createdMs)
+                    .put("checkIns", new JSONArray(habit.checkIns)));
+        }
+
+        JSONObject abstinences = new JSONObject();
+        for (var entry : state.abstinences.entrySet()) {
+            FocusState.Abstinence a = entry.getValue();
+            JSONArray runsArr = new JSONArray();
+            for (FocusState.AbstinenceRun run : a.runs) {
+                runsArr.put(new JSONObject()
+                        .put("startedMs", run.startedMs())
+                        .put("endedMs", run.endedMs())
+                        .put("relapsed", run.relapsed())
+                        .put("triggerTag", run.triggerTag())
+                        .put("note", run.note()));
+            }
+            abstinences.put(entry.getKey(), new JSONObject()
+                    .put("name", a.name)
+                    .put("startedMs", a.startedMs)
+                    .put("targetHours", a.targetHours)
+                    .put("extraTargetMinutes", a.extraTargetMinutes)
+                    .put("customReward", a.customReward)
+                    .put("rewardMinutes", a.rewardMinutes)
+                    .put("completedCount", a.completedCount)
+                    .put("relapseCount", a.relapseCount)
+                    .put("longestMs", a.longestMs)
+                    .put("rewardClaimed", a.rewardClaimed)
+                    .put("reason", a.reason)
+                    .put("dailySavingYuan", a.dailySavingYuan)
+                    .put("iconIndex", a.iconIndex)
+                    .put("createdMs", a.createdMs)
+                    .put("rewardGuardUntilMs", a.rewardGuardUntilMs)
+                    .put("totalEarnedMinutes", a.totalEarnedMinutes)
+                    .put("previousStartedMs", a.previousStartedMs)
+                    .put("previousStartedForDate", a.previousStartedForDate)
+                    .put("previouslyClaimedTargetHours", a.previouslyClaimedTargetHours)
+                    .put("relapseDates", new JSONArray(a.relapseDates))
+                    .put("diaryNotes", new JSONObject(a.diaryNotes))
+                    .put("diaryTriggers", new JSONObject(a.diaryTriggers))
+                    .put("linkedPackages", new JSONArray(a.linkedPackages))
+                    .put("runs", runsArr));
+        }
+
+        JSONObject todos = new JSONObject();
+        for (var entry : state.todos.entrySet()) {
+            FocusState.Todo todo = entry.getValue();
+            todos.put(entry.getKey(), new JSONObject()
+                    .put("title", todo.title)
+                    .put("reward", todo.rewardMinutes)
+                    .put("done", todo.done)
+                    .put("claimed", todo.claimed)
+                    .put("createdDate", todo.createdDate)
+                    .put("scheduledDate", todo.scheduledDate)
+                    .put("doneDate", todo.doneDate)
+                    .put("createdMs", todo.createdMs));
+        }
+
+        JSONObject rewards = new JSONObject();
+        for (var entry : state.rewards.entrySet()) {
+            FocusState.Reward r = entry.getValue();
+            rewards.put(entry.getKey(), new JSONObject()
+                    .put("title", r.title)
+                    .put("subtitle", r.subtitle)
+                    .put("costMinutes", r.costMinutes)
+                    .put("iconIndex", r.iconIndex)
+                    .put("colorIndex", r.colorIndex)
+                    .put("repeatable", r.repeatable)
+                    .put("redeemedCount", r.redeemedCount)
+                    .put("lastRedeemedMs", r.lastRedeemedMs));
+        }
+
+        JSONArray wishVouchers = new JSONArray();
+        for (FocusState.WishVoucher v : state.wishVouchers) {
+            wishVouchers.put(new JSONObject()
+                    .put("id", v.id)
+                    .put("rewardId", v.rewardId)
+                    .put("title", v.title)
+                    .put("subtitle", v.subtitle)
+                    .put("costMinutes", v.costMinutes)
+                    .put("iconIndex", v.iconIndex)
+                    .put("colorIndex", v.colorIndex)
+                    .put("issuedMs", v.issuedMs)
+                    .put("used", v.used)
+                    .put("usedMs", v.usedMs));
+        }
+
+        JSONObject days = new JSONObject();
+        for (var entry : state.days.entrySet()) {
+            FocusState.Day day = entry.getValue();
+            JSONArray events = new JSONArray();
+            for (FocusState.Event ev : day.events) {
+                events.put(new JSONObject()
+                        .put("time", ev.timeMs())
+                        .put("type", ev.type())
+                        .put("title", ev.title())
+                        .put("detail", ev.detail())
+                        .put("delta", ev.deltaMs()));
+            }
+            JSONObject categoryMs = new JSONObject();
+            for (var category : day.disciplineCategoryMs.entrySet()) {
+                categoryMs.put(category.getKey(), category.getValue());
+            }
+            days.put(entry.getKey(), new JSONObject()
+                    .put("learning", day.learningMs)
+                    .put("limited", day.limitedMs)
+                    .put("focus", day.focusMs)
+                    .put("offline", day.offlineMs)
+                    .put("signedIn", day.signedIn)
+                    .put("disciplineCategoryMs", categoryMs)
+                    .put("earned", day.earnedMs)
+                    .put("spent", day.spentMs)
+                    .put("checkIns", day.checkIns)
+                    .put("learningEarned", day.learningEarnedMs)
+                    .put("focusEarned", day.focusEarnedMs)
+                    .put("offlineEarned", day.offlineEarnedMs)
+                    .put("todoEarned", day.todoEarnedMs)
+                    .put("habitEarned", day.habitEarnedMs)
+                    .put("wakeEarned", day.wakeEarnedMs)
+                    .put("areaEarned", day.areaEarnedMs)
+                    .put("steps", day.steps)
+                    .put("stepsClaimed", day.stepsClaimed)
+                    .put("stepsEarned", day.stepsEarnedMs)
+                    .put("rewardSpent", day.rewardSpentMs)
+                    .put("configSpent", day.configSpentMs)
+                    .put("usage", new JSONObject(day.usage))
+                    .put("events", events));
+        }
+
+        root.put("rules", rules).put("habits", habits).put("abstinences", abstinences)
+                .put("todos", todos).put("rewards", rewards).put("wishVouchers", wishVouchers).put("days", days);
+        return root;
     }
 }

@@ -68,6 +68,7 @@ final class RedeemUi {
         private final Paint dashPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF cardRect = new RectF();
         private final RectF notchArcRect = new RectF();
+        private final Path watermarkPath = new Path();
         private View perforationView;
 
         TicketCardLayout(Context context) {
@@ -99,6 +100,8 @@ final class RedeemUi {
             canvas.drawRoundRect(cardRect, radius, radius, fillPaint);
             fillPaint.setShader(null);
 
+            drawTicketWatermark(canvas, w, h, radius);
+
             strokePaint.setStrokeWidth(dp(getContext(), 1));
             strokePaint.setColor(voucherStroke());
             canvas.drawRoundRect(cardRect, radius, radius, strokePaint);
@@ -126,6 +129,65 @@ final class RedeemUi {
                 }
             }
             super.onDraw(canvas);
+        }
+
+        private void drawTicketWatermark(Canvas canvas, float w, float h, float radius) {
+            watermarkPath.reset();
+            watermarkPath.addRoundRect(cardRect, radius, radius, Path.Direction.CW);
+            canvas.save();
+            canvas.clipPath(watermarkPath);
+            int pal = colorTheme();
+            switch (pal) {
+                case FocusState.PALETTE_SAGE -> {
+                    fillPaint.setColor(0x20ffffff);
+                    watermarkPath.reset();
+                    watermarkPath.moveTo(w * 0.86f, dp(getContext(), 10));
+                    watermarkPath.quadTo(w * 0.72f, h * 0.24f, w * 0.94f, h * 0.42f);
+                    watermarkPath.quadTo(w * 0.90f, h * 0.22f, w * 0.86f, dp(getContext(), 10));
+                    canvas.drawPath(watermarkPath, fillPaint);
+                    fillPaint.setColor(0x16ffffff);
+                    canvas.drawCircle(w * 0.78f, h * 0.16f, dp(getContext(), 22), fillPaint);
+                }
+                case FocusState.PALETTE_SAKURA -> {
+                    drawSakuraPetal(canvas, watermarkPath, fillPaint, w * 0.84f, h * 0.22f, dp(getContext(), 15), -24f, 0.9f, 0x26ffffff);
+                    drawSakuraPetal(canvas, watermarkPath, fillPaint, w * 0.72f, h * 0.34f, dp(getContext(), 9), 34f, 0.85f, 0x1effffff);
+                }
+                case FocusState.PALETTE_JOURNAL -> {
+                    fillPaint.setColor(0x22ffffff);
+                    float sp = dp(getContext(), 14);
+                    for (int gx = 0; gx < 5; gx++) {
+                        for (int gy = 0; gy < 4; gy++) {
+                            canvas.drawCircle(w * 0.68f + gx * sp, dp(getContext(), 14) + gy * sp, dp(getContext(), 1.2f), fillPaint);
+                        }
+                    }
+                    strokePaint.setColor(0x26ffffff);
+                    strokePaint.setStrokeWidth(dp(getContext(), 1));
+                    canvas.drawRect(dp(getContext(), 8), dp(getContext(), 8), w - dp(getContext(), 8), h - dp(getContext(), 8), strokePaint);
+                }
+                case FocusState.PALETTE_AURORA -> {
+                    int[] cols = {0xff99f6e4, 0xff93c5fd, 0xffddd6fe};
+                    drawAuroraCurve(canvas, watermarkPath, strokePaint,
+                            w * 0.28f, h * 0.32f, w * 0.62f, h * 0.06f, w * 1.02f, h * 0.26f,
+                            0f, 1f, dp(getContext(), 8), 0.7f, dp(getContext(), 14), cols, 48);
+                    drawPrismDiamond(canvas, watermarkPath, fillPaint, w * 0.86f, h * 0.20f, dp(getContext(), 6), 16f, 0x36ffffff);
+                }
+                case FocusState.PALETTE_STUDY -> {
+                    fillPaint.setColor(0x22fde68a);
+                    canvas.drawCircle(w * 0.82f, h * 0.14f, dp(getContext(), 42), fillPaint);
+                    strokePaint.setColor(0x28fde68a);
+                    strokePaint.setStrokeWidth(dp(getContext(), 1));
+                    float inset2 = dp(getContext(), 7);
+                    notchArcRect.set(inset2, inset2, w - inset2, h - inset2);
+                    canvas.drawRoundRect(notchArcRect, Math.max(4f, radius - inset2), Math.max(4f, radius - inset2), strokePaint);
+                }
+                default -> {
+                    fillPaint.setColor(0x1cffffff);
+                    canvas.drawCircle(w * 0.78f, h * 0.18f, dp(getContext(), 22), fillPaint);
+                    canvas.drawCircle(w * 0.86f, h * 0.22f, dp(getContext(), 16), fillPaint);
+                    canvas.drawCircle(w * 0.70f, h * 0.24f, dp(getContext(), 14), fillPaint);
+                }
+            }
+            canvas.restore();
         }
     }
 
@@ -491,22 +553,163 @@ final class RedeemUi {
         }
     }
 
+    static void drawFourStar(Canvas canvas, Path path, Paint paint, float x, float y, float r, int color) {
+        path.reset();
+        path.moveTo(x, y - r);
+        path.quadTo(x, y, x + r, y);
+        path.quadTo(x, y, x, y + r);
+        path.quadTo(x, y, x - r, y);
+        path.quadTo(x, y, x, y - r);
+        path.close();
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(color);
+        canvas.drawPath(path, paint);
+    }
+
+    static void drawSakuraPetal(Canvas canvas, Path path, Paint paint,
+                                float x, float y, float r, float rotDeg, float flipScaleY, int color) {
+        canvas.save();
+        canvas.translate(x, y);
+        canvas.rotate(rotDeg);
+        canvas.scale(1f, Math.max(0.28f, Math.min(1f, flipScaleY)));
+        path.reset();
+        path.moveTo(0f, r * 0.85f);
+        path.cubicTo(-r * 0.92f, r * 0.36f, -r * 0.96f, -r * 0.52f, -r * 0.34f, -r * 0.92f);
+        path.lineTo(0f, -r * 0.54f);
+        path.lineTo(r * 0.34f, -r * 0.92f);
+        path.cubicTo(r * 0.96f, -r * 0.52f, r * 0.92f, r * 0.36f, 0f, r * 0.85f);
+        path.close();
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(color);
+        canvas.drawPath(path, paint);
+        int baseA = (color >>> 24) & 0xff;
+        if (baseA > 32) {
+            int veinA = Math.round(baseA * 0.38f);
+            paint.setColor((veinA << 24) | 0x00ffffff);
+            canvas.drawCircle(0f, r * 0.16f, r * 0.24f, paint);
+        }
+        canvas.restore();
+    }
+
+    static void drawPrismDiamond(Canvas canvas, Path path, Paint paint,
+                                 float x, float y, float r, float rotDeg, int color) {
+        canvas.save();
+        canvas.translate(x, y);
+        canvas.rotate(rotDeg);
+        float hr = r * 1.24f;
+        float wr = r * 0.70f;
+        path.reset();
+        path.moveTo(0f, -hr);
+        path.lineTo(wr, 0f);
+        path.lineTo(0f, hr);
+        path.lineTo(-wr, 0f);
+        path.close();
+        paint.setShader(null);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(color);
+        canvas.drawPath(path, paint);
+        int baseA = (color >>> 24) & 0xff;
+        if (baseA > 32) {
+            path.reset();
+            path.moveTo(0f, -hr);
+            path.lineTo(0f, 0f);
+            path.lineTo(-wr, 0f);
+            path.close();
+            paint.setColor((Math.round(baseA * 0.44f) << 24) | 0x00ffffff);
+            canvas.drawPath(path, paint);
+        }
+        canvas.restore();
+    }
+
+    static void drawAuroraCurve(Canvas canvas, Path path, Paint strokePaint,
+                                float sx, float sy, float cx, float cy, float ex, float ey,
+                                float tStart, float tEnd, float waveAmp, float phase,
+                                float strokeWidth, int[] palette, int alpha) {
+        if (tEnd <= tStart + 0.01f || alpha <= 4) return;
+        float dx = ex - sx;
+        float dy = ey - sy;
+        float dist = Math.max(1f, (float) Math.hypot(dx, dy));
+        float perpX = -dy / dist;
+        float perpY = dx / dist;
+
+        int steps = 16;
+        path.reset();
+        float x0 = 0f, y0 = 0f, x1 = 0f, y1 = 0f;
+        for (int i = 0; i <= steps; i++) {
+            float u = tStart + (tEnd - tStart) * (i / (float) steps);
+            float omt = 1f - u;
+            float env = (float) Math.sin(u * Math.PI);
+            float wave = (float) Math.sin(u * 10.5f + phase) * waveAmp * env;
+            float px = omt * omt * sx + 2f * omt * u * cx + u * u * ex + perpX * wave;
+            float py = omt * omt * sy + 2f * omt * u * cy + u * u * ey + perpY * wave;
+            if (i == 0) {
+                path.moveTo(px, py);
+                x0 = px;
+                y0 = py;
+            } else {
+                path.lineTo(px, py);
+            }
+            if (i == steps) {
+                x1 = px;
+                y1 = py;
+            }
+        }
+        int c0 = (alpha << 24) | (palette[0] & 0x00ffffff);
+        int c1 = (alpha << 24) | (palette[1 % palette.length] & 0x00ffffff);
+        int c2 = (alpha << 24) | (palette[2 % palette.length] & 0x00ffffff);
+        strokePaint.setStyle(Paint.Style.STROKE);
+        strokePaint.setStrokeCap(Paint.Cap.ROUND);
+        strokePaint.setStrokeJoin(Paint.Join.ROUND);
+        strokePaint.setStrokeWidth(strokeWidth);
+        strokePaint.setShader(new LinearGradient(x0, y0,
+                Math.abs(x1 - x0) + Math.abs(y1 - y0) < 2f ? x0 + 4f : x1, y1,
+                new int[]{c0, c1, c2}, new float[]{0f, 0.52f, 1f}, Shader.TileMode.CLAMP));
+        canvas.drawPath(path, strokePaint);
+        strokePaint.setShader(null);
+    }
+
+    static float quadBezier(float p0, float p1, float p2, float t) {
+        float omt = 1f - t;
+        return omt * omt * p0 + 2f * omt * t * p1 + t * t * p2;
+    }
+
+    static int withAlpha(int color, int alpha) {
+        int clamped = Math.max(0, Math.min(255, alpha));
+        return (clamped << 24) | (color & 0x00ffffff);
+    }
+
     static final class RedeemAnimOverlay extends View {
         private static final class Particle {
             float sx, sy, cx, cy, ex, ey;
             float delayFrac, radius;
+            float spinSpeed, swayAmp, swayPhase;
             int color;
+            boolean dust;
+        }
+
+        private static final class ImpactSpark {
+            float angle, dist, radius;
+            int color;
+            boolean origin;
         }
 
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path shapePath = new Path();
+        private final Path ribbonPath = new Path();
         private final List<Particle> particles = new ArrayList<>();
+        private final List<ImpactSpark> sparks = new ArrayList<>();
         private final int[] tmpLoc = new int[2];
         private ValueAnimator animator;
+        private float originX, originY, targetX, targetY, curveX, curveY;
         private float floatStartX, floatStartY;
         private String floatingText = "";
         private int floatingColor;
-        private String particleShape = "circle";
+        private String particleShape = "gold_orb";
+        private int[] activeColors = {0xfff5b942, 0xffffdd83, 0xffd9921e, 0xfffff3c4};
+        private boolean popMode;
 
         RedeemAnimOverlay(Context context) {
             super(context);
@@ -514,6 +717,8 @@ final class RedeemUi {
             setClickable(false);
             setFocusable(false);
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
         }
 
         void cancel() {
@@ -522,6 +727,7 @@ final class RedeemUi {
                 animator = null;
             }
             particles.clear();
+            sparks.clear();
             floatingText = "";
             setVisibility(GONE);
         }
@@ -544,43 +750,178 @@ final class RedeemUi {
             float tx = tmpLoc[0] - ox + target.getWidth() * 0.5f;
             float ty = tmpLoc[1] - oy + target.getHeight() * 0.5f;
 
+            playBurstAtCoords(sx, sy, tx, ty, label, textColor, effectId, 820L);
+        }
+
+        void playBurstAtCoords(float sx, float sy, float tx, float ty,
+                               String label, int textColor, String effectId, long durationMs) {
+            if (reducedMotion(getContext()) || !isAttachedToWindow()) return;
             if (animator != null) {
                 animator.cancel();
                 animator = null;
             }
+            popMode = false;
             particles.clear();
+            sparks.clear();
+            originX = sx;
+            originY = sy;
+            targetX = tx;
+            targetY = ty;
+            float dist = (float) Math.hypot(tx - sx, ty - sy);
+            float baseLift = Math.min(dp(getContext(), 58), Math.max(dp(getContext(), 16), dist * 0.25f));
+            curveX = (sx + tx) * 0.5f + dp(getContext(), 18);
+            curveY = Math.min(sy, ty) - baseLift;
             floatStartX = sx;
-            floatStartY = sy - dp(getContext(), 12);
+            floatStartY = sy - dp(getContext(), 14);
             floatingText = label == null ? "" : label;
             floatingColor = textColor;
 
             ShopCatalog.RedeemEffectPalette fx = ShopCatalog.redeemEffect(effectId);
-            int[] colors = fx.colors();
+            activeColors = fx.colors();
             particleShape = fx.shapeKind();
-            for (int i = 0; i < 10; i++) {
+
+            int mainCount = switch (particleShape) {
+                case "petal" -> 16;
+                case "aurora" -> 14;
+                case "comet" -> 12;
+                default -> 10;
+            };
+            int dustCount = "gold_orb".equals(particleShape) ? 6 : 9;
+
+            for (int i = 0; i < mainCount; i++) {
                 Particle p = new Particle();
-                float jitterX = (i - 4.5f) * dp(getContext(), 6);
-                float arcOffsetX = ((i % 2 == 0) ? -1f : 1f) * dp(getContext(), 28 + i * 7);
-                p.sx = sx + jitterX * 0.5f;
-                p.sy = sy + ((i % 3) - 1) * dp(getContext(), 4);
-                p.ex = tx + ((i % 3) - 1) * dp(getContext(), 4);
-                p.ey = ty + ((i % 3) - 1) * dp(getContext(), 3);
+                float frac = mainCount <= 1 ? 0f : (i / (float) (mainCount - 1)) * 2f - 1f;
+                float side = (i % 2 == 0) ? -1f : 1f;
+                float arcOffsetX = side * dp(getContext(), 18 + (i % 5) * 9) + frac * dp(getContext(), 12);
+                p.sx = sx + frac * dp(getContext(), 10);
+                p.sy = sy + ((i % 3) - 1) * dp(getContext(), 5);
+                p.ex = tx + ((i % 3) - 1) * dp(getContext(), 5);
+                p.ey = ty + ((i % 3) - 1) * dp(getContext(), 4);
                 p.cx = (p.sx + p.ex) * 0.5f + arcOffsetX;
-                p.cy = Math.min(p.sy, p.ey) - dp(getContext(), 36 + (i % 4) * 14);
-                p.delayFrac = i * 0.025f;
-                p.radius = dp(getContext(), 4.2f + (i % 3) * 1.1f);
-                p.color = colors[i % colors.length];
+                p.cy = Math.min(p.sy, p.ey) - baseLift * (0.65f + (i % 4) * 0.16f);
+                p.delayFrac = 0.04f + i * 0.018f;
+                p.radius = dp(getContext(), ("petal".equals(particleShape) ? 5.6f : 4.8f) + (i % 3) * 1.1f);
+                p.spinSpeed = 160f + (i % 4) * 65f;
+                p.swayAmp = dp(getContext(), 6 + (i % 3) * 4);
+                p.swayPhase = i * 1.15f;
+                p.color = activeColors[i % activeColors.length];
+                p.dust = false;
                 particles.add(p);
             }
+            for (int i = 0; i < dustCount; i++) {
+                Particle d = new Particle();
+                float side = (i % 2 == 0) ? 1f : -1f;
+                d.sx = sx + (i - dustCount * 0.5f) * dp(getContext(), 4);
+                d.sy = sy + ((i % 3) - 1) * dp(getContext(), 6);
+                d.ex = tx + ((i % 2) == 0 ? 4f : -4f);
+                d.ey = ty + ((i % 3) - 1) * dp(getContext(), 3);
+                d.cx = (d.sx + d.ex) * 0.5f + side * dp(getContext(), 28 + i * 5);
+                d.cy = Math.min(d.sy, d.ey) - baseLift * (0.55f + (i % 3) * 0.18f);
+                d.delayFrac = 0.08f + i * 0.028f;
+                d.radius = dp(getContext(), 2.2f + (i % 2) * 0.8f);
+                d.spinSpeed = 200f + i * 40f;
+                d.swayAmp = dp(getContext(), 8);
+                d.swayPhase = i * 1.7f;
+                d.color = activeColors[(i + 1) % activeColors.length];
+                d.dust = true;
+                particles.add(d);
+            }
 
+            // Stage 1 origin sparks + Stage 3 target arrival sparks
+            for (int i = 0; i < 6; i++) {
+                ImpactSpark s = new ImpactSpark();
+                s.origin = true;
+                s.angle = (float) (i * Math.PI / 3.0 + (i % 2) * 0.22);
+                s.dist = dp(getContext(), 22 + (i % 3) * 6);
+                s.radius = dp(getContext(), 3.2f + (i % 2) * 0.9f);
+                s.color = activeColors[i % activeColors.length];
+                sparks.add(s);
+            }
+            for (int i = 0; i < 8; i++) {
+                ImpactSpark s = new ImpactSpark();
+                s.origin = false;
+                s.angle = (float) (i * Math.PI / 4.0 + 0.18);
+                s.dist = dp(getContext(), 26 + (i % 3) * 7);
+                s.radius = dp(getContext(), 3.8f + (i % 2) * 1.1f);
+                s.color = activeColors[i % activeColors.length];
+                sparks.add(s);
+            }
+
+            startAnimator(durationMs);
+        }
+
+        boolean centerOf(View source, float[] out) {
+            if (reducedMotion(getContext()) || source == null
+                    || !isAttachedToWindow() || !source.isAttachedToWindow()) return false;
+            getLocationInWindow(tmpLoc);
+            int ox = tmpLoc[0];
+            int oy = tmpLoc[1];
+            source.getLocationInWindow(tmpLoc);
+            out[0] = tmpLoc[0] - ox + source.getWidth() * 0.5f;
+            out[1] = tmpLoc[1] - oy + source.getHeight() * 0.5f;
+            return true;
+        }
+
+        void playPop(View source, String label, int textColor, String effectId) {
+            float[] xy = new float[2];
+            if (!centerOf(source, xy)) return;
+            playPopAtCoords(xy[0], xy[1], label, textColor, effectId);
+        }
+
+        void playPopAtCoords(float sx, float sy, String label, int textColor, String effectId) {
+            if (reducedMotion(getContext()) || !isAttachedToWindow()) return;
+            if (animator != null) {
+                animator.cancel();
+                animator = null;
+            }
+            popMode = true;
+            particles.clear();
+            sparks.clear();
+            originX = sx;
+            originY = sy;
+            targetX = sx;
+            targetY = sy;
+            floatStartX = sx;
+            floatStartY = sy - dp(getContext(), 10);
+            floatingText = label == null ? "" : label;
+            floatingColor = textColor;
+
+            ShopCatalog.RedeemEffectPalette fx = ShopCatalog.redeemEffect(effectId);
+            activeColors = fx.colors();
+            particleShape = fx.shapeKind();
+
+            for (int i = 0; i < 12; i++) {
+                double ang = i * Math.PI / 6.0 + (i % 2) * 0.25;
+                float reach = dp(getContext(), 24 + (i % 3) * 9);
+                Particle p = new Particle();
+                p.sx = sx;
+                p.sy = sy;
+                p.ex = sx + (float) Math.cos(ang) * reach;
+                p.ey = sy + (float) Math.sin(ang) * reach - ("petal".equals(particleShape) ? dp(getContext(), 4) : 0f);
+                p.cx = (p.sx + p.ex) * 0.5f;
+                p.cy = Math.min(p.sy, p.ey) - dp(getContext(), 8);
+                p.delayFrac = 0f;
+                p.radius = dp(getContext(), (i % 3 == 0) ? 2.6f : 4.4f);
+                p.spinSpeed = 180f + (i % 4) * 50f;
+                p.swayAmp = dp(getContext(), 4);
+                p.swayPhase = i * 1.1f;
+                p.color = activeColors[i % activeColors.length];
+                p.dust = (i % 3 == 0);
+                particles.add(p);
+            }
+            startAnimator(520L);
+        }
+
+        private void startAnimator(long durationMs) {
             setVisibility(VISIBLE);
             ValueAnimator va = ValueAnimator.ofFloat(0f, 1f);
-            va.setDuration(560);
-            va.setInterpolator(new DecelerateInterpolator(1.2f));
+            va.setDuration(durationMs);
+            va.setInterpolator(new DecelerateInterpolator(1.15f));
             va.addUpdateListener(anim -> invalidate());
             va.addListener(new AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(Animator animation) {
                     particles.clear();
+                    sparks.clear();
                     floatingText = "";
                     animator = null;
                     setVisibility(GONE);
@@ -588,6 +929,7 @@ final class RedeemUi {
 
                 @Override public void onAnimationCancel(Animator animation) {
                     particles.clear();
+                    sparks.clear();
                     floatingText = "";
                     animator = null;
                     setVisibility(GONE);
@@ -600,48 +942,156 @@ final class RedeemUi {
         @Override protected void onDraw(Canvas canvas) {
             if (animator == null) return;
             float raw = (float) animator.getAnimatedValue();
+            Context ctx = getContext();
 
             if (!floatingText.isEmpty() && raw < 0.78f) {
                 float u = raw / 0.78f;
                 int alpha = Math.round(255f * (u < 0.2f ? (u / 0.2f) : (1f - (u - 0.2f) / 0.8f)));
                 paint.setShader(null);
                 paint.setStyle(Paint.Style.FILL);
-                paint.setColor((Math.max(0, Math.min(255, alpha)) << 24) | (floatingColor & 0x00ffffff));
+                paint.setColor(withAlpha(floatingColor, alpha));
                 paint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
                 paint.setTextSize(15f * getResources().getDisplayMetrics().scaledDensity);
                 paint.setTextAlign(Paint.Align.CENTER);
-                float rise = dp(getContext(), 36) * u;
+                float rise = dp(ctx, 36) * u;
                 canvas.drawText(floatingText, floatStartX, floatStartY - rise, paint);
             }
 
-            paint.setStyle(Paint.Style.FILL);
+            // Stage 1: Launch ring & origin sparks
+            if (raw < 0.30f) {
+                float u = raw / 0.30f;
+                int ringAlpha = Math.round(170f * (1f - u));
+                strokePaint.setShader(null);
+                strokePaint.setStrokeWidth(dp(ctx, 2.2f - 1.2f * u));
+                strokePaint.setColor(withAlpha(activeColors[0], ringAlpha));
+                canvas.drawCircle(originX, originY, dp(ctx, 8 + (popMode ? 24 : 20) * u), strokePaint);
+
+                int sparkAlpha = Math.round(230f * (1f - u * u));
+                for (ImpactSpark s : sparks) {
+                    if (!s.origin) continue;
+                    float sx = originX + (float) Math.cos(s.angle) * s.dist * u;
+                    float sy = originY + (float) Math.sin(s.angle) * s.dist * u;
+                    drawShapeAtom(canvas, sx, sy, s.radius * (1f - 0.35f * u), u * 90f, 1f, s.color, sparkAlpha, true);
+                }
+            }
+
+            // Stage 2: Distinct effect flight (Aurora ribbon + particles)
+            float flightEnd = popMode ? 1f : 0.84f;
+            if (!popMode && "aurora".equals(particleShape) && raw > 0.04f && raw < 0.90f) {
+                float tStart = Math.max(0f, raw - 0.38f);
+                float tEnd = Math.min(1f, raw * 1.18f);
+                float fade = raw < 0.68f ? 1f : Math.max(0f, (0.90f - raw) / 0.22f);
+                drawAuroraCurve(canvas, ribbonPath, strokePaint, originX, originY, curveX, curveY, targetX, targetY,
+                        tStart, tEnd, dp(ctx, 8), raw * 6.5f, dp(ctx, 10), activeColors, Math.round(92f * fade));
+                drawAuroraCurve(canvas, ribbonPath, strokePaint, originX, originY, curveX + dp(ctx, 10),
+                        curveY - dp(ctx, 8), targetX, targetY,
+                        tStart, tEnd, dp(ctx, 5), raw * 6.5f + 1.4f, dp(ctx, 3.6f), activeColors, Math.round(170f * fade));
+            }
+
             for (Particle p : particles) {
-                float local = (raw - p.delayFrac) / (1f - p.delayFrac);
+                float local = (raw - p.delayFrac) / Math.max(0.05f, flightEnd - p.delayFrac);
                 if (local <= 0f || local >= 1f) continue;
-                float omt = 1f - local;
-                float x = omt * omt * p.sx + 2f * omt * local * p.cx + local * local * p.ex;
-                float y = omt * omt * p.sy + 2f * omt * local * p.cy + local * local * p.ey;
-                float scale = local < 0.75f ? 1f : Math.max(0.2f, 1f - (local - 0.75f) / 0.25f * 0.7f);
-                int alpha = local < 0.8f ? 255 : Math.round(255f * (1f - (local - 0.8f) / 0.2f));
-                paint.setColor((Math.max(0, Math.min(255, alpha)) << 24) | (p.color & 0x00ffffff));
+
+                float x = quadBezier(p.sx, p.cx, p.ex, local);
+                float y = quadBezier(p.sy, p.cy, p.ey, local);
+                if ("petal".equals(particleShape) && !p.dust && !popMode) {
+                    float env = (float) Math.sin(local * Math.PI);
+                    x += (float) Math.sin(local * 7.6f + p.swayPhase) * p.swayAmp * env;
+                }
+
+                float scale = local < 0.72f ? 1f : Math.max(0.28f, 1f - (local - 0.72f) / 0.28f * 0.72f);
+                int alpha = local < 0.78f ? 245 : Math.round(245f * (1f - (local - 0.78f) / 0.22f));
                 float r = p.radius * scale;
-                if ("star".equals(particleShape)) {
-                    float sr = r * 1.35f;
-                    shapePath.reset();
-                    shapePath.moveTo(x, y - sr);
-                    shapePath.quadTo(x, y, x + sr, y);
-                    shapePath.quadTo(x, y, x, y + sr);
-                    shapePath.quadTo(x, y, x - sr, y);
-                    shapePath.quadTo(x, y, x, y - sr);
-                    shapePath.close();
-                    canvas.drawPath(shapePath, paint);
-                } else if ("petal".equals(particleShape)) {
-                    canvas.save();
-                    canvas.rotate(local * 140f, x, y);
-                    canvas.drawOval(x - r * 1.15f, y - r * 0.65f, x + r * 1.15f, y + r * 0.65f, paint);
-                    canvas.restore();
-                } else {
+
+                // Comet motion trails (drawn behind head)
+                if (!popMode && !p.dust && "comet".equals(particleShape)) {
+                    for (int step = 5; step >= 1; step--) {
+                        float prevT = Math.max(0f, local - step * 0.030f);
+                        float tx = quadBezier(p.sx, p.cx, p.ex, prevT);
+                        float ty = quadBezier(p.sy, p.cy, p.ey, prevT);
+                        int trailColor = activeColors[(step >= 3 ? 2 : 1) % activeColors.length];
+                        int ta = Math.round(alpha * (0.42f - step * 0.068f));
+                        paint.setShader(null);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(withAlpha(trailColor, ta));
+                        canvas.drawCircle(tx, ty, r * (1.0f - step * 0.14f), paint);
+                    }
+                } else if (!popMode && !p.dust && "gold_orb".equals(particleShape)) {
+                    for (int step = 3; step >= 1; step--) {
+                        float prevT = Math.max(0f, local - step * 0.026f);
+                        float tx = quadBezier(p.sx, p.cx, p.ex, prevT);
+                        float ty = quadBezier(p.sy, p.cy, p.ey, prevT);
+                        int ta = Math.round(alpha * (0.34f - step * 0.08f));
+                        paint.setShader(null);
+                        paint.setStyle(Paint.Style.FILL);
+                        paint.setColor(withAlpha(p.color, ta));
+                        canvas.drawCircle(tx, ty, r * (0.86f - step * 0.16f), paint);
+                    }
+                }
+
+                // Soft glow halo on primary particles
+                if (!p.dust) {
+                    paint.setShader(null);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(withAlpha(p.color, Math.round(alpha * 0.24f)));
+                    canvas.drawCircle(x, y, r * 1.75f, paint);
+                }
+
+                float rot = local * p.spinSpeed + p.swayPhase * 30f;
+                float flip = 0.34f + 0.66f * Math.abs((float) Math.cos(local * 5.2f + p.swayPhase));
+                drawShapeAtom(canvas, x, y, r, rot, flip, p.color, alpha, p.dust);
+            }
+
+            // Stage 3: Target arrival burst
+            if (!popMode && raw > 0.66f) {
+                float u = (raw - 0.66f) / 0.34f;
+                int ringAlpha = Math.round(210f * (1f - u * u));
+                strokePaint.setShader(null);
+                strokePaint.setStrokeWidth(dp(ctx, 2.5f - 1.5f * u));
+                strokePaint.setColor(withAlpha(activeColors[0], ringAlpha));
+                canvas.drawCircle(targetX, targetY, dp(ctx, 10 + 26 * u), strokePaint);
+                if ("aurora".equals(particleShape) || "comet".equals(particleShape)) {
+                    strokePaint.setStrokeWidth(dp(ctx, 1.6f - 0.9f * u));
+                    strokePaint.setColor(withAlpha(activeColors[2 % activeColors.length], Math.round(ringAlpha * 0.8f)));
+                    canvas.drawCircle(targetX, targetY, dp(ctx, 6 + 18 * u), strokePaint);
+                }
+                for (ImpactSpark s : sparks) {
+                    if (s.origin) continue;
+                    float sx = targetX + (float) Math.cos(s.angle) * s.dist * u;
+                    float sy = targetY + (float) Math.sin(s.angle) * s.dist * u;
+                    drawShapeAtom(canvas, sx, sy, s.radius * (1f - 0.4f * u), u * 160f, 0.7f, s.color, ringAlpha, false);
+                }
+            }
+        }
+
+        private void drawShapeAtom(Canvas canvas, float x, float y, float r, float rotDeg,
+                                   float flipScaleY, int color, int alpha, boolean dust) {
+            if (dust) {
+                paint.setShader(null);
+                paint.setStyle(Paint.Style.FILL);
+                paint.setColor(withAlpha(color, Math.round(alpha * 0.85f)));
+                canvas.drawCircle(x, y, r, paint);
+                return;
+            }
+            switch (particleShape) {
+                case "comet" -> {
+                    paint.setShader(null);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(withAlpha(color, alpha));
+                    canvas.drawCircle(x, y, r * 0.78f, paint);
+                    drawFourStar(canvas, shapePath, paint, x, y, r * 1.48f, withAlpha(0xffffffff, alpha));
+                }
+                case "petal" -> drawSakuraPetal(canvas, shapePath, paint, x, y, r * 1.15f,
+                        rotDeg, flipScaleY, withAlpha(color, alpha));
+                case "aurora" -> drawPrismDiamond(canvas, shapePath, paint, x, y, r * 1.05f,
+                        rotDeg, withAlpha(color, alpha));
+                default -> {
+                    paint.setShader(null);
+                    paint.setStyle(Paint.Style.FILL);
+                    paint.setColor(withAlpha(color, alpha));
                     canvas.drawCircle(x, y, r, paint);
+                    paint.setColor(withAlpha(0xffffffff, Math.round(alpha * 0.65f)));
+                    canvas.drawCircle(x - r * 0.25f, y - r * 0.25f, r * 0.36f, paint);
                 }
             }
         }

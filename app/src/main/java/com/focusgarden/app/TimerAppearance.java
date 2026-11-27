@@ -15,7 +15,11 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.File;
+import java.io.IOException;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -40,22 +44,30 @@ final class TimerAppearance {
 
         private AtomicFile file(Context context, String id) {
             if (FocusState.TIMER_BG_CUSTOM.equals(id)) {
-                return new AtomicFile(new File(context.getFilesDir(), fileName));
+                return new AtomicFile(new File(FocusStore.imageDirectory(context), fileName));
             }
             return new AtomicFile(new File(folder(context), id + ".png"));
         }
 
         private File folder(Context context) {
-            return new File(context.getFilesDir(), name().toLowerCase(java.util.Locale.ROOT) + "_backgrounds");
+            return new File(FocusStore.imageDirectory(context), name().toLowerCase(java.util.Locale.ROOT) + "_backgrounds");
         }
 
         private SharedPreferences settings(Context context) {
-            return context.getSharedPreferences("timer_background_" + name(), Context.MODE_PRIVATE);
+            return settings(context, FocusStore.imageDirectory(context));
+        }
+
+        private String settingsName(Context context, File images) {
+            return "timer_background_" + name() + (images.equals(context.getFilesDir()) ? "" : "_" + images.getName());
+        }
+
+        private SharedPreferences settings(Context context, File images) {
+            return context.getSharedPreferences(settingsName(context, images), Context.MODE_PRIVATE);
         }
 
         private List<String> customIds(Context context) {
             List<String> ids = new ArrayList<>();
-            if (hasCustom(context)) ids.add(FocusState.TIMER_BG_CUSTOM);
+            if (hasCustom(FocusStore.imageDirectory(context))) ids.add(FocusState.TIMER_BG_CUSTOM);
             File[] files = folder(context).listFiles();
             if (files != null) {
                 java.util.Arrays.sort(files, java.util.Comparator.comparingLong(File::lastModified));
@@ -135,8 +147,8 @@ final class TimerAppearance {
             }
         }
 
-        boolean hasCustom(Context context) {
-            return file(context, FocusState.TIMER_BG_CUSTOM).getBaseFile().isFile();
+        boolean hasCustom(File images) {
+            return new File(images, fileName).isFile();
         }
 
         String save(Context context, Uri uri) {
@@ -196,6 +208,31 @@ final class TimerAppearance {
     }
 
     private TimerAppearance() {}
+
+    static JSONObject backupRotation(Context context, File images) throws JSONException {
+        JSONObject rotations = new JSONObject();
+        for (Mode mode : Mode.values()) {
+            var values = mode.settings(context, images).getAll();
+            rotations.put(mode.name(), new JSONObject()
+                    .put("enabled", Boolean.TRUE.equals(values.get("enabled")))
+                    .put("order", values.get("order") instanceof String order ? order : ""));
+        }
+        return rotations;
+    }
+
+    static void stageRotation(Context context, File images, JSONObject rotations) throws IOException, JSONException {
+        for (Mode mode : Mode.values()) {
+            JSONObject config = rotations.getJSONObject(mode.name());
+            if (!mode.settings(context, images).edit().putBoolean("enabled", config.getBoolean("enabled"))
+                    .putString("order", config.getString("order")).commit()) {
+                throw new IOException("Cannot store timer background options");
+            }
+        }
+    }
+
+    static void discardRotation(Context context, File images) {
+        for (Mode mode : Mode.values()) context.deleteSharedPreferences(mode.settingsName(context, images));
+    }
 
     static void showSettings(MainActivity activity, Runnable onChanged) {
         FocusStore store = FocusStore.get(activity);

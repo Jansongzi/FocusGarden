@@ -11,13 +11,21 @@ final class BlockImage {
     private BlockImage() {}
 
     private static AtomicFile file(Context context, String id) {
+        return new AtomicFile(imageFile(FocusStore.imageDirectory(context), id));
+    }
+
+    private static File imageFile(File directory, String id) {
         String name = FocusState.LEGACY_DEFAULT_BLOCK_APPEARANCE.equals(id)
                 ? "restriction_image.png" : "restriction_image_" + id + ".png";
-        return new AtomicFile(new File(context.getFilesDir(), name));
+        return new File(directory, name);
     }
 
     static boolean hasCustom(Context context, String id) {
-        return file(context, id).getBaseFile().isFile();
+        return hasCustom(FocusStore.imageDirectory(context), id);
+    }
+
+    static boolean hasCustom(File directory, String id) {
+        return imageFile(directory, id).isFile();
     }
 
     static Bitmap load(Context context, String id) {

@@ -2684,81 +2684,89 @@ final class FocusSheets {
         body.addView(text(activity, "外观与主题", 13, MUTED, true));
         gap(body, 8);
         boolean modeActive = state.isModeThemeActive();
-        LinearLayout paletteRow = row(activity);
-        for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
-            boolean selected = !modeActive && state.colorTheme == theme.palette();
-            boolean savedBase = modeActive && state.colorTheme == theme.palette();
-            boolean owned = state.isShopItemOwned(theme.id());
-            if (paletteRow.getChildCount() > 0) space(paletteRow, 8);
+        LinearLayout paletteWrap = column(activity);
+        List<ShopCatalog.AppTheme> allThemes = ShopCatalog.appThemes();
+        for (int rowStart = 0; rowStart < allThemes.size(); rowStart += 3) {
+            if (rowStart > 0) gap(paletteWrap, 8);
+            LinearLayout paletteRow = row(activity);
+            int rowEnd = Math.min(allThemes.size(), rowStart + 3);
+            for (int tIdx = rowStart; tIdx < rowEnd; tIdx++) {
+                ShopCatalog.AppTheme theme = allThemes.get(tIdx);
+                boolean selected = !modeActive && state.colorTheme == theme.palette();
+                boolean savedBase = modeActive && state.colorTheme == theme.palette();
+                boolean owned = state.isShopItemOwned(theme.id());
+                if (paletteRow.getChildCount() > 0) space(paletteRow, 8);
 
-            LinearLayout tile = column(activity);
-            int tileColor = selected ? BLUE_SOFT : owned ? SURFACE_SUBTLE : BLUE_DISABLED_BG;
-            tile.setBackground(touchCard(activity, tileColor, (selected || savedBase) ? blueStroke() : BORDER, 14));
-            tile.setPadding(dp(activity, 9), dp(activity, 10), dp(activity, 9), dp(activity, 10));
-            tile.setContentDescription("主题：" + theme.name()
-                    + (owned ? "" : "，未解锁，" + theme.costMinutes() + " 分钟"));
+                LinearLayout tile = column(activity);
+                int tileColor = selected ? BLUE_SOFT : owned ? SURFACE_SUBTLE : BLUE_DISABLED_BG;
+                tile.setBackground(touchCard(activity, tileColor, (selected || savedBase) ? blueStroke() : BORDER, 14));
+                tile.setPadding(dp(activity, 9), dp(activity, 10), dp(activity, 9), dp(activity, 10));
+                tile.setContentDescription("主题：" + theme.name()
+                        + (owned ? "" : "，未解锁，" + theme.costMinutes() + " 分钟"));
 
-            LinearLayout topLine = row(activity);
-            TextView nameTv = text(activity, theme.name(), 13, (selected || savedBase) ? BLUE : INK, true);
-            nameTv.setSingleLine(true);
-            nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            weight(topLine, nameTv);
-            if (selected) {
-                space(topLine, 3);
-                topLine.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 16, 9, 8));
-            } else if (!owned) {
-                space(topLine, 3);
-                topLine.addView(iconBadge(activity, R.drawable.ic_lock, BORDER, INK_SUB, 16, 8, 11));
-            }
-            tile.addView(topLine);
-            gap(tile, 7);
-
-            LinearLayout swRow = row(activity);
-            int[] pSwatches = theme.swatches();
-            for (int cIdx = 0; cIdx < pSwatches.length; cIdx++) {
-                View dot = new View(activity);
-                dot.setBackground(cardBg(activity, pSwatches[cIdx], BORDER, 5));
-                if (!owned) dot.setAlpha(0.65f);
-                swRow.addView(dot, dp(activity, 14), dp(activity, 14));
-                if (cIdx + 1 < pSwatches.length) space(swRow, 4);
-            }
-            tile.addView(swRow);
-            gap(tile, 6);
-            String subTxt = !owned ? theme.costMinutes() + " 分钟"
-                    : savedBase ? "常规默认" : theme.subtitle();
-            TextView subTv = text(activity, subTxt,
-                    11, (selected || savedBase) ? BLUE : MUTED, false);
-            subTv.setSingleLine(true);
-            subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            tile.addView(subTv);
-            tile.setOnClickListener(v -> {
-                if (state.colorTheme == theme.palette() && !modeActive) return;
-                if (state.colorTheme == theme.palette()) {
-                    Toast.makeText(activity,
-                            "当前模式生效中，「" + theme.name() + "」已为默认主题",
-                            Toast.LENGTH_SHORT).show();
-                    return;
+                LinearLayout topLine = row(activity);
+                TextView nameTv = text(activity, theme.name(), 13, (selected || savedBase) ? BLUE : INK, true);
+                nameTv.setSingleLine(true);
+                nameTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                weight(topLine, nameTv);
+                if (selected) {
+                    space(topLine, 3);
+                    topLine.addView(iconBadge(activity, R.drawable.ic_check, BLUE, ON_ACCENT, 16, 9, 8));
+                } else if (!owned) {
+                    space(topLine, 3);
+                    topLine.addView(iconBadge(activity, R.drawable.ic_lock, BORDER, INK_SUB, 16, 8, 11));
                 }
-                tapHaptic(v);
-                Runnable reopen = () -> showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
-                suppressReturn[0] = true;
-                if (sheetRef[0] != null) sheetRef[0].dismiss();
-                if (state.setColorTheme(theme.palette())) {
-                    FocusStore.get(activity).save();
-                    activity.applyThemeNow();
-                    if (modeActive) {
+                tile.addView(topLine);
+                gap(tile, 7);
+
+                LinearLayout swRow = row(activity);
+                int[] pSwatches = theme.swatches();
+                for (int cIdx = 0; cIdx < pSwatches.length; cIdx++) {
+                    View dot = new View(activity);
+                    dot.setBackground(cardBg(activity, pSwatches[cIdx], BORDER, 5));
+                    if (!owned) dot.setAlpha(0.65f);
+                    swRow.addView(dot, dp(activity, 12), dp(activity, 12));
+                    if (cIdx + 1 < pSwatches.length) space(swRow, 3);
+                }
+                tile.addView(swRow);
+                gap(tile, 6);
+                String subTxt = !owned ? theme.costMinutes() + " 分钟"
+                        : savedBase ? "常规默认" : theme.subtitle();
+                TextView subTv = text(activity, subTxt,
+                        11, (selected || savedBase) ? BLUE : MUTED, false);
+                subTv.setSingleLine(true);
+                subTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tile.addView(subTv);
+                tile.setOnClickListener(v -> {
+                    if (state.colorTheme == theme.palette() && !modeActive) return;
+                    if (state.colorTheme == theme.palette()) {
                         Toast.makeText(activity,
-                                "已设为常规主题「" + theme.name() + "」，退出当前模式后生效",
+                                "当前模式生效中，「" + theme.name() + "」已为默认主题",
                                 Toast.LENGTH_SHORT).show();
+                        return;
                     }
-                    reopen.run();
-                } else {
-                    TimeShopUi.showAppearanceShop(activity, state, onChanged, reopen);
-                }
-            });
-            weight(paletteRow, tile);
+                    tapHaptic(v);
+                    Runnable reopen = () -> showGeneralSettings(activity, state, onCards, onChanged, onDismissBack);
+                    suppressReturn[0] = true;
+                    if (sheetRef[0] != null) sheetRef[0].dismiss();
+                    if (state.setColorTheme(theme.palette())) {
+                        FocusStore.get(activity).save();
+                        activity.applyThemeNow();
+                        if (modeActive) {
+                            Toast.makeText(activity,
+                                    "已设为常规主题「" + theme.name() + "」，退出当前模式后生效",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                        reopen.run();
+                    } else {
+                        TimeShopUi.showAppearanceShop(activity, state, onChanged, reopen);
+                    }
+                });
+                weight(paletteRow, tile);
+            }
+            paletteWrap.addView(paletteRow);
         }
-        body.addView(paletteRow);
+        body.addView(paletteWrap);
         gap(body, 8);
 
         LinearLayout modeRow = row(activity);
@@ -2868,6 +2876,24 @@ final class FocusSheets {
         barRow.addView(sw);
         barRow.setOnClickListener(v -> sw.performClick());
         body.addView(barRow);
+        gap(body, 10);
+
+        LinearLayout themeAuraRow = row(activity);
+        themeAuraRow.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        themeAuraRow.setPadding(dp(activity, 14), dp(activity, 13), dp(activity, 14), dp(activity, 13));
+        themeAuraRow.addView(iconBadge(activity, R.drawable.ic_sun, CYAN_SOFT, CYAN, 40, 20, 12));
+        space(themeAuraRow, 12);
+        weight(themeAuraRow, titleWithInfo(activity, "主题氛围动效", 15, INK,
+                "主题氛围动效", "在页面顶部展示所选主题的动态意境天幕（晴空流云、落樱、极光流幕、书房微尘等），关闭后仅保留静态配色与暗纹。"));
+        SwitchView themeAuraSw = new SwitchView(activity, state.themeAtmosphereMotion);
+        themeAuraSw.setContentDescription("开关主题氛围动效");
+        themeAuraSw.setOnToggleListener(on -> {
+            state.themeAtmosphereMotion = on;
+            onChanged.run();
+        });
+        themeAuraRow.addView(themeAuraSw);
+        themeAuraRow.setOnClickListener(v -> themeAuraSw.performClick());
+        body.addView(themeAuraRow);
         gap(body, 10);
 
         LinearLayout auraRow = row(activity);
@@ -3183,7 +3209,7 @@ final class FocusSheets {
 
     static void showSettings(MainActivity activity, FocusState state, KeepAliveManager.StatusSnapshot initialSnap,
                              Runnable onRules, Runnable onKeepAlive, Runnable onGeneral, Runnable onRates,
-                             Runnable onRewards, Runnable onDebug, Runnable onFeedback, Runnable onUpdates) {
+                             Runnable onRewards, Runnable onBackup, Runnable onDebug, Runnable onFeedback, Runnable onUpdates) {
         LinearLayout body = column(activity);
         Dialog[] sheetRef = new Dialog[1];
 
@@ -3234,6 +3260,13 @@ final class FocusSheets {
                 "时间商店", null, shopChip, null, () -> {
                     if (sheetRef[0] != null) sheetRef[0].dismiss();
                     onRewards.run();
+                }));
+        gap(body, 8);
+
+        body.addView(settingRow(activity, R.drawable.ic_info, BLUE_SOFT, BLUE,
+                "备份与恢复", null, null, () -> {
+                    if (sheetRef[0] != null) sheetRef[0].dismiss();
+                    onBackup.run();
                 }));
         gap(body, 8);
 

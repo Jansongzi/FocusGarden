@@ -70,6 +70,9 @@
                 android:value="digital_wellbeing_keep_alive" />
         </service>
 
+        <service android:name=".SongshiBackup$BackupJob" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <service
             android:name=".KeepAliveWallpaperService"
             android:exported="true"

@@ -62,6 +62,9 @@ final class FocusState {
     static final int PALETTE_SAKURA = 2;
     static final int PALETTE_INDULGENT = 3;
     static final int PALETTE_LAY_FLAT = 4;
+    static final int PALETTE_JOURNAL = 5;
+    static final int PALETTE_AURORA = 6;
+    static final int PALETTE_STUDY = 7;
     static final int[] ABSTINENCE_STAGE_HOURS = {24, 72, 168, 360, 720, 1440, 2160, 4320, 6480, 8760};
     static final int MAX_ABSTINENCE_UI_REWARD_MINUTES = 30;
     static final long ABSTINENCE_BACKDATE_GUARD_MS = 24L * 60 * MINUTE;
@@ -479,6 +482,7 @@ final class FocusState {
 
     boolean timeAwarenessBar = true;
     boolean layFlatAuraEffect = true;
+    boolean themeAtmosphereMotion = true;
     static final String LEGACY_DEFAULT_BLOCK_APPEARANCE = "default";
     static final String BUILTIN_FULL_1 = "builtin_full_1";
     static final String BUILTIN_FULL_2 = "builtin_full_2";

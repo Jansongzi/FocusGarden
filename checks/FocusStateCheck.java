@@ -640,8 +640,30 @@ final class FocusStateCheck {
         equal(true, state.isShopItemOwned(blueTheme.id()));
         equal(true, state.isShopItemOwned(sakuraTheme.id()));
 
+        // Expanded Atmosphere Themes catalog (6 themes, 180m flagship themes support installment)
+        equal(6, ShopCatalog.appThemes().size());
+        var journalTheme = ShopCatalog.findPermanentItem(ShopCatalog.JOURNAL_APP_THEME);
+        var auroraTheme = ShopCatalog.findPermanentItem(ShopCatalog.AURORA_APP_THEME);
+        var studyTheme = ShopCatalog.findPermanentItem(ShopCatalog.STUDY_APP_THEME);
+        equal(120, journalTheme.costMinutes());
+        equal(false, journalTheme.supportsInstallment());
+        equal(180, auroraTheme.costMinutes());
+        equal(true, auroraTheme.supportsInstallment());
+        equal(180, studyTheme.costMinutes());
+        equal(true, studyTheme.supportsInstallment());
+        equal(false, state.setColorTheme(FocusState.PALETTE_JOURNAL));
+        state.creditMs = 500 * MINUTE;
+        equal(true, state.buyPermanentShopItem(journalTheme.id(), journalTheme.costMinutes(), journalTheme.name(), noon, UTC));
+        equal(true, state.setColorTheme(FocusState.PALETTE_JOURNAL));
+        equal(FocusState.PALETTE_JOURNAL, state.colorTheme);
+        equal(FocusState.InstallmentResult.PAID, state.contributePermanentItemInstallment(auroraTheme.id(), 100, noon, UTC));
+        equal(false, state.setColorTheme(FocusState.PALETTE_AURORA));
+        equal(FocusState.InstallmentResult.COMPLETED, state.contributePermanentItemInstallment(auroraTheme.id(), 100, noon, UTC));
+        equal(true, state.setColorTheme(FocusState.PALETTE_AURORA));
+        equal(FocusState.PALETTE_AURORA, state.colorTheme);
+        state.creditMs = 0L;
+
         // Mode-locked non-purchasable auto hot-swap themes (Indulgent Orange & Lay-Flat Purple)
-        equal(3, ShopCatalog.appThemes().size());
         equal(2, ShopCatalog.modeThemes().size());
         equal(false, state.setColorTheme(FocusState.PALETTE_INDULGENT));
         equal(false, state.setColorTheme(FocusState.PALETTE_LAY_FLAT));

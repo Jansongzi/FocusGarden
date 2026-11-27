@@ -13,6 +13,7 @@ final class AreaCheckIn {
     static final int REWARD_MINUTES = 15;
     static final long MAX_FIX_AGE_MS = 5_000L;
     private static final long MIN_SAMPLE_GAP_MS = 700L;
+    private static final long CENTER_PAIR_WINDOW_MS = 12_000L;
     private static final double EARTH_RADIUS_METERS = 6_371_008.8;
 
     enum Match { INSIDE, OUTSIDE, UNCERTAIN }
@@ -35,7 +36,10 @@ final class AreaCheckIn {
         private final Point point;
         private final int radiusMeters;
         private final long requestedAt;
-        private Fix previous;
+        private final Map<String, Fix> previous = new LinkedHashMap<>();
+        private double bestAccuracy = Double.POSITIVE_INFINITY;
+        private Fix preciseCenter;
+        private boolean conflictingCenter;
 
         Sampler(Point point, int radiusMeters, long requestedAt) {
             this.point = point;
@@ -43,24 +47,54 @@ final class AreaCheckIn {
             this.requestedAt = requestedAt;
         }
 
-        Located accept(Fix fix, long nowElapsed) {
+        Located accept(String provider, Fix fix, long nowElapsed) {
             if (!fresh(fix, nowElapsed) || fix.capturedAt() < requestedAt) return null;
-            if (previous != null && fix.capturedAt() - previous.capturedAt() < MIN_SAMPLE_GAP_MS) return null;
-            Fix earlier = previous;
-            previous = fix;
-            if (!fresh(earlier, nowElapsed)) return null;
-
-            double separation = distance(earlier.latitude(), earlier.longitude(), fix.latitude(), fix.longitude());
-            if (separation > earlier.accuracyMeters() + fix.accuracyMeters()) return null;
+            bestAccuracy = Math.min(bestAccuracy, fix.accuracyMeters());
+            if (point == null && fix.accuracyMeters() >= radiusMeters) return null;
+            String source = point == null ? provider : "";
+            Fix earlier = previous.get(source);
+            if (point == null) considerPreciseCenter(fix, nowElapsed);
+            if (earlier != null && fix.capturedAt() - earlier.capturedAt() < MIN_SAMPLE_GAP_MS) return null;
+            previous.put(source, fix);
 
             if (point == null) {
-                if (earlier.accuracyMeters() >= radiusMeters || fix.accuracyMeters() >= radiusMeters) return null;
-                Fix best = earlier.accuracyMeters() < fix.accuracyMeters() ? earlier : fix;
+                if (earlier == null || nowElapsed - earlier.capturedAt() > CENTER_PAIR_WINDOW_MS
+                        || !overlaps(earlier, fix)) return null;
+                Fix best = fresh(earlier, nowElapsed) && earlier.accuracyMeters() < fix.accuracyMeters() ? earlier : fix;
                 return new Located(Match.INSIDE, best);
             }
+            if (!fresh(earlier, nowElapsed) || !overlaps(earlier, fix)) return null;
             Match result = locate(point, fix, nowElapsed);
             if (result == Match.UNCERTAIN || locate(point, earlier, nowElapsed) != result) return null;
             return new Located(result, fix);
+        }
+
+        private void considerPreciseCenter(Fix fix, long nowElapsed) {
+            if (preciseCenter != null && nowElapsed - preciseCenter.capturedAt() <= CENTER_PAIR_WINDOW_MS
+                    && !overlaps(preciseCenter, fix)) conflictingCenter = true;
+            // A single fix can place a point when its error is small relative to the radius.
+            if (fix.accuracyMeters() > Math.min(25.0, radiusMeters / 3.0)) return;
+            for (Fix earlier : previous.values()) {
+                if (nowElapsed - earlier.capturedAt() <= CENTER_PAIR_WINDOW_MS
+                        && !overlaps(earlier, fix)) conflictingCenter = true;
+            }
+            if (!fresh(preciseCenter, nowElapsed) || fix.accuracyMeters() < preciseCenter.accuracyMeters()) {
+                preciseCenter = fix;
+            }
+        }
+
+        Located preciseCenter(long nowElapsed) {
+            if (point != null || conflictingCenter || !fresh(preciseCenter, nowElapsed)) return null;
+            return new Located(Match.INSIDE, preciseCenter);
+        }
+
+        double bestAccuracy() {
+            return bestAccuracy;
+        }
+
+        private static boolean overlaps(Fix first, Fix second) {
+            return distance(first.latitude(), first.longitude(), second.latitude(), second.longitude())
+                    <= first.accuracyMeters() + second.accuracyMeters();
         }
     }
 
