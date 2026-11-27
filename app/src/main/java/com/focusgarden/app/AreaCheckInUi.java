@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.InputType;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -89,14 +90,14 @@ final class AreaCheckInUi {
             TextView modify = secondaryButton(activity, "编辑");
             modify.setOnClickListener(v -> {
                 tapHaptic(v);
-                edit(point);
+                edit(point, Double.NaN);
             });
             weight(actions, modify);
             space(actions, 8);
             TextView mark = primaryButton(activity, "到达打卡");
             mark.setOnClickListener(v -> {
                 tapHaptic(v);
-                locate(panel, mark, point, point.radiusMeters(), located -> arrive(point, located));
+                startArrival(panel, mark, point);
             });
             weight(actions, mark);
             card.addView(actions, -1, -2);
@@ -126,7 +127,14 @@ final class AreaCheckInUi {
         }
     }
 
-    private void arrive(AreaCheckIn.Point point, AreaCheckIn.Located located) {
+    private void startArrival(Dialog owner, TextView button, AreaCheckIn.Point point) {
+        locate(owner, button, point, point.radiusMeters(), null, (located, error, bestAccuracy) -> {
+            if (error != null) showArrivalFailure(owner, button, point, error, bestAccuracy);
+            else arrive(owner, button, point, located);
+        });
+    }
+
+    private void arrive(Dialog owner, TextView button, AreaCheckIn.Point point, AreaCheckIn.Located located) {
         AreaCheckIn.Result result = state.checkInArea(point, located.fix(), SystemClock.elapsedRealtime(),
                 System.currentTimeMillis(), ZoneId.systemDefault());
         switch (result) {
@@ -139,13 +147,44 @@ final class AreaCheckInUi {
                     toast(result == AreaCheckIn.Result.FROZEN ? "已打卡 · 躺平模式暂停奖励" : "打卡成功");
                 }
             }
-            case OUTSIDE -> toast("还在打卡范围外，请到达后重试。");
-            case UNCERTAIN -> toast("位置靠近边界或精度不足，请重新定位。");
+            case OUTSIDE -> showArrivalFailure(owner, button, point, "本次定位在打卡范围外。",
+                    located.fix().accuracyMeters());
+            case UNCERTAIN -> showArrivalFailure(owner, button, point, "本次定位无法确认在打卡范围内。",
+                    located.fix().accuracyMeters());
             case CHANGED_POINT -> toast("点位已更新，请重新打卡。");
         }
     }
 
+    private void showArrivalFailure(Dialog owner, TextView button, AreaCheckIn.Point point, String error,
+                                    double arrivalError) {
+        String arrival = Double.isFinite(arrivalError) ? "约 " + metersLabel(arrivalError) : "未取得有效定位";
+        String message = error + "\n设点误差约 " + metersLabel(point.accuracyMeters())
+                + "\n本次定位误差 " + arrival + "\n打卡半径 " + point.radiusMeters() + " 米";
+        String suggestion = radiusSuggestion(point.accuracyMeters(), arrivalError, point.radiusMeters());
+        if (!suggestion.isEmpty()) message += "\n\n" + suggestion;
+        LinearLayout actions = row(activity);
+        TextView retry = primaryButton(activity, "重试");
+        weight(actions, retry);
+        space(actions, 8);
+        TextView editRadius = secondaryButton(activity, "编辑半径");
+        weight(actions, editRadius);
+        Dialog dialog = cardDialog(activity, R.drawable.ic_target, BLUE_SOFT, BLUE, "未能完成到达打卡",
+                message, actions, null, null, false, true, null);
+        retry.setOnClickListener(v -> {
+            dialog.dismiss();
+            if (owner.isShowing()) startArrival(owner, button, point);
+        });
+        editRadius.setOnClickListener(v -> {
+            dialog.dismiss();
+            if (owner.isShowing()) edit(point, arrivalError);
+        });
+    }
+
     private void edit(AreaCheckIn.Point point) {
+        edit(point, Double.NaN);
+    }
+
+    private void edit(AreaCheckIn.Point point, double arrivalError) {
         pause();
         LinearLayout body = column(activity);
         EditText name = styledInput(activity, "打卡点名称，如图书馆", point == null ? "" : point.name(),
@@ -162,6 +201,17 @@ final class AreaCheckInUi {
         body.addView(locate, -1, -2);
         TextView centerStatus = text(activity, point == null ? "" : centerLabel(point.accuracyMeters()), 12, INK_SUB, false);
         body.addView(centerStatus, -1, -2);
+        TextView radiusHint = text(activity, point == null ? "" :
+                radiusSuggestion(point.accuracyMeters(), arrivalError, point.radiusMeters()), 12, INK_SUB, false);
+        body.addView(radiusHint, -1, -2);
+        LinearLayout choices = row(activity);
+        TextView useApproximate = primaryButton(activity, "使用此位置");
+        weight(choices, useApproximate);
+        space(choices, 8);
+        TextView keepLocating = secondaryButton(activity, "继续定位");
+        weight(choices, keepLocating);
+        choices.setVisibility(View.GONE);
+        body.addView(choices, -1, -2);
         gap(body, 12);
         TextView save = primaryButton(activity, "保存打卡点");
         body.addView(save, -1, -2);
@@ -175,14 +225,52 @@ final class AreaCheckInUi {
         sheet.setOnDismissListener(d -> cancelFor(sheet));
         AreaCheckIn.Fix[] center = {null};
         long[] centerCheckedAt = {0L};
+        AreaCheckIn.Observation[] offered = {null};
+        Consumer<AreaCheckIn.Observation> applyCenter = observation -> {
+            center[0] = observation.fix();
+            centerCheckedAt[0] = observation.observedAt();
+            choices.setVisibility(View.GONE);
+            centerStatus.setText(centerLabel(center[0].accuracyMeters()));
+            int meters = readRadius(radius);
+            double expectedArrivalError = Double.isFinite(arrivalError) ? arrivalError : center[0].accuracyMeters();
+            radiusHint.setText(meters == 0 ? "" : radiusSuggestion(center[0].accuracyMeters(),
+                    expectedArrivalError, meters));
+        };
+        Consumer<AreaCheckIn.Observation> showApproximate = observation -> {
+            offered[0] = observation;
+            centerStatus.setText("已取得位置 · 误差约 " + metersLabel(observation.fix().accuracyMeters()));
+            choices.setVisibility(View.VISIBLE);
+            keepLocating.setText(busyButton != null ? "继续定位" : "重新定位");
+        };
+        useApproximate.setOnClickListener(v -> {
+            if (offered[0] == null) return;
+            pause();
+            applyCenter.accept(offered[0]);
+            offered[0] = null;
+        });
+        keepLocating.setOnClickListener(v -> {
+            choices.setVisibility(View.GONE);
+            if (busyButton == null) locate.performClick();
+            else centerStatus.setText("继续定位中…");
+        });
         locate.setOnClickListener(v -> {
             tapHaptic(v);
             int meters = readRadius(radius);
             if (meters == 0) return;
-            locate(sheet, locate, null, meters, result -> {
-                center[0] = result.fix();
-                centerCheckedAt[0] = SystemClock.elapsedRealtime();
-                centerStatus.setText(centerLabel(result.fix().accuracyMeters()));
+            offered[0] = null;
+            choices.setVisibility(View.GONE);
+            double savedError = center[0] != null ? center[0].accuracyMeters()
+                    : point == null ? Double.NaN : point.accuracyMeters();
+            centerStatus.setText(Double.isFinite(savedError) ? centerLabel(savedError) : "");
+            locate(sheet, locate, null, meters, showApproximate, (result, error, bestAccuracy) -> {
+                if (result != null) {
+                    applyCenter.accept(new AreaCheckIn.Observation(result.fix(), SystemClock.elapsedRealtime()));
+                    offered[0] = null;
+                } else if (offered[0] != null) {
+                    showApproximate.accept(offered[0]);
+                } else {
+                    centerStatus.setText(error);
+                }
             });
         });
         save.setOnClickListener(v -> {
@@ -225,7 +313,16 @@ final class AreaCheckInUi {
     }
 
     private static String centerLabel(double accuracy) {
-        return "设点精度约 " + (long) Math.ceil(accuracy) + " 米";
+        return "设点误差约 " + metersLabel(accuracy);
+    }
+
+    private static String metersLabel(double accuracy) {
+        return (long) Math.ceil(accuracy) + " 米";
+    }
+
+    private static String radiusSuggestion(double centerError, double arrivalError, int currentRadius) {
+        int suggested = AreaCheckIn.suggestedRadius(centerError, arrivalError, currentRadius);
+        return suggested == 0 ? "" : "若定位误差相近，可考虑手动将半径改为 " + suggested + " 米。打卡范围也会扩大。";
     }
 
     private static int readRadius(EditText radius) {
@@ -238,7 +335,7 @@ final class AreaCheckInUi {
     }
 
     private void locate(Dialog owner, TextView button, AreaCheckIn.Point point, int meters,
-                        Consumer<AreaCheckIn.Located> callback) {
+                        Consumer<AreaCheckIn.Observation> onApproximate, AreaLocation.Callback callback) {
         if (busyButton != null || permissionAction != null) return;
         Runnable begin = () -> {
             if (!owner.isShowing() || !activity.isResumedForUpdate()) return;
@@ -246,11 +343,10 @@ final class AreaCheckInUi {
             busyLabel = button.getText();
             button.setEnabled(false);
             button.setText("定位中…");
-            location.start(point, meters, (result, error) -> {
+            location.start(point, meters, onApproximate, (result, error, bestAccuracy) -> {
                 clearProgress();
                 if (!owner.isShowing() || !activity.isResumedForUpdate()) return;
-                if (error != null) toast(error);
-                else callback.accept(result);
+                callback.finish(result, error, bestAccuracy);
             });
         };
         if (hasPreciseLocation()) {

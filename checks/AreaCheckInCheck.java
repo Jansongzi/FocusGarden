@@ -12,9 +12,11 @@ final class AreaCheckInCheck {
     public static void main(String[] args) {
         checkLocationDrift();
         checkSparseCenterLocation();
+        checkSparseArrival();
+        checkApproximateCenterAndRadius();
         checkRewardRollover();
         checkLayFlat();
-        System.out.println("PASS: area drift, sparse indoor fixes, 04:00 rollover and shared reward deduplication");
+        System.out.println("PASS: area drift, sparse indoor fixes and arrivals, 04:00 rollover and shared reward deduplication");
     }
 
     private static void checkSparseCenterLocation() {
@@ -46,7 +48,10 @@ final class AreaCheckInCheck {
         equal(null, mixed.preciseCenter(ELAPSED + 2_000));
         equal(null, mixed.accept("gps", fix(250, 50, ELAPSED + 2_000), ELAPSED + 2_000));
         var latest = fix(48, 50, ELAPSED + 8_000);
-        equal(latest, mixed.accept("network", latest, ELAPSED + 8_000).fix());
+        equal(null, mixed.accept("network", latest, ELAPSED + 8_000));
+        equal(45.0, mixed.approximateCenter().fix().accuracyMeters());
+        var better = fix(48, 25, ELAPSED + 9_000);
+        equal(better, mixed.accept("network", better, ELAPSED + 9_000).fix());
 
         var conflicting = new AreaCheckIn.Sampler(null, 100, ELAPSED);
         equal(null, conflicting.accept("fused", precise, ELAPSED));
@@ -59,6 +64,62 @@ final class AreaCheckInCheck {
         equal(null, arrival.preciseCenter(ELAPSED + 2_000));
         equal(AreaCheckIn.Match.INSIDE,
                 arrival.accept("gps", fix(2, 12, ELAPSED + 2_100), ELAPSED + 2_100).match());
+    }
+
+    private static void checkApproximateCenterAndRadius() {
+        var sampler = new AreaCheckIn.Sampler(null, 100, ELAPSED);
+        var approximate = fix(0, 90, ELAPSED);
+        equal(null, sampler.accept("network", approximate, ELAPSED));
+        var offer = sampler.approximateCenter();
+        equal(approximate, offer.fix());
+        equal(ELAPSED, offer.observedAt());
+        equal(null, sampler.accept("network", fix(1, 90, ELAPSED + 1_000), ELAPSED + 1_000));
+        equal(null, sampler.confirmationCandidate(ELAPSED + 1_500));
+        equal(200, AreaCheckIn.suggestedRadius(90, 90, 100));
+        equal(150, AreaCheckIn.suggestedRadius(35, 90, 100));
+        equal(0, AreaCheckIn.suggestedRadius(90, 90, 200));
+        equal(0, AreaCheckIn.suggestedRadius(90, Double.POSITIVE_INFINITY, 100));
+
+        var area = new AreaCheckIn();
+        var saved = area.savePoint(null, "宿舍", 100, offer.fix(), offer.observedAt());
+        equal(100, saved.radiusMeters());
+        equal(90.0, saved.accuracyMeters());
+        equal(AreaCheckIn.Match.UNCERTAIN, AreaCheckIn.locate(saved, approximate, ELAPSED));
+        var edited = area.savePoint(saved, saved.name(), 200, null, 0L);
+        equal(AreaCheckIn.Match.INSIDE, AreaCheckIn.locate(edited, approximate, ELAPSED));
+    }
+
+    private static void checkSparseArrival() {
+        var area = new AreaCheckIn();
+        var indoorFix = fix(0, 35, ELAPSED);
+        var point = area.savePoint(null, "宿舍", 100, indoorFix, ELAPSED);
+        var sampler = new AreaCheckIn.Sampler(point, point.radiusMeters(), ELAPSED);
+        equal(null, sampler.accept("network", indoorFix, ELAPSED));
+        equal(null, sampler.accept("fused", fix(80, 110, ELAPSED + 800), ELAPSED + 800));
+        var confirmed = sampler.confirmationCandidate(ELAPSED + 1_500);
+        equal(indoorFix, confirmed.fix());
+        var day = java.time.LocalDate.of(2026, 11, 27);
+        equal(AreaCheckIn.Result.FIRST_REWARD, area.arrive(point, confirmed.fix(), ELAPSED + 1_500,
+                at("2026-11-27T08:00:00+08:00"), day, false));
+        equal(AreaCheckIn.Result.RECORDED, area.arrive(point, confirmed.fix(), ELAPSED + 1_600,
+                at("2026-11-27T08:00:00+08:00") + 100, day, false));
+        equal(15 * MINUTE, area.pendingMs());
+        equal(null, sampler.confirmationCandidate(ELAPSED + 5_001));
+
+        var conflicting = new AreaCheckIn.Sampler(point, point.radiusMeters(), ELAPSED);
+        equal(null, conflicting.accept("network", indoorFix, ELAPSED));
+        equal(null, conflicting.accept("fused", fix(170, 12, ELAPSED + 800), ELAPSED + 800));
+        equal(null, conflicting.confirmationCandidate(ELAPSED + 1_500));
+        equal(null, conflicting.accept("gps", fix(0, 10, ELAPSED + 1_600), ELAPSED + 1_600));
+        equal(null, conflicting.confirmationCandidate(ELAPSED + 3_100));
+
+        var uncertain = new AreaCheckIn.Sampler(point, point.radiusMeters(), ELAPSED);
+        equal(null, uncertain.accept("network", fix(40, 35, ELAPSED), ELAPSED));
+        equal(null, uncertain.confirmationCandidate(ELAPSED + 1_500));
+        equal(null, uncertain.accept("network", fix(0, 12, ELAPSED - 1), ELAPSED));
+        equal(null, uncertain.accept("network", new AreaCheckIn.Fix(0, 0, 12, ELAPSED + 2_000, true),
+                ELAPSED + 2_000));
+        equal(null, uncertain.confirmationCandidate(ELAPSED + 3_500));
     }
 
     private static void checkLocationDrift() {

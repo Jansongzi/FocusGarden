@@ -10,33 +10,37 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 
+import java.util.Objects;
+import java.util.function.Consumer;
+
 final class AreaLocation {
-    private static final long CENTER_TIMEOUT_MS = 30_000L;
-    private static final long ARRIVAL_TIMEOUT_MS = 15_000L;
-    private static final long CENTER_CONFIRM_MS = 2_000L;
+    private static final long CENTER_TIMEOUT_MS = 20_000L;
+    private static final long ARRIVAL_TIMEOUT_MS = 10_000L;
+    private static final long CONFIRM_MS = 1_500L;
     private final LocationManager manager;
     private final Handler main = new Handler(Looper.getMainLooper());
     private Attempt active;
 
     interface Callback {
-        void finish(AreaCheckIn.Located located, String error);
+        void finish(AreaCheckIn.Located located, String error, double bestAccuracy);
     }
 
     AreaLocation(Context context) {
         manager = context.getSystemService(LocationManager.class);
     }
 
-    void start(AreaCheckIn.Point point, int radiusMeters, Callback callback) {
+    void start(AreaCheckIn.Point point, int radiusMeters, Consumer<AreaCheckIn.Observation> onApproximateCenter,
+               Callback callback) {
         cancel();
         if (manager == null) {
-            callback.finish(null, "无法使用系统定位。");
+            callback.finish(null, "无法使用系统定位。", Double.POSITIVE_INFINITY);
             return;
         }
         if (Build.VERSION.SDK_INT >= 28 && !manager.isLocationEnabled()) {
-            callback.finish(null, "系统定位已关闭，请先开启。");
+            callback.finish(null, "系统定位已关闭，请先开启。", Double.POSITIVE_INFINITY);
             return;
         }
-        Attempt attempt = new Attempt(point, radiusMeters, callback);
+        Attempt attempt = new Attempt(point, radiusMeters, onApproximateCenter, callback);
         active = attempt;
         boolean requested = false;
         for (String provider : manager.getProviders(true)) {
@@ -58,7 +62,7 @@ final class AreaLocation {
         if (attempt == null) return;
         active = null;
         main.removeCallbacks(attempt.timeout);
-        main.removeCallbacks(attempt.confirmCenter);
+        main.removeCallbacks(attempt.confirm);
         try {
             manager.removeUpdates(attempt);
         } catch (SecurityException ignored) {
@@ -69,17 +73,21 @@ final class AreaLocation {
     private final class Attempt implements LocationListener {
         final AreaCheckIn.Sampler sampler;
         final Callback callback;
+        final Consumer<AreaCheckIn.Observation> onApproximateCenter;
         final boolean placingPoint;
         final int radiusMeters;
         final Runnable timeout = this::onTimeout;
-        final Runnable confirmCenter = this::onConfirmCenter;
-        boolean waitingForCenter;
+        final Runnable confirm = this::onConfirm;
+        AreaCheckIn.Located pendingConfirmation;
+        AreaCheckIn.Observation lastOffer;
 
-        Attempt(AreaCheckIn.Point point, int radiusMeters, Callback callback) {
+        Attempt(AreaCheckIn.Point point, int radiusMeters, Consumer<AreaCheckIn.Observation> onApproximateCenter,
+                Callback callback) {
             sampler = new AreaCheckIn.Sampler(point, radiusMeters, SystemClock.elapsedRealtime());
             placingPoint = point == null;
             this.radiusMeters = radiusMeters;
             this.callback = callback;
+            this.onApproximateCenter = onApproximateCenter;
         }
 
         @Override public void onLocationChanged(Location location) {
@@ -91,16 +99,25 @@ final class AreaLocation {
             AreaCheckIn.Located located = sampler.accept(location.getProvider(), fix, now);
             if (located != null) {
                 complete(located, null);
-            } else if (!waitingForCenter && sampler.preciseCenter(now) != null) {
-                waitingForCenter = true;
-                main.postDelayed(confirmCenter, CENTER_CONFIRM_MS);
+                return;
             }
+            var offer = sampler.approximateCenter();
+            if (offer != null && offer != lastOffer && onApproximateCenter != null) {
+                lastOffer = offer;
+                onApproximateCenter.accept(offer);
+            }
+            var candidate = sampler.confirmationCandidate(now);
+            if (Objects.equals(candidate, pendingConfirmation)) return;
+            main.removeCallbacks(confirm);
+            pendingConfirmation = candidate;
+            if (candidate != null) main.postDelayed(confirm, CONFIRM_MS);
         }
 
-        private void onConfirmCenter() {
-            waitingForCenter = false;
-            var located = sampler.preciseCenter(SystemClock.elapsedRealtime());
-            if (located != null) complete(located, null);
+        private void onConfirm() {
+            var expected = pendingConfirmation;
+            pendingConfirmation = null;
+            var located = sampler.confirmationCandidate(SystemClock.elapsedRealtime());
+            if (located != null && located.equals(expected)) complete(located, null);
         }
 
         private void onTimeout() {
@@ -112,14 +129,14 @@ final class AreaLocation {
             } else if (placingPoint) {
                 complete(null, "定位暂未稳定，最佳误差约 " + (long) Math.ceil(accuracy) + " 米。");
             } else {
-                complete(null, "定位结果波动或靠近边界，请在原地重试。");
+                complete(null, "未能确认在打卡范围内。");
             }
         }
 
         void complete(AreaCheckIn.Located located, String error) {
             if (active != this) return;
             cancel();
-            callback.finish(located, error);
+            callback.finish(located, error, sampler.bestAccuracy());
         }
 
         @Override public void onStatusChanged(String provider, int status, Bundle extras) {}

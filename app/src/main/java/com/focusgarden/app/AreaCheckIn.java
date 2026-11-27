@@ -31,15 +31,18 @@ final class AreaCheckIn {
 
     record Arrival(String pointId, String pointName, long at) {}
     record Located(Match match, Fix fix) {}
+    record Observation(Fix fix, long observedAt) {}
 
     static final class Sampler {
         private final Point point;
         private final int radiusMeters;
         private final long requestedAt;
         private final Map<String, Fix> previous = new LinkedHashMap<>();
-        private double bestAccuracy = Double.POSITIVE_INFINITY;
+        private Observation bestObservation;
         private Fix preciseCenter;
         private boolean conflictingCenter;
+        private Fix arrivalCandidate;
+        private Fix lastOutside;
 
         Sampler(Point point, int radiusMeters, long requestedAt) {
             this.point = point;
@@ -49,11 +52,12 @@ final class AreaCheckIn {
 
         Located accept(String provider, Fix fix, long nowElapsed) {
             if (!fresh(fix, nowElapsed) || fix.capturedAt() < requestedAt) return null;
-            bestAccuracy = Math.min(bestAccuracy, fix.accuracyMeters());
+            if (fix.accuracyMeters() < bestAccuracy()) bestObservation = new Observation(fix, nowElapsed);
             if (point == null && fix.accuracyMeters() >= radiusMeters) return null;
             String source = point == null ? provider : "";
             Fix earlier = previous.get(source);
             if (point == null) considerPreciseCenter(fix, nowElapsed);
+            else considerArrival(fix, earlier, nowElapsed);
             if (earlier != null && fix.capturedAt() - earlier.capturedAt() < MIN_SAMPLE_GAP_MS) return null;
             previous.put(source, fix);
 
@@ -61,7 +65,7 @@ final class AreaCheckIn {
                 if (earlier == null || nowElapsed - earlier.capturedAt() > CENTER_PAIR_WINDOW_MS
                         || !overlaps(earlier, fix)) return null;
                 Fix best = fresh(earlier, nowElapsed) && earlier.accuracyMeters() < fix.accuracyMeters() ? earlier : fix;
-                return new Located(Match.INSIDE, best);
+                return automaticCenter(best) ? new Located(Match.INSIDE, best) : null;
             }
             if (!fresh(earlier, nowElapsed) || !overlaps(earlier, fix)) return null;
             Match result = locate(point, fix, nowElapsed);
@@ -73,7 +77,7 @@ final class AreaCheckIn {
             if (preciseCenter != null && nowElapsed - preciseCenter.capturedAt() <= CENTER_PAIR_WINDOW_MS
                     && !overlaps(preciseCenter, fix)) conflictingCenter = true;
             // A single fix can place a point when its error is small relative to the radius.
-            if (fix.accuracyMeters() > Math.min(40.0, radiusMeters * 0.4)) return;
+            if (!automaticCenter(fix)) return;
             for (Fix earlier : previous.values()) {
                 if (nowElapsed - earlier.capturedAt() <= CENTER_PAIR_WINDOW_MS
                         && !overlaps(earlier, fix)) conflictingCenter = true;
@@ -88,8 +92,37 @@ final class AreaCheckIn {
             return new Located(Match.INSIDE, preciseCenter);
         }
 
+        private void considerArrival(Fix fix, Fix earlier, long nowElapsed) {
+            Match result = locate(point, fix, nowElapsed);
+            if (result == Match.OUTSIDE) lastOutside = fix;
+            if (fresh(arrivalCandidate, nowElapsed)
+                    && (result == Match.OUTSIDE || !overlaps(arrivalCandidate, fix))) {
+                arrivalCandidate = null;
+            }
+            if (result != Match.INSIDE || fresh(lastOutside, nowElapsed)
+                    || (fresh(earlier, nowElapsed) && !overlaps(earlier, fix))) return;
+            if (!fresh(arrivalCandidate, nowElapsed) || fix.accuracyMeters() < arrivalCandidate.accuracyMeters()) {
+                arrivalCandidate = fix;
+            }
+        }
+
+        Located confirmationCandidate(long nowElapsed) {
+            if (point == null) return preciseCenter(nowElapsed);
+            if (arrivalCandidate == null || locate(point, arrivalCandidate, nowElapsed) != Match.INSIDE) return null;
+            return new Located(Match.INSIDE, arrivalCandidate);
+        }
+
         double bestAccuracy() {
-            return bestAccuracy;
+            return bestObservation == null ? Double.POSITIVE_INFINITY : bestObservation.fix().accuracyMeters();
+        }
+
+        Observation approximateCenter() {
+            if (point != null || bestObservation == null || automaticCenter(bestObservation.fix())) return null;
+            return bestObservation;
+        }
+
+        private boolean automaticCenter(Fix fix) {
+            return fix.accuracyMeters() <= Math.min(40.0, radiusMeters * 0.4);
         }
 
         private static boolean overlaps(Fix first, Fix second) {
@@ -181,6 +214,15 @@ final class AreaCheckIn {
         if (distance + uncertainty <= point.radiusMeters()) return Match.INSIDE;
         if (distance - uncertainty > point.radiusMeters()) return Match.OUTSIDE;
         return Match.UNCERTAIN;
+    }
+
+    static int suggestedRadius(double centerError, double arrivalError, int currentRadius) {
+        if (!Double.isFinite(centerError) || !Double.isFinite(arrivalError)
+                || centerError <= 0.0 || arrivalError <= 0.0) return 0;
+        double combinedError = centerError + arrivalError;
+        if (combinedError < currentRadius) return 0;
+        double rounded = Math.ceil((combinedError + 20.0) / 50.0) * 50.0;
+        return rounded <= Integer.MAX_VALUE ? (int) rounded : 0;
     }
 
     private static double distance(double fromLat, double fromLon, double toLat, double toLon) {
