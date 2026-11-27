@@ -6,11 +6,13 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
@@ -31,6 +33,7 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -41,6 +44,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -52,13 +56,27 @@ import static com.focusgarden.app.GardenUi.*;
  */
 final class TimeShopUi {
 
-    private static final int TAB_ALL = 0;
+    private static final int TAB_RECOMMEND = 0;
     private static final int TAB_PROP = 1;
     private static final int TAB_APPEARANCE = 2;
     private static final int TAB_WISH = 3;
     private static final int FOCUS_NONE = 0;
     private static final int FOCUS_INDULGENT_SHELF = 1;
     private static final int FOCUS_CRAFT_MODULE = 2;
+
+    private static final int FILTER_ALL = 0;
+    private static final int FILTER_SPECIAL = 1;
+    private static final int FILTER_PIGGY = 2;
+    private static final int FILTER_PROP = 3;
+    private static final int FILTER_THEME_FX = 4;
+    private static final int FILTER_INSTALLMENT = 5;
+    private static final int FILTER_UNOWNED = 6;
+    private static final int FILTER_AFFORDABLE = 7;
+
+    private static final int SORT_DEFAULT = 0;
+    private static final int SORT_PRICE_ASC = 1;
+    private static final int SORT_PRICE_DESC = 2;
+    private static final int SORT_UNOWNED_FIRST = 3;
 
     private static final int BAG_ALL = 0;
     private static final int BAG_PROP = 1;
@@ -530,7 +548,7 @@ final class TimeShopUi {
     }
 
     static final class ShopIllustrationView extends View {
-        enum Kind { CARD, PIGGY, LIQUID, EFFECT, THEME }
+        enum Kind { CARD, PIGGY, EFFECT, THEME }
 
         private final Kind kind;
         private final String key;
@@ -564,11 +582,11 @@ final class TimeShopUi {
             paint.setColor(isDark() ? 0x55000000 : 0x1b634b2e);
             rect.set(w * 0.22f, h * 0.85f, w * 0.78f, h * 0.94f);
             canvas.drawOval(rect, paint);
+            paint.setAlpha(255);
 
             switch (kind) {
                 case CARD -> drawCard(canvas, w, h, ctx);
                 case PIGGY -> drawMiniPiggy(canvas, w, h, ctx);
-                case LIQUID -> drawLiquidJar(canvas, w, h, ctx);
                 case EFFECT -> drawEffectOrb(canvas, w, h, ctx);
                 case THEME -> drawTheme(canvas, w, h, ctx);
             }
@@ -740,6 +758,14 @@ final class TimeShopUi {
 
         private void drawMiniPiggy(Canvas canvas, float w, float h, Context ctx) {
             ShopCatalog.PiggySkinPalette skin = ShopCatalog.piggySkin(key);
+            switch (skin.shapeKind()) {
+                case "mug" -> { drawMiniMug(canvas, w, h, ctx, skin); return; }
+                case "boba_cup" -> { drawMiniBobaCup(canvas, w, h, ctx, skin); return; }
+                case "wish_jar" -> { drawMiniWishJar(canvas, w, h, ctx, skin); return; }
+                case "lucky_cat" -> { drawMiniLuckyCat(canvas, w, h, ctx, skin); return; }
+                case "bonsai" -> { drawMiniBonsai(canvas, w, h, ctx, skin); return; }
+                case "moon_phase" -> { drawMiniMoonPhase(canvas, w, h, ctx, skin); return; }
+            }
             float unit = Math.min(w, h) * 0.25f;
             float cx = w * 0.47f;
             float cy = h * 0.54f;
@@ -787,7 +813,7 @@ final class TimeShopUi {
             path.addOval(rect, Path.Direction.CW);
             canvas.save();
             canvas.clipPath(path);
-            paint.setColor((0x55 << 24) | (skin.glow() & 0x00ffffff));
+            paint.setColor((0x88 << 24) | (skin.waveFrontTop() & 0x00ffffff));
             rect.set(cx - rx, cy + ry * 0.18f, cx + rx, cy + ry * 1.1f);
             canvas.drawRect(rect, paint);
 
@@ -800,6 +826,9 @@ final class TimeShopUi {
 
             // Front ear
             drawMiniEar(canvas, cx + rx * 0.14f, cy - ry * 0.78f, rx * 0.24f, ry * 0.36f, -10f, skin);
+
+            // Signature skin accessory
+            drawMiniAccessory(canvas, cx, cy, rx, ry, ctx, skin);
 
             // Coin slot
             paint.setColor(skin.slot());
@@ -844,90 +873,517 @@ final class TimeShopUi {
 
         private void drawMiniAccents(Canvas canvas, float cx, float cy, float rx, float ry,
                                      ShopCatalog.PiggySkinPalette skin) {
+            Context ctx = getContext();
             switch (skin.accentKind()) {
                 case "stars" -> {
-                    drawSpark(canvas, cx - rx * 0.32f, cy - ry * 0.25f, dp(getContext(), 4.5f), 0xeeffffff);
-                    drawSpark(canvas, cx + rx * 0.24f, cy + ry * 0.26f, dp(getContext(), 3.8f), 0xddede9fe);
+                    drawSpark(canvas, cx - rx * 0.32f, cy - ry * 0.25f, dp(ctx, 4.5f), 0xeeffffff);
+                    drawSpark(canvas, cx + rx * 0.24f, cy + ry * 0.26f, dp(ctx, 3.8f), 0xddede9fe);
                 }
-                case "glint" -> drawSpark(canvas, cx - rx * 0.28f, cy - ry * 0.30f, dp(getContext(), 5f), 0xeefffbeb);
+                case "glint" -> {
+                    drawSpark(canvas, cx - rx * 0.30f, cy - ry * 0.32f, dp(ctx, 5.2f), 0xeefffbeb);
+                    drawSpark(canvas, cx + rx * 0.24f, cy + ry * 0.20f, dp(ctx, 3.6f), 0xddfef3c7);
+                }
                 case "crystal" -> {
+                    accentPaint.setStyle(Paint.Style.FILL);
                     accentPaint.setColor(0x44ffffff);
                     canvas.drawRect(cx - rx * 0.55f, cy - ry, cx - rx * 0.28f, cy + ry, accentPaint);
-                    drawSpark(canvas, cx - rx * 0.25f, cy - ry * 0.25f, dp(getContext(), 4f), 0xe6ffffff);
+                    drawSpark(canvas, cx - rx * 0.25f, cy - ry * 0.25f, dp(ctx, 4f), 0xe6ffffff);
                 }
                 case "sakura" -> {
+                    accentPaint.setStyle(Paint.Style.FILL);
                     accentPaint.setColor(0xddfff0f6);
                     float fx = cx - rx * 0.30f;
                     float fy = cy - ry * 0.22f;
                     for (int i = 0; i < 5; i++) {
                         double a = i * Math.PI * 2.0 / 5.0;
-                        canvas.drawCircle(fx + (float) Math.cos(a) * dp(getContext(), 3f),
-                                fy + (float) Math.sin(a) * dp(getContext(), 3f), dp(getContext(), 2.2f), accentPaint);
+                        canvas.drawCircle(fx + (float) Math.cos(a) * dp(ctx, 3f),
+                                fy + (float) Math.sin(a) * dp(ctx, 3f), dp(ctx, 2.2f), accentPaint);
                     }
                     accentPaint.setColor(0xfffde68a);
-                    canvas.drawCircle(fx, fy, dp(getContext(), 1.4f), accentPaint);
+                    canvas.drawCircle(fx, fy, dp(ctx, 1.4f), accentPaint);
                 }
                 case "jade" -> {
+                    accentPaint.setStyle(Paint.Style.FILL);
                     accentPaint.setColor(0x55ffffff);
                     inner.set(cx - rx * 0.6f, cy - ry * 0.6f, cx - rx * 0.1f, cy - ry * 0.15f);
                     canvas.drawOval(inner, accentPaint);
+                    drawSpark(canvas, cx - rx * 0.26f, cy - ry * 0.32f, dp(ctx, 3.5f), 0xdcf0fdf4);
                 }
                 case "moon" -> {
-                    accentPaint.setColor(0xeefde68a);
                     float mx = cx - rx * 0.28f;
-                    float my = cy - ry * 0.22f;
-                    float mr = dp(getContext(), 5.5f);
-                    canvas.drawCircle(mx, my, mr, accentPaint);
-                    accentPaint.setColor(skin.shellTop());
-                    canvas.drawCircle(mx + mr * 0.42f, my - mr * 0.22f, mr * 0.85f, accentPaint);
-                    drawSpark(canvas, cx + rx * 0.18f, cy - ry * 0.35f, dp(getContext(), 3.2f), 0xdddbeafe);
+                    float my = cy - ry * 0.24f;
+                    float mr = dp(ctx, 5.4f);
+                    accentPaint.setStyle(Paint.Style.FILL);
+                    accentPaint.setColor(0x30fef3c7);
+                    canvas.drawCircle(mx, my, mr * 1.45f, accentPaint);
+                    canvas.save();
+                    canvas.translate(mx, my);
+                    canvas.rotate(-22f);
+                    buildMiniCrescentPath(path2, mr);
+                    accentPaint.setColor(0xeefde68a);
+                    canvas.drawPath(path2, accentPaint);
+                    canvas.restore();
+                    drawSpark(canvas, cx + rx * 0.18f, cy - ry * 0.35f, dp(ctx, 3.2f), 0xdddbeafe);
                 }
             }
         }
 
-        private void drawLiquidJar(Canvas canvas, float w, float h, Context ctx) {
-            ShopCatalog.LiquidPalette pal = ShopCatalog.liquidTheme(key);
-            float cx = w * 0.5f;
-            float jw = w * 0.50f;
-            float jh = h * 0.58f;
-            float top = h * 0.26f;
+        private void drawMiniAccessory(Canvas canvas, float cx, float cy, float rx, float ry,
+                                       Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            switch (skin.accentKind()) {
+                case "glint" -> {
+                    float w = rx * 0.34f;
+                    float h = ry * 0.26f;
+                    canvas.save();
+                    canvas.translate(cx + rx * 0.30f, cy - ry * 0.87f);
+                    canvas.rotate(13f);
+                    path2.reset();
+                    path2.moveTo(-w * 0.45f, 0f);
+                    path2.lineTo(-w * 0.52f, -h * 0.78f);
+                    path2.lineTo(-w * 0.22f, -h * 0.36f);
+                    path2.lineTo(0f, -h * 1.04f);
+                    path2.lineTo(w * 0.22f, -h * 0.36f);
+                    path2.lineTo(w * 0.52f, -h * 0.78f);
+                    path2.lineTo(w * 0.45f, 0f);
+                    path2.quadTo(0f, h * 0.14f, -w * 0.45f, 0f);
+                    path2.close();
+                    accentPaint.setStyle(Paint.Style.FILL);
+                    accentPaint.setColor(0xfffde047);
+                    canvas.drawPath(path2, accentPaint);
+                    accentPaint.setStyle(Paint.Style.STROKE);
+                    accentPaint.setStrokeWidth(dp(ctx, 1.1f));
+                    accentPaint.setColor(0xff9c6611);
+                    canvas.drawPath(path2, accentPaint);
+                    accentPaint.setStyle(Paint.Style.FILL);
+                    accentPaint.setColor(0xffe5484d);
+                    canvas.drawCircle(0f, -h * 0.16f, dp(ctx, 1.4f), accentPaint);
+                    canvas.restore();
+                }
+                case "stars" -> {
+                    float a = rx * 0.30f;
+                    float b = ry * 0.10f;
+                    canvas.save();
+                    canvas.translate(cx + rx * 0.30f, cy - ry * 0.96f);
+                    canvas.rotate(-14f);
+                    accentPaint.setStyle(Paint.Style.STROKE);
+                    accentPaint.setStrokeWidth(dp(ctx, 1.1f));
+                    accentPaint.setColor(0xaaede9fe);
+                    inner.set(-a, -b, a, b);
+                    canvas.drawOval(inner, accentPaint);
+                    drawSpark(canvas, a * 0.76f, b * 0.55f, dp(ctx, 2.8f), 0xffffffff);
+                    drawSpark(canvas, -a * 0.85f, -b * 0.40f, dp(ctx, 2.2f), 0xccfef3c7);
+                    canvas.restore();
+                }
+                case "crystal" -> {
+                    float w = rx * 0.34f;
+                    float h = ry * 0.26f;
+                    canvas.save();
+                    canvas.translate(cx + rx * 0.30f, cy - ry * 0.87f);
+                    canvas.rotate(13f);
+                    drawMiniCrystalShard(canvas, -w * 0.25f, 0f, w * 0.16f, h * 0.70f, -14f, 0xd4bae6fd, 0xff69b0df, ctx);
+                    drawMiniCrystalShard(canvas, w * 0.25f, 0f, w * 0.16f, h * 0.70f, 14f, 0xd4bae6fd, 0xff69b0df, ctx);
+                    drawMiniCrystalShard(canvas, 0f, 0f, w * 0.20f, h * 1.05f, 0f, 0xeeffffff, 0xff538bb3, ctx);
+                    canvas.restore();
+                }
+                case "sakura" -> {
+                    float fx = cx + rx * 0.06f;
+                    float fy = cy - ry * 0.72f;
+                    float r = dp(ctx, 4.4f);
+                    accentPaint.setStyle(Paint.Style.FILL);
+                    accentPaint.setColor(0xffffdceb);
+                    for (int i = 0; i < 5; i++) {
+                        double ang = i * Math.PI * 2.0 / 5.0 - Math.PI * 0.5;
+                        canvas.drawCircle(fx + (float) Math.cos(ang) * r * 0.55f,
+                                fy + (float) Math.sin(ang) * r * 0.55f, r * 0.48f, accentPaint);
+                    }
+                    accentPaint.setColor(0xfffde68a);
+                    canvas.drawCircle(fx, fy, r * 0.26f, accentPaint);
+                }
+                case "jade" -> {
+                    float lx = cx + rx * 0.06f;
+                    float ly = cy - ry * 0.74f;
+                    drawMiniJadeLeaf(canvas, lx - dp(ctx, 1f), ly, dp(ctx, 6.4f), dp(ctx, 3.0f), -24f, 0xff6ee7b7, skin.outline(), ctx);
+                    drawMiniJadeLeaf(canvas, lx + dp(ctx, 1.5f), ly + dp(ctx, 0.8f), dp(ctx, 4.8f), dp(ctx, 2.3f), 20f, 0xffa7f3d0, skin.outline(), ctx);
+                }
+                case "moon" -> {
+                    float mx = cx + rx * 0.31f;
+                    float my = cy - ry * 1.03f;
+                    float mr = dp(ctx, 3.8f);
+                    canvas.save();
+                    canvas.translate(mx, my);
+                    canvas.rotate(-20f);
+                    buildMiniCrescentPath(path2, mr);
+                    accentPaint.setStyle(Paint.Style.FILL);
+                    accentPaint.setColor(0xfffef3c7);
+                    canvas.drawPath(path2, accentPaint);
+                    canvas.restore();
+                    drawSpark(canvas, mx + dp(ctx, 5.2f), my - dp(ctx, 2.0f), dp(ctx, 2.1f), 0xffdbeafe);
+                }
+            }
+        }
 
-            // Glass bottle outline
-            rect.set(cx - jw * 0.5f, top, cx + jw * 0.5f, top + jh);
+        private void drawMiniCrystalShard(Canvas canvas, float cx, float baseY, float halfW, float h,
+                                          float deg, int fillColor, int rimColor, Context ctx) {
+            canvas.save();
+            canvas.translate(cx, baseY);
+            canvas.rotate(deg);
+            path2.reset();
+            path2.moveTo(0f, -h);
+            path2.lineTo(halfW, -h * 0.36f);
+            path2.lineTo(halfW * 0.62f, 0f);
+            path2.lineTo(-halfW * 0.62f, 0f);
+            path2.lineTo(-halfW, -h * 0.36f);
+            path2.close();
+            accentPaint.setStyle(Paint.Style.FILL);
+            accentPaint.setColor(fillColor);
+            canvas.drawPath(path2, accentPaint);
+            accentPaint.setStyle(Paint.Style.STROKE);
+            accentPaint.setStrokeWidth(dp(ctx, 0.9f));
+            accentPaint.setColor(rimColor);
+            canvas.drawPath(path2, accentPaint);
+            canvas.restore();
+        }
+
+        private void drawMiniJadeLeaf(Canvas canvas, float bx, float by, float len, float wid,
+                                      float deg, int fillColor, int rimColor, Context ctx) {
+            canvas.save();
+            canvas.translate(bx, by);
+            canvas.rotate(deg);
+            path2.reset();
+            path2.moveTo(0f, 0f);
+            path2.quadTo(-wid, -len * 0.52f, 0f, -len);
+            path2.quadTo(wid, -len * 0.52f, 0f, 0f);
+            path2.close();
+            accentPaint.setStyle(Paint.Style.FILL);
+            accentPaint.setColor(fillColor);
+            canvas.drawPath(path2, accentPaint);
+            accentPaint.setStyle(Paint.Style.STROKE);
+            accentPaint.setStrokeWidth(dp(ctx, 0.9f));
+            accentPaint.setColor(rimColor);
+            canvas.drawPath(path2, accentPaint);
+            canvas.restore();
+        }
+
+        private void buildMiniCrescentPath(Path out, float r) {
+            out.reset();
+            inner.set(-r, -r, r, r);
+            out.arcTo(inner, 55f, 250f, true);
+            float cxIn = 0.42f * r;
+            float rIn = 0.8335f * r;
+            inner.set(cxIn - rIn, -rIn, cxIn + rIn, rIn);
+            out.arcTo(inner, 280.62f, -201.24f, false);
+            out.close();
+        }
+
+        private void drawMiniMug(Canvas canvas, float w, float h, Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            float cx = w * 0.45f;
+            float top = h * 0.34f;
+            float bot = h * 0.84f;
+            float hw = w * 0.23f;
+
+            // Coaster
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(isDark() ? 0xff28231d : 0xfff3efe8);
-            canvas.drawRoundRect(rect, dp(ctx, 13), dp(ctx, 13), paint);
+            paint.setColor(0xffe5c49e);
+            rect.set(cx - hw * 1.15f, bot - dp(ctx, 2), cx + hw * 1.15f, bot + dp(ctx, 3.5f));
+            canvas.drawRoundRect(rect, dp(ctx, 3), dp(ctx, 3), paint);
 
-            // Clipped wavy liquid inside jar
+            // C-handle
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
+            strokePaint.setColor(skin.outline());
+            strokePaint.setStrokeWidth(dp(ctx, 5.2f));
             path.reset();
-            path.addRoundRect(rect, dp(ctx, 13), dp(ctx, 13), Path.Direction.CW);
+            path.moveTo(cx + hw * 0.86f, h * 0.45f);
+            path.cubicTo(cx + hw * 1.55f, h * 0.43f, cx + hw * 1.55f, h * 0.71f, cx + hw * 0.78f, h * 0.70f);
+            canvas.drawPath(path, strokePaint);
+            strokePaint.setColor(skin.shellTop());
+            strokePaint.setStrokeWidth(dp(ctx, 3.0f));
+            canvas.drawPath(path, strokePaint);
+
+            // Cup body + warm tea fill
+            path.reset();
+            path.moveTo(cx - hw, top);
+            path.lineTo(cx + hw, top);
+            path.lineTo(cx + hw * 0.84f, bot - dp(ctx, 7));
+            path.quadTo(cx + hw * 0.84f, bot, cx + hw * 0.84f - dp(ctx, 7), bot);
+            path.lineTo(cx - hw * 0.84f + dp(ctx, 7), bot);
+            path.quadTo(cx - hw * 0.84f, bot, cx - hw * 0.84f, bot - dp(ctx, 7));
+            path.close();
+            paint.setShader(new LinearGradient(0f, top, 0f, bot, skin.shellTop(), skin.shellBottom(), Shader.TileMode.CLAMP));
+            canvas.drawPath(path, paint);
+            paint.setShader(null);
+
             canvas.save();
             canvas.clipPath(path);
-            float waterY = top + jh * 0.38f;
-            path2.reset();
-            path2.moveTo(rect.left, rect.bottom);
-            path2.lineTo(rect.left, waterY);
-            path2.quadTo(cx - jw * 0.22f, waterY - dp(ctx, 5), cx, waterY);
-            path2.quadTo(cx + jw * 0.22f, waterY + dp(ctx, 5), rect.right, waterY - dp(ctx, 1));
-            path2.lineTo(rect.right, rect.bottom);
-            path2.close();
-            paint.setShader(new LinearGradient(0f, waterY, 0f, rect.bottom,
-                    pal.frontTop(), pal.frontBottom(), Shader.TileMode.CLAMP));
-            canvas.drawPath(path2, paint);
+            paint.setShader(new LinearGradient(0f, h * 0.50f, 0f, bot, skin.waveFrontTop(), skin.waveFrontBottom(), Shader.TileMode.CLAMP));
+            canvas.drawRect(cx - hw, h * 0.50f, cx + hw, bot, paint);
             paint.setShader(null);
             canvas.restore();
 
-            strokePaint.setStyle(Paint.Style.STROKE);
-            strokePaint.setStrokeWidth(dp(ctx, 1.5f));
-            strokePaint.setColor(isDark() ? 0xff6e6253 : 0xffbcae98);
-            canvas.drawRoundRect(rect, dp(ctx, 13), dp(ctx, 13), strokePaint);
+            strokePaint.setColor(skin.outline());
+            strokePaint.setStrokeWidth(dp(ctx, 1.4f));
+            canvas.drawPath(path, strokePaint);
 
-            // Cork cap
+            // Cream rim + steam wisps
+            paint.setColor(0xfffffcf7);
+            inner.set(cx - hw, top - dp(ctx, 3), cx + hw, top + dp(ctx, 3));
+            canvas.drawOval(inner, paint);
+            canvas.drawOval(inner, strokePaint);
+
+            strokePaint.setColor(0xb8fffdf8);
+            strokePaint.setStrokeWidth(dp(ctx, 1.4f));
+            for (int i = -1; i <= 1; i++) {
+                float sx = cx + i * dp(ctx, 6.5f);
+                path2.reset();
+                path2.moveTo(sx, top - dp(ctx, 4.5f));
+                path2.quadTo(sx + dp(ctx, 2.5f), top - dp(ctx, 10), sx - dp(ctx, 1), top - dp(ctx, 15));
+                canvas.drawPath(path2, strokePaint);
+            }
+        }
+
+        private void drawMiniBobaCup(Canvas canvas, float w, float h, Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            float cx = w * 0.5f;
+            float top = h * 0.34f;
+            float bot = h * 0.86f;
+            float topHw = w * 0.22f;
+            float botHw = w * 0.15f;
+
+            // Straw
+            canvas.save();
+            canvas.translate(cx + dp(ctx, 4), top);
+            canvas.rotate(13f);
             paint.setStyle(Paint.Style.FILL);
-            paint.setColor(ShopColors.woodFace());
-            inner.set(cx - jw * 0.26f, top - dp(ctx, 8), cx + jw * 0.26f, top + dp(ctx, 2));
-            canvas.drawRoundRect(inner, dp(ctx, 3.5f), dp(ctx, 3.5f), paint);
-            canvas.drawRoundRect(inner, dp(ctx, 3.5f), dp(ctx, 3.5f), strokePaint);
+            paint.setColor(0xffe68a6e);
+            inner.set(-dp(ctx, 2.2f), -dp(ctx, 15), dp(ctx, 2.2f), dp(ctx, 2));
+            canvas.drawRoundRect(inner, dp(ctx, 1.5f), dp(ctx, 1.5f), paint);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(ctx, 1.1f));
+            strokePaint.setColor(skin.outline());
+            canvas.drawRoundRect(inner, dp(ctx, 1.5f), dp(ctx, 1.5f), strokePaint);
+            canvas.restore();
+
+            // Cup body + roasted milk tea + boba + floating ice
+            path.reset();
+            path.moveTo(cx - topHw, top);
+            path.lineTo(cx + topHw, top);
+            path.lineTo(cx + botHw, bot - dp(ctx, 6));
+            path.quadTo(cx + botHw, bot, cx + botHw - dp(ctx, 6), bot);
+            path.lineTo(cx - botHw + dp(ctx, 6), bot);
+            path.quadTo(cx - botHw, bot, cx - botHw, bot - dp(ctx, 6));
+            path.close();
+            paint.setColor(skin.shellTop());
+            canvas.drawPath(path, paint);
+
+            canvas.save();
+            canvas.clipPath(path);
+            float waterY = h * 0.52f;
+            paint.setAlpha(255);
+            paint.setShader(new LinearGradient(0f, waterY, 0f, bot, skin.waveFrontTop(), skin.waveFrontBottom(), Shader.TileMode.CLAMP));
+            canvas.drawRect(cx - topHw, waterY, cx + topHw, bot, paint);
+            paint.setShader(null);
+            // Floating ice
+            paint.setColor(0x88ffffff);
+            inner.set(cx - dp(ctx, 8), waterY - dp(ctx, 2.5f), cx - dp(ctx, 1.5f), waterY + dp(ctx, 4));
+            canvas.drawRoundRect(inner, dp(ctx, 1.5f), dp(ctx, 1.5f), paint);
+            // Pearls
+            paint.setColor(0xff3e2723);
+            for (int i = -1; i <= 1; i++) {
+                canvas.drawCircle(cx + i * dp(ctx, 6.2f), bot - dp(ctx, 4.2f), dp(ctx, 2.4f), paint);
+            }
+            canvas.restore();
+
+            strokePaint.setColor(skin.outline());
+            strokePaint.setStrokeWidth(dp(ctx, 1.4f));
+            canvas.drawPath(path, strokePaint);
+
+            // Lid
+            paint.setColor(0xfffffcf7);
+            inner.set(cx - topHw - dp(ctx, 2.5f), top - dp(ctx, 3.5f), cx + topHw + dp(ctx, 2.5f), top + dp(ctx, 2.5f));
+            canvas.drawRoundRect(inner, dp(ctx, 3), dp(ctx, 3), paint);
+            canvas.drawRoundRect(inner, dp(ctx, 3), dp(ctx, 3), strokePaint);
+        }
+
+        private void drawMiniWishJar(Canvas canvas, float w, float h, Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            float cx = w * 0.49f;
+            float neckTop = h * 0.30f;
+            float neckBot = h * 0.38f;
+            float shBot = h * 0.48f;
+            float bot = h * 0.86f;
+            float neckHw = w * 0.11f;
+            float bellyHw = w * 0.25f;
+
+            // Cork
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xffd5a572);
+            inner.set(cx - neckHw * 0.78f, neckTop - dp(ctx, 7), cx + neckHw * 0.78f, neckTop + dp(ctx, 2));
+            canvas.drawRoundRect(inner, dp(ctx, 2.2f), dp(ctx, 2.2f), paint);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(dp(ctx, 1.2f));
+            strokePaint.setColor(skin.outline());
+            canvas.drawRoundRect(inner, dp(ctx, 2.2f), dp(ctx, 2.2f), strokePaint);
+
+            // Bottle body
+            path.reset();
+            path.moveTo(cx - neckHw, neckTop);
+            path.lineTo(cx + neckHw, neckTop);
+            path.lineTo(cx + neckHw, neckBot);
+            path.cubicTo(cx + neckHw, shBot - dp(ctx, 3), cx + bellyHw, shBot - dp(ctx, 4), cx + bellyHw, shBot);
+            path.lineTo(cx + bellyHw, bot - dp(ctx, 7));
+            path.quadTo(cx + bellyHw, bot, cx + bellyHw - dp(ctx, 7), bot);
+            path.lineTo(cx - bellyHw + dp(ctx, 7), bot);
+            path.quadTo(cx - bellyHw, bot, cx - bellyHw, bot - dp(ctx, 7));
+            path.lineTo(cx - bellyHw, shBot);
+            path.cubicTo(cx - bellyHw, shBot - dp(ctx, 4), cx - neckHw, shBot - dp(ctx, 3), cx - neckHw, neckBot);
+            path.close();
+            paint.setColor(skin.shellTop());
+            canvas.drawPath(path, paint);
+
+            canvas.save();
+            canvas.clipPath(path);
+            paint.setAlpha(255);
+            paint.setShader(new LinearGradient(0f, h * 0.54f, 0f, bot, skin.waveFrontTop(), skin.waveFrontBottom(), Shader.TileMode.CLAMP));
+            canvas.drawRect(cx - bellyHw, h * 0.54f, cx + bellyHw, bot, paint);
+            paint.setShader(null);
+            drawSpark(canvas, cx - dp(ctx, 5), h * 0.64f, dp(ctx, 3.2f), 0xfffde68a);
+            drawSpark(canvas, cx + dp(ctx, 6), h * 0.74f, dp(ctx, 2.6f), 0xffe0f2fe);
+            canvas.restore();
+
+            strokePaint.setStrokeWidth(dp(ctx, 1.4f));
+            canvas.drawPath(path, strokePaint);
+
+            // Twine + tag
+            strokePaint.setColor(0xffc2986b);
+            strokePaint.setStrokeWidth(dp(ctx, 1.5f));
+            canvas.drawLine(cx - neckHw, neckTop + dp(ctx, 5), cx + neckHw, neckTop + dp(ctx, 5.5f), strokePaint);
+            paint.setColor(0xfff3dec0);
+            inner.set(cx + neckHw + dp(ctx, 1), neckTop + dp(ctx, 8), cx + neckHw + dp(ctx, 8.5f), neckTop + dp(ctx, 17));
+            canvas.drawRoundRect(inner, dp(ctx, 1.5f), dp(ctx, 1.5f), paint);
+            strokePaint.setStrokeWidth(dp(ctx, 0.9f));
+            canvas.drawRoundRect(inner, dp(ctx, 1.5f), dp(ctx, 1.5f), strokePaint);
+        }
+
+        private void drawMiniLuckyCat(Canvas canvas, float w, float h, Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            float cx = w * 0.50f;
+            float cy = h * 0.56f;
+            float rx = w * 0.25f;
+            float ry = h * 0.28f;
+
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setColor(skin.outline());
+            strokePaint.setStrokeWidth(dp(ctx, 1.4f));
+
+            // Cat ears
+            drawMiniEar(canvas, cx - rx * 0.56f, cy - ry * 0.72f, rx * 0.34f, ry * 0.42f, -18f, skin);
+            drawMiniEar(canvas, cx + rx * 0.56f, cy - ry * 0.72f, rx * 0.34f, ry * 0.42f, 18f, skin);
+
+            // Body
+            paint.setStyle(Paint.Style.FILL);
+            paint.setShader(new LinearGradient(0f, cy - ry, 0f, cy + ry, skin.shellTop(), skin.shellBottom(), Shader.TileMode.CLAMP));
+            rect.set(cx - rx, cy - ry, cx + rx, cy + ry);
+            canvas.drawOval(rect, paint);
+            paint.setShader(null);
+            canvas.drawOval(rect, strokePaint);
+
+            // Gold belly window
+            inner.set(cx - rx * 0.56f, cy + ry * 0.05f, cx + rx * 0.56f, cy + ry * 0.78f);
+            paint.setColor(skin.waveFrontTop());
+            canvas.drawOval(inner, paint);
+            canvas.drawOval(inner, strokePaint);
+
+            // Red collar + bell
+            strokePaint.setColor(0xffe5484d);
+            strokePaint.setStrokeWidth(dp(ctx, 2.2f));
+            canvas.drawLine(cx - rx * 0.58f, cy - ry * 0.08f, cx + rx * 0.58f, cy - ry * 0.08f, strokePaint);
+            paint.setColor(0xfffbbf24);
+            canvas.drawCircle(cx, cy - ry * 0.02f, dp(ctx, 3.2f), paint);
+
+            // Raised left paw
+            paint.setColor(skin.shellTop());
+            strokePaint.setColor(skin.outline());
+            strokePaint.setStrokeWidth(dp(ctx, 1.2f));
+            inner.set(cx - rx * 1.05f, cy - ry * 0.78f, cx - rx * 0.62f, cy - ry * 0.14f);
+            canvas.drawRoundRect(inner, dp(ctx, 4.5f), dp(ctx, 4.5f), paint);
+            canvas.drawRoundRect(inner, dp(ctx, 4.5f), dp(ctx, 4.5f), strokePaint);
+
+            // Eyes & blush
+            paint.setColor(skin.cheek());
+            canvas.drawCircle(cx - rx * 0.44f, cy - ry * 0.30f, dp(ctx, 2.4f), paint);
+            canvas.drawCircle(cx + rx * 0.44f, cy - ry * 0.30f, dp(ctx, 2.4f), paint);
+            paint.setColor(skin.eye());
+            canvas.drawCircle(cx - rx * 0.32f, cy - ry * 0.44f, dp(ctx, 1.8f), paint);
+            canvas.drawCircle(cx + rx * 0.32f, cy - ry * 0.44f, dp(ctx, 1.8f), paint);
+        }
+
+        private void drawMiniBonsai(Canvas canvas, float w, float h, Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            float cx = w * 0.50f;
+            float potTop = h * 0.64f;
+            float potBot = h * 0.86f;
+            float topHw = w * 0.21f;
+            float botHw = w * 0.14f;
+
+            // Trunk + branches
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeCap(Paint.Cap.ROUND);
+            strokePaint.setColor(0xff6d4c41);
+            strokePaint.setStrokeWidth(dp(ctx, 3.6f));
+            path.reset();
+            path.moveTo(cx, potTop);
+            path.cubicTo(cx - dp(ctx, 4), potTop - dp(ctx, 9), cx + dp(ctx, 4), potTop - dp(ctx, 17), cx, potTop - dp(ctx, 24));
+            canvas.drawPath(path, strokePaint);
+
+            // Sage canopy clouds
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xff66bb6a);
+            canvas.drawOval(cx - dp(ctx, 20), h * 0.35f, cx - dp(ctx, 1), h * 0.54f, paint);
+            paint.setColor(0xff81c784);
+            canvas.drawOval(cx + dp(ctx, 1), h * 0.33f, cx + dp(ctx, 20), h * 0.52f, paint);
+            paint.setColor(0xffa5d6a7);
+            canvas.drawOval(cx - dp(ctx, 14), h * 0.24f, cx + dp(ctx, 14), h * 0.46f, paint);
+
+            // Blossoms
+            paint.setColor(0xffffdce8);
+            canvas.drawCircle(cx - dp(ctx, 7), h * 0.34f, dp(ctx, 2.4f), paint);
+            canvas.drawCircle(cx + dp(ctx, 6), h * 0.36f, dp(ctx, 2.2f), paint);
+            canvas.drawCircle(cx - dp(ctx, 11), h * 0.44f, dp(ctx, 2.0f), paint);
+
+            // Pot
+            path.reset();
+            path.moveTo(cx - topHw, potTop);
+            path.lineTo(cx + topHw, potTop);
+            path.lineTo(cx + botHw, potBot);
+            path.lineTo(cx - botHw, potBot);
+            path.close();
+            paint.setColor(skin.shellBottom());
+            canvas.drawPath(path, paint);
+            strokePaint.setColor(skin.outline());
+            strokePaint.setStrokeWidth(dp(ctx, 1.3f));
+            canvas.drawPath(path, strokePaint);
+            paint.setColor(0xffdcf2de);
+            inner.set(cx - topHw - dp(ctx, 2), potTop - dp(ctx, 2), cx + topHw + dp(ctx, 2), potTop + dp(ctx, 2.5f));
+            canvas.drawRoundRect(inner, dp(ctx, 2), dp(ctx, 2), paint);
+            canvas.drawRoundRect(inner, dp(ctx, 2), dp(ctx, 2), strokePaint);
+        }
+
+        private void drawMiniMoonPhase(Canvas canvas, float w, float h, Context ctx, ShopCatalog.PiggySkinPalette skin) {
+            boolean dark = isDark();
+            float cx = w * 0.50f;
+            float cy = h * 0.47f;
+            float r = Math.min(w, h) * 0.41f;
+
+            paint.setStyle(Paint.Style.FILL);
+            paint.setFilterBitmap(true);
+            paint.setShader(null);
+            paint.setColor(0xffffffff);
+            Bitmap thumb = MoonPhaseRenderer.staticThumb(ctx, dark);
+            if (thumb != null && !thumb.isRecycled()) {
+                inner.set(cx - r, cy - r, cx + r, cy + r);
+                canvas.drawBitmap(thumb, null, inner, paint);
+            }
+
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setColor(dark ? 0x38dce4f0 : 0x42334155);
+            strokePaint.setStrokeWidth(dp(ctx, 0.95f));
+            canvas.drawCircle(cx, cy, r, strokePaint);
         }
 
         private void drawEffectOrb(Canvas canvas, float w, float h, Context ctx) {
@@ -1350,7 +1806,7 @@ final class TimeShopUi {
 
     static Dialog showTimeShopSheet(MainActivity activity, FocusState state,
                                     Runnable onChanged, Runnable onDismissBack) {
-        return showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_ALL, FOCUS_NONE);
+        return showTimeShopSheet(activity, state, onChanged, onDismissBack, TAB_RECOMMEND, FOCUS_NONE);
     }
 
     static void showAppearanceShop(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
@@ -1521,7 +1977,26 @@ final class TimeShopUi {
         navRow.setGravity(Gravity.CENTER);
         navRow.setPadding(dp(activity, 14), 0, dp(activity, 14), 0);
         interior.addView(navRow, -1, -2);
-        gap(interior, 12);
+        gap(interior, 8);
+
+        // 3.4b Compact Filter & Sort Bar (for Recommend & Appearance tabs)
+        LinearLayout filterSortBar = row(activity);
+        filterSortBar.setGravity(Gravity.CENTER_VERTICAL);
+        filterSortBar.setPadding(dp(activity, 14), 0, dp(activity, 14), dp(activity, 10));
+        HorizontalScrollView filterScroll = new HorizontalScrollView(activity);
+        filterScroll.setHorizontalScrollBarEnabled(false);
+        filterScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout filterChipsRow = row(activity);
+        filterChipsRow.setGravity(Gravity.CENTER_VERTICAL);
+        filterScroll.addView(filterChipsRow, -2, -2);
+        filterSortBar.addView(filterScroll, new LinearLayout.LayoutParams(0, -2, 1f));
+        space(filterSortBar, 8);
+        TextView sortBtn = text(activity, "⇅ 默认", 11, ShopColors.warmInk(), true);
+        sortBtn.setSingleLine(true);
+        sortBtn.setGravity(Gravity.CENTER);
+        sortBtn.setPadding(dp(activity, 10), dp(activity, 5), dp(activity, 10), dp(activity, 5));
+        filterSortBar.addView(sortBtn, -2, -2);
+        interior.addView(filterSortBar, -1, -2);
 
         LinearLayout shelfContentWrap = column(activity);
         shelfContentWrap.setPadding(dp(activity, 14), 0, dp(activity, 14), 0);
@@ -1548,6 +2023,8 @@ final class TimeShopUi {
         final int openedPalette = state.effectiveColorTheme();
         final boolean[] suppressDismissBack = {false};
         final int[] activeTab = {initialTab};
+        final int[] activeFilter = {FILTER_ALL};
+        final int[] activeSort = {SORT_DEFAULT};
         final int[] displayedMinutes = {(int) Math.max(0L, state.rewardSpendableMs() / FocusState.MINUTE)};
         final ValueAnimator[] balanceAnimator = {null};
         final boolean[] actionBusy = {false};
@@ -1607,18 +2084,21 @@ final class TimeShopUi {
             shelfContentWrap.animate().alpha(1f).setDuration(180L).start();
         };
 
-        String[] navLabels = {"全部", "道具", "外观", "心愿"};
+        String[] navLabels = {"推荐", "道具", "外观", "心愿"};
         TextView[] navPills = new TextView[navLabels.length];
         for (int i = 0; i < navLabels.length; i++) {
             final int tabIdx = i;
             TextView pill = text(activity, navLabels[i], 13, ShopColors.muted(), true);
-pill.setSingleLine(true);
+            pill.setSingleLine(true);
             pill.setGravity(Gravity.CENTER);
             pill.setPadding(dp(activity, 16), dp(activity, 7), dp(activity, 16), dp(activity, 7));
             pill.setOnClickListener(v -> {
                 if (activeTab[0] == tabIdx) return;
                 tapHaptic(v);
                 activeTab[0] = tabIdx;
+                if (tabIdx == TAB_APPEARANCE && activeFilter[0] == FILTER_PROP) {
+                    activeFilter[0] = FILTER_ALL;
+                }
                 rebuild[0].run();
                 animateTabTransition.run();
             });
@@ -1626,6 +2106,12 @@ pill.setSingleLine(true);
             navRow.addView(pill);
             if (i + 1 < navLabels.length) space(navRow, 4);
         }
+
+        sortBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            activeSort[0] = (activeSort[0] + 1) % 4;
+            rebuild[0].run();
+        });
 
         Runnable refreshAfterPurchase = () -> {
             FocusStore.get(activity).save();
@@ -1674,110 +2160,163 @@ pill.setSingleLine(true);
                 navPills[i].setBackground(sel ? shape(activity, ShopColors.navSelectedBg(), 14) : null);
             }
 
+            int tab = activeTab[0];
+            boolean showFilterBar = tab == TAB_RECOMMEND || tab == TAB_APPEARANCE;
+            filterSortBar.setVisibility(showFilterBar ? View.VISIBLE : View.GONE);
+            if (showFilterBar) {
+                if (tab == TAB_APPEARANCE && activeFilter[0] == FILTER_PROP) {
+                    activeFilter[0] = FILTER_ALL;
+                }
+                filterChipsRow.removeAllViews();
+                int[] filterIds = tab == TAB_RECOMMEND
+                        ? new int[]{FILTER_ALL, FILTER_SPECIAL, FILTER_PIGGY, FILTER_PROP,
+                                FILTER_THEME_FX, FILTER_INSTALLMENT, FILTER_UNOWNED, FILTER_AFFORDABLE}
+                        : new int[]{FILTER_ALL, FILTER_SPECIAL, FILTER_PIGGY,
+                                FILTER_THEME_FX, FILTER_INSTALLMENT, FILTER_UNOWNED, FILTER_AFFORDABLE};
+                String[] filterLabels = tab == TAB_RECOMMEND
+                        ? new String[]{"全部", "新造型", "小猪", "道具", "主题动效", "可分期", "未拥有", "买得起"}
+                        : new String[]{"全部", "新造型", "小猪", "主题动效", "可分期", "未拥有", "买得起"};
+                for (int i = 0; i < filterIds.length; i++) {
+                    final int fId = filterIds[i];
+                    boolean sel = activeFilter[0] == fId;
+                    TextView chip = text(activity, filterLabels[i], 11,
+                            sel ? ShopColors.navSelectedInk() : ShopColors.muted(), sel);
+                    chip.setSingleLine(true);
+                    chip.setGravity(Gravity.CENTER);
+                    chip.setPadding(dp(activity, 10), dp(activity, 5), dp(activity, 10), dp(activity, 5));
+                    chip.setBackground(sel
+                            ? shape(activity, ShopColors.navSelectedBg(), 12)
+                            : roundedShape(activity, ShopColors.pillBg(), ShopColors.pillBorder(), 12, 1));
+                    chip.setOnClickListener(v -> {
+                        if (activeFilter[0] == fId) return;
+                        tapHaptic(v);
+                        activeFilter[0] = fId;
+                        rebuild[0].run();
+                    });
+                    filterChipsRow.addView(chip, -2, -2);
+                    if (i + 1 < filterIds.length) space(filterChipsRow, 5);
+                }
+
+                String sortLabel = switch (activeSort[0]) {
+                    case SORT_PRICE_ASC -> "↑ 低价";
+                    case SORT_PRICE_DESC -> "↓ 高价";
+                    case SORT_UNOWNED_FIRST -> "✦ 未拥";
+                    default -> "⇅ 默认";
+                };
+                boolean customSort = activeSort[0] != SORT_DEFAULT;
+                sortBtn.setText(sortLabel);
+                sortBtn.setTextColor(customSort ? ShopColors.blue() : ShopColors.warmInk());
+                sortBtn.setBackground(roundedShape(activity,
+                        customSort ? ShopColors.navSelectedBg() : ShopColors.pillBg(),
+                        customSort ? ShopColors.blue() : ShopColors.pillBorder(), 12, 1));
+            }
+
             shelfContentWrap.removeAllViews();
             indulgentAnchorRef[0] = null;
             craftAnchorRef[0] = null;
-            int tab = activeTab[0];
 
-            // Shelf 1: 自律好物
-            if (tab == TAB_ALL || tab == TAB_PROP) {
-                ShelfItem left = buildStreakProtectShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                ShelfItem right = buildVaultExpandShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                addShelfSection(activity, shelfContentWrap, "自律好物", left, right);
+            boolean filteredMode = showFilterBar && (activeFilter[0] != FILTER_ALL || activeSort[0] != SORT_DEFAULT);
+            if (filteredMode) {
+                renderFilteredShopShelves(activity, shelfContentWrap, state,
+                        tab == TAB_RECOMMEND, activeFilter[0], activeSort[0],
+                        actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase, () -> {
+                            activeFilter[0] = FILTER_ALL;
+                            activeSort[0] = SORT_DEFAULT;
+                            rebuild[0].run();
+                        });
+                return;
             }
 
-            // Shelf 2: 特别奖励
-            if (tab == TAB_ALL || tab == TAB_PROP) {
+            if (tab == TAB_RECOMMEND) {
+                // 1. 自律好物
+                addShelfSection(activity, shelfContentWrap, "自律好物",
+                        buildStreakProtectShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildVaultExpandShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+
+                // 2. 新造型精选
+                addShelfSection(activity, shelfContentWrap, "新造型精选",
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_moon_phase"),
+                                ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_bonsai"),
+                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                addShelfRowWithPlank(activity, shelfContentWrap,
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_lucky_cat"),
+                                ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_wish_jar"),
+                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+
+                // 3. 特别奖励
                 int beforeSpecial = shelfContentWrap.getChildCount();
-                ShelfItem left = buildIndulgentInstallmentShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                ShelfItem right = tab == TAB_ALL
-                        ? buildPermanentShelfItem(activity, state,
-                                ShopCatalog.findPermanentItem("piggy_starry"),
-                                ShopIllustrationView.Kind.PIGGY, 0f,
-                                actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase)
-                        : buildLayFlatShelfEntry(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                addShelfSection(activity, shelfContentWrap, tab == TAB_ALL ? "特别奖励" : "特殊卡券", left, right);
+                addShelfSection(activity, shelfContentWrap, "特别奖励",
+                        buildIndulgentInstallmentShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_starry"),
+                                ShopIllustrationView.Kind.PIGGY, 0f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
                 if (shelfContentWrap.getChildCount() > beforeSpecial) {
                     indulgentAnchorRef[0] = shelfContentWrap.getChildAt(beforeSpecial);
                 }
-            }
 
-            // Cozy Card Achievement & Synthesis Shelf Module (migrated from Rate Settings)
-            if (tab == TAB_ALL || tab == TAB_PROP) {
+                // 4. 自律宝箱与卡牌合成
                 int beforeCraft = shelfContentWrap.getChildCount();
                 addCardCraftShelfModule(activity, shelfContentWrap, state, actionBusy, bagBtnWrap, refreshAfterPurchase);
                 if (shelfContentWrap.getChildCount() > beforeCraft) {
                     craftAnchorRef[0] = shelfContentWrap.getChildAt(beforeCraft);
                 }
-            }
+            } else if (tab == TAB_PROP) {
+                addShelfSection(activity, shelfContentWrap, "自律好物",
+                        buildStreakProtectShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildVaultExpandShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
 
-            if (tab == TAB_ALL || tab == TAB_APPEARANCE) {
-                ShelfItem blueTheme = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.DEFAULT_APP_THEME),
-                        ShopIllustrationView.Kind.THEME, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                ShelfItem sakura = buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME),
-                        ShopIllustrationView.Kind.THEME, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase);
-                addShelfSection(activity, shelfContentWrap, "应用主题", blueTheme, sakura);
-            }
+                int beforeSpecial = shelfContentWrap.getChildCount();
+                addShelfSection(activity, shelfContentWrap, "特殊卡券",
+                        buildIndulgentInstallmentShelfItem(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildLayFlatShelfEntry(activity, state, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                if (shelfContentWrap.getChildCount() > beforeSpecial) {
+                    indulgentAnchorRef[0] = shelfContentWrap.getChildAt(beforeSpecial);
+                }
 
-            // Piggy Bank Collection Shelves
-            if (tab == TAB_ALL) {
-                addShelfSection(activity, shelfContentWrap, "小猪收藏",
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_gold"),
+                int beforeCraft = shelfContentWrap.getChildCount();
+                addCardCraftShelfModule(activity, shelfContentWrap, state, actionBusy, bagBtnWrap, refreshAfterPurchase);
+                if (shelfContentWrap.getChildCount() > beforeCraft) {
+                    craftAnchorRef[0] = shelfContentWrap.getChildAt(beforeCraft);
+                }
+            } else if (tab == TAB_APPEARANCE) {
+                addShelfSection(activity, shelfContentWrap, "意境摆件与特色造型",
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_mug"),
                                 ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_crystal"),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_boba_cup"),
                                 ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
                 addShelfRowWithPlank(activity, shelfContentWrap,
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_wish_jar"),
+                                ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_lucky_cat"),
+                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                addShelfRowWithPlank(activity, shelfContentWrap,
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_bonsai"),
+                                ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("vault_moon_phase"),
+                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+
+                addShelfSection(activity, shelfContentWrap, "经典小猪",
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_sakura"),
                                 ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_jade"),
                                 ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-                addShelfSection(activity, shelfContentWrap, "外观与动效",
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_obsidian"),
+                addShelfRowWithPlank(activity, shelfContentWrap,
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_crystal"),
                                 ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("fx_starlight"),
-                                ShopIllustrationView.Kind.EFFECT, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_gold"),
+                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
                 addShelfRowWithPlank(activity, shelfContentWrap,
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_mint"),
-                                ShopIllustrationView.Kind.LIQUID, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_lavender"),
-                                ShopIllustrationView.Kind.LIQUID, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-                addShelfRowWithPlank(activity, shelfContentWrap,
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_honey"),
-                                ShopIllustrationView.Kind.LIQUID, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_berry"),
-                                ShopIllustrationView.Kind.LIQUID, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-                addShelfRowWithPlank(activity, shelfContentWrap,
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("fx_sakura"),
-                                ShopIllustrationView.Kind.EFFECT, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("fx_aurora"),
-                                ShopIllustrationView.Kind.EFFECT, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-            } else if (tab == TAB_APPEARANCE) {
-                addShelfSection(activity, shelfContentWrap, "小猪收藏",
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_starry"),
                                 ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_gold"),
-                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-                addShelfRowWithPlank(activity, shelfContentWrap,
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_crystal"),
-                                ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_sakura"),
-                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-                addShelfRowWithPlank(activity, shelfContentWrap,
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_jade"),
-                                ShopIllustrationView.Kind.PIGGY, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("piggy_obsidian"),
                                 ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
 
-                addShelfSection(activity, shelfContentWrap, "储蓄罐液体",
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_mint"),
-                                ShopIllustrationView.Kind.LIQUID, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_lavender"),
-                                ShopIllustrationView.Kind.LIQUID, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
-                addShelfRowWithPlank(activity, shelfContentWrap,
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_honey"),
-                                ShopIllustrationView.Kind.LIQUID, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("liquid_berry"),
-                                ShopIllustrationView.Kind.LIQUID, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                addShelfSection(activity, shelfContentWrap, "应用主题",
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.DEFAULT_APP_THEME),
+                                ShopIllustrationView.Kind.THEME, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
+                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem(ShopCatalog.SAKURA_APP_THEME),
+                                ShopIllustrationView.Kind.THEME, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
 
                 addShelfSection(activity, shelfContentWrap, "兑换粒子动效",
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("fx_starlight"),
@@ -1787,12 +2326,11 @@ pill.setSingleLine(true);
                 addShelfRowWithPlank(activity, shelfContentWrap,
                         buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("fx_aurora"),
                                 ShopIllustrationView.Kind.EFFECT, -2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase),
-                        buildPermanentShelfItem(activity, state, ShopCatalog.findPermanentItem("default"),
-                                ShopIllustrationView.Kind.PIGGY, 2.5f, actionBusy, flyOverlay, bagBtnWrap, refreshAfterPurchase));
+                        null);
             }
 
             // 3.5 Hanging Wishes Section (挂在墙上的心愿)
-            if (tab == TAB_ALL || tab == TAB_WISH) {
+            if (tab == TAB_RECOMMEND || tab == TAB_WISH) {
                 addWishWallSection(activity, shelfContentWrap, state, actionBusy, flyOverlay, bagBtnWrap,
                         openAddWish, refreshAfterPurchase);
             }
@@ -1887,6 +2425,144 @@ pill.setSingleLine(true);
             });
         }
         return dialog;
+    }
+
+    private static final int GROUP_PROP = 1;
+    private static final int GROUP_SPECIAL = 2;
+    private static final int GROUP_PIGGY = 3;
+    private static final int GROUP_THEME_FX = 4;
+
+    private record ShopCandidate(
+            int group,
+            int sortCost,
+            boolean installment,
+            boolean owned,
+            boolean equipped,
+            boolean affordable,
+            ShelfItem item) {}
+
+    private static void renderFilteredShopShelves(MainActivity activity, LinearLayout parent, FocusState state,
+                                                  boolean includeProps, int filter, int sort,
+                                                  boolean[] busy, ShopFlyOverlay flyOverlay, View bagTarget,
+                                                  Runnable onUpdated, Runnable onReset) {
+        List<ShopCandidate> candidates = buildFilteredShopCandidates(
+                activity, state, includeProps, busy, flyOverlay, bagTarget, onUpdated);
+        List<ShopCandidate> filtered = new ArrayList<>();
+        for (ShopCandidate c : candidates) {
+            boolean match = switch (filter) {
+                case FILTER_SPECIAL -> c.group() == GROUP_SPECIAL;
+                case FILTER_PIGGY -> c.group() == GROUP_PIGGY;
+                case FILTER_PROP -> c.group() == GROUP_PROP;
+                case FILTER_THEME_FX -> c.group() == GROUP_THEME_FX;
+                case FILTER_INSTALLMENT -> c.installment();
+                case FILTER_UNOWNED -> !c.owned();
+                case FILTER_AFFORDABLE -> c.affordable();
+                default -> true;
+            };
+            if (match) filtered.add(c);
+        }
+
+        switch (sort) {
+            case SORT_PRICE_ASC -> filtered.sort(Comparator.comparingInt(ShopCandidate::sortCost));
+            case SORT_PRICE_DESC -> filtered.sort(Comparator.comparingInt(ShopCandidate::sortCost).reversed());
+            case SORT_UNOWNED_FIRST -> filtered.sort(Comparator.comparingInt(
+                    c -> c.owned() ? (c.equipped() ? 2 : 1) : 0));
+            default -> {}
+        }
+
+        if (filtered.isEmpty()) {
+            LinearLayout empty = column(activity);
+            empty.setBackground(roundedShape(activity, ShopColors.pageBg(), ShopColors.interiorBorder(), 16, 1));
+            empty.setPadding(dp(activity, 16), dp(activity, 20), dp(activity, 16), dp(activity, 20));
+            empty.setGravity(Gravity.CENTER);
+            empty.addView(text(activity, "暂无符合当前条件的商品", 14, ShopColors.ink(), true));
+            gap(empty, 6);
+            empty.addView(text(activity, "可以换个筛选条件或重置查看全部商品", 12, ShopColors.muted(), false));
+            gap(empty, 12);
+            TextView resetBtn = pillButton(activity, "重置筛选", ShopColors.navSelectedBg(), ShopColors.blue(), 12, 34);
+            resetBtn.setPadding(dp(activity, 18), dp(activity, 6), dp(activity, 18), dp(activity, 6));
+            resetBtn.setOnClickListener(v -> {
+                tapHaptic(v);
+                onReset.run();
+            });
+            empty.addView(resetBtn, -2, -2);
+            parent.addView(empty, -1, -2);
+            gap(parent, 12);
+            return;
+        }
+
+        String header = "筛选结果 · " + filtered.size() + " 件";
+        for (int i = 0; i < filtered.size(); i += 2) {
+            ShelfItem left = filtered.get(i).item();
+            ShelfItem right = (i + 1 < filtered.size()) ? filtered.get(i + 1).item() : null;
+            if (i == 0) {
+                addShelfSection(activity, parent, header, left, right);
+            } else {
+                addShelfRowWithPlank(activity, parent, left, right);
+            }
+        }
+    }
+
+    private static List<ShopCandidate> buildFilteredShopCandidates(MainActivity activity, FocusState state,
+                                                                   boolean includeProps, boolean[] busy,
+                                                                   ShopFlyOverlay flyOverlay, View bagTarget,
+                                                                   Runnable onUpdated) {
+        List<ShopCandidate> list = new ArrayList<>();
+        if (includeProps) {
+            boolean spFull = state.streakProtectCards >= FocusState.MAX_STREAK_PROTECT_CARDS;
+            list.add(new ShopCandidate(GROUP_PROP, FocusState.STREAK_PROTECT_CARD_COST_MINUTES, false,
+                    spFull, false, !spFull && state.canAffordReward(FocusState.STREAK_PROTECT_CARD_COST_MINUTES * FocusState.MINUTE),
+                    buildStreakProtectShelfItem(activity, state, busy, flyOverlay, bagTarget, onUpdated)));
+
+            boolean veFull = !state.canBuyVaultExpandCard();
+            list.add(new ShopCandidate(GROUP_PROP, FocusState.VAULT_EXPAND_CARD_COST_MINUTES, false,
+                    veFull, false, !veFull && state.canAffordReward(FocusState.VAULT_EXPAND_CARD_COST_MINUTES * FocusState.MINUTE),
+                    buildVaultExpandShelfItem(activity, state, busy, flyOverlay, bagTarget, onUpdated)));
+
+            boolean indFull = state.indulgentPasses >= FocusState.MAX_INDULGENT_CARDS;
+            list.add(new ShopCandidate(GROUP_PROP, FocusState.INDULGENT_INSTALLMENT_TOTAL_MINUTES, true,
+                    indFull, false, !indFull && state.rewardSpendableMs() >= FocusState.MINUTE,
+                    buildIndulgentInstallmentShelfItem(activity, state, busy, flyOverlay, bagTarget, onUpdated)));
+
+            boolean lfFull = state.layFlatCards >= FocusState.MAX_LAY_FLAT_CARDS;
+            list.add(new ShopCandidate(GROUP_PROP, FocusState.INDULGENT_INSTALLMENT_TOTAL_MINUTES * 2, false,
+                    lfFull, false, state.canExchangeLayFlatCard(),
+                    buildLayFlatShelfEntry(activity, state, busy, flyOverlay, bagTarget, onUpdated)));
+        }
+
+        for (ShopCatalog.PiggySkinPalette s : ShopCatalog.specialVaultSkins()) {
+            list.add(buildPermanentCandidate(activity, state, s.id(), ShopIllustrationView.Kind.PIGGY,
+                    GROUP_SPECIAL, busy, flyOverlay, bagTarget, onUpdated));
+        }
+        for (ShopCatalog.PiggySkinPalette s : ShopCatalog.classicPiggySkins()) {
+            list.add(buildPermanentCandidate(activity, state, s.id(), ShopIllustrationView.Kind.PIGGY,
+                    GROUP_PIGGY, busy, flyOverlay, bagTarget, onUpdated));
+        }
+        list.add(buildPermanentCandidate(activity, state, ShopCatalog.DEFAULT_APP_THEME,
+                ShopIllustrationView.Kind.THEME, GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
+        list.add(buildPermanentCandidate(activity, state, ShopCatalog.SAKURA_APP_THEME,
+                ShopIllustrationView.Kind.THEME, GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
+        for (ShopCatalog.RedeemEffectPalette fx : ShopCatalog.purchasableRedeemEffects()) {
+            list.add(buildPermanentCandidate(activity, state, fx.id(), ShopIllustrationView.Kind.EFFECT,
+                    GROUP_THEME_FX, busy, flyOverlay, bagTarget, onUpdated));
+        }
+        return list;
+    }
+
+    private static ShopCandidate buildPermanentCandidate(MainActivity activity, FocusState state, String id,
+                                                         ShopIllustrationView.Kind kind, int group,
+                                                         boolean[] busy, ShopFlyOverlay flyOverlay,
+                                                         View bagTarget, Runnable onUpdated) {
+        ShopCatalog.PermanentEntry entry = ShopCatalog.findPermanentItem(id);
+        boolean owned = state.isShopItemOwned(id);
+        boolean equipped = isPermanentItemEquipped(state, entry);
+        boolean installment = entry.supportsInstallment();
+        boolean affordable = !owned && (installment
+                ? state.rewardSpendableMs() >= FocusState.MINUTE
+                : state.canAffordReward(entry.costMinutes() * FocusState.MINUTE));
+        ShelfItem item = buildPermanentShelfItem(activity, state, entry, kind, 0f,
+                busy, flyOverlay, bagTarget, onUpdated);
+        return new ShopCandidate(group, entry.costMinutes(), installment, owned, equipped, affordable, item);
     }
 
     private record ShelfItem(
@@ -2151,35 +2827,56 @@ pill.setSingleLine(true);
         ShopIllustrationView art = new ShopIllustrationView(activity, kind, entry.id(), tiltDeg);
         boolean owned = state.isShopItemOwned(entry.id());
         boolean equipped = isPermanentItemEquipped(state, entry);
-        boolean afford = state.canAffordReward(entry.costMinutes() * FocusState.MINUTE);
+        boolean installment = !owned && entry.supportsInstallment();
 
         RedeemUi.Pressable3DButton.Mode mode;
         String btnTxt;
+        String subTxt = entry.subtitle();
+        float progress = -1f;
+        int fillColor = 0;
+        int trackColor = 0;
+
         if (equipped) {
             mode = RedeemUi.Pressable3DButton.Mode.SUCCESS;
             btnTxt = "✓ 已装备";
         } else if (owned) {
             mode = RedeemUi.Pressable3DButton.Mode.SUCCESS;
             btnTxt = "已拥有";
-        } else if (afford) {
-            mode = RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED;
-            btnTxt = entry.costMinutes() + " 分钟";
+        } else if (installment) {
+            int paid = state.shopItemPaidMinutes(entry.id());
+            int total = entry.costMinutes();
+            boolean canPayAny = state.rewardSpendableMs() >= FocusState.MINUTE;
+            mode = canPayAny
+                    ? RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED
+                    : RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
+            String hoursLabel = (total % 60 == 0) ? (total / 60) + "h 分期" : total + "分 · 分期";
+            btnTxt = paid > 0 ? "继续积攒" : hoursLabel;
+            if (paid > 0) subTxt = "已存 " + paid + "/" + total + "分";
+            progress = paid <= 0 ? 0f : Math.max(0.04f, Math.min(1f, (float) paid / total));
+            fillColor = ShopColors.blue();
+            trackColor = isDark() ? 0xff283348 : 0xffdde7f8;
         } else {
-            mode = RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
+            boolean afford = state.canAffordReward(entry.costMinutes() * FocusState.MINUTE);
+            mode = afford
+                    ? RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED
+                    : RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED;
             btnTxt = entry.costMinutes() + " 分钟";
         }
 
-        return new ShelfItem(art, entry.name(), entry.subtitle(), mode, btnTxt, () -> {
+        return new ShelfItem(art, entry.name(), subTxt, mode, btnTxt, () -> {
             if (busy[0]) return;
             tapHaptic(art);
-            showPermanentDetailDialog(activity, state, entry, kind, busy, art, flyOverlay, bagTarget, onUpdated);
-        });
+            if (installment) {
+                showPermanentInstallmentDialog(activity, state, entry, busy, art, flyOverlay, bagTarget, onUpdated);
+            } else {
+                showPermanentDetailDialog(activity, state, entry, kind, busy, art, flyOverlay, bagTarget, onUpdated);
+            }
+        }, progress, fillColor, trackColor);
     }
 
     private static boolean isPermanentItemEquipped(FocusState state, ShopCatalog.PermanentEntry entry) {
         return switch (entry.type()) {
             case PIGGY_SKIN -> entry.id().equals(state.equippedPiggySkin);
-            case LIQUID_THEME -> entry.id().equals(state.equippedLiquidTheme);
             case REDEEM_EFFECT -> entry.id().equals(state.equippedRedeemEffect);
             case APP_THEME -> state.colorTheme == ShopCatalog.appTheme(entry.id()).palette();
             default -> false;
@@ -2189,7 +2886,6 @@ pill.setSingleLine(true);
     private static boolean equipPermanentItem(MainActivity activity, FocusState state, ShopCatalog.PermanentEntry entry) {
         return switch (entry.type()) {
             case PIGGY_SKIN -> state.equipPiggySkin(entry.id());
-            case LIQUID_THEME -> state.equipLiquidTheme(entry.id());
             case REDEEM_EFFECT -> state.equipRedeemEffect(entry.id());
             case APP_THEME -> {
                 if (!state.setColorTheme(ShopCatalog.appTheme(entry.id()).palette())) yield false;
@@ -2531,14 +3227,53 @@ pill.setSingleLine(true);
         }
 
         int defaultPay = Math.max(5, Math.min(remainNeed, Math.min(30, Math.max(5, spendableMins))));
-        int[] payChoice = {spendableMins > 0 ? Math.min(remainNeed, defaultPay) : 30};
+        int[] payChoice = {spendableMins > 0 ? Math.min(remainNeed, defaultPay) : Math.min(remainNeed, 30)};
 
         content.addView(text(activity, "选择本次投入时间（可用 " + spendableMins + " 分钟"
                 + (state.isLayFlat() ? " · 仅储蓄罐" : "") + "）", 12, INK_SUB, true));
         gap(content, 6);
         LinearLayout chipsRow = row(activity);
         TextView previewCost = text(activity, "", 12, BLUE, true);
+        bindInstallmentChipsRow(activity, chipsRow, previewCost, paid, total, remainNeed,
+                spendableMins, payChoice, "（本次满额即领放纵卡！）");
+        content.addView(chipsRow);
+        gap(content, 8);
+        content.addView(previewCost);
 
+        cardDialog(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
+                "放纵卡 · 20h 分期兑换", null, content,
+                "取消", spendableMins > 0 ? "确认投入" : null, false, true, () -> {
+                    int req = payChoice[0];
+                    FocusState.InstallmentResult res = state.contributeIndulgentInstallment(
+                            req, System.currentTimeMillis(), ZoneId.systemDefault());
+                    if (res == FocusState.InstallmentResult.PAID || res == FocusState.InstallmentResult.COMPLETED) {
+                        FocusStore.get(activity).save();
+                        haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
+                        busy[0] = true;
+                        flyOverlay.playCollect(sourceView, bagTarget, AMBER, () -> {
+                            busy[0] = false;
+                            CardCraftUi.bouncePill(bagTarget);
+                            onUpdated.run();
+                            Toast.makeText(activity,
+                                    res == FocusState.InstallmentResult.COMPLETED
+                                            ? "分期满 20 小时！已获得 1 张放纵卡"
+                                            : "已分期投入，当前进度 " + state.indulgentPaidMinutes + "/" + total + " 分钟",
+                                    Toast.LENGTH_SHORT).show();
+                        });
+                    } else {
+                        haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
+                        Toast.makeText(activity,
+                                res == FocusState.InstallmentResult.FULL_INVENTORY ? "放纵卡已达 5 张上限"
+                                        : state.isLayFlat() ? "储蓄时间不足" : "可支配时间不足",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+    }
+
+    private static void bindInstallmentChipsRow(MainActivity activity, LinearLayout chipsRow,
+                                                TextView previewCost, int paid, int total,
+                                                int remainNeed, int spendableMins,
+                                                int[] payChoice, String fullRewardMsg) {
         Runnable[] refreshPay = new Runnable[1];
         refreshPay[0] = () -> {
             chipsRow.removeAllViews();
@@ -2594,39 +3329,110 @@ pill.setSingleLine(true);
             boolean affordNow = spendableMins >= payNow;
             previewCost.setText(affordNow
                     ? "投入 " + payNow + " 分钟 → 进度 " + afterPaid + "/" + total
-                    + (afterPaid >= total ? "（本次满额即领放纵卡！）" : " · 剩余可用 " + (spendableMins - payNow) + " 分钟")
+                    + (afterPaid >= total ? fullRewardMsg : " · 剩余可用 " + (spendableMins - payNow) + " 分钟")
                     : "当前余额 " + spendableMins + " 分钟不足以投入 " + payNow + " 分钟");
             previewCost.setTextColor(affordNow ? BLUE : RED);
         };
         refreshPay[0].run();
+    }
+
+    private static void showPermanentInstallmentDialog(MainActivity activity, FocusState state,
+                                                       ShopCatalog.PermanentEntry entry,
+                                                       boolean[] busy, View sourceView,
+                                                       ShopFlyOverlay flyOverlay, View bagTarget,
+                                                       Runnable onUpdated) {
+        long now = System.currentTimeMillis();
+        state.syncResetDay(now, ZoneId.systemDefault());
+        int total = entry.costMinutes();
+        int paid = state.shopItemPaidMinutes(entry.id());
+        int remainNeed = state.shopItemRemainingMinutes(entry.id());
+        int spendableMins = (int) Math.max(0L, state.rewardSpendableMs() / FocusState.MINUTE);
+
+        LinearLayout content = column(activity);
+        if (entry.type() == ShopCatalog.ItemType.PIGGY_SKIN) {
+            content.addView(buildLivePiggyPreviewStage(activity, entry.id(),
+                    state.vaultCapacityMinutes(), entry.name()));
+        } else {
+            ShopIllustrationView.Kind artKind = entry.type() == ShopCatalog.ItemType.APP_THEME
+                    ? ShopIllustrationView.Kind.THEME : ShopIllustrationView.Kind.EFFECT;
+            FrameLayout artWrap = new FrameLayout(activity);
+            artWrap.addView(new ShopIllustrationView(activity, artKind, entry.id(), 0f),
+                    new FrameLayout.LayoutParams(dp(activity, 96), dp(activity, 92), Gravity.CENTER));
+            content.addView(artWrap, -1, -2);
+        }
+        gap(content, 8);
+
+        TextView desc = text(activity,
+                entry.subtitle() + "\n超过 2.5 小时的珍藏外观支持随时分期投入，攒满即永久收入背包。",
+                12, INK_SUB, false);
+        content.addView(desc);
+        gap(content, 10);
+
+        LinearLayout progBox = column(activity);
+        progBox.setBackground(cardBg(activity, BLUE_SOFT, blueStroke(), 14));
+        progBox.setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10));
+        LinearLayout progHead = row(activity);
+        weight(progHead, text(activity, "分期进度", 12, BLUE, true));
+        progHead.addView(text(activity, paid + " / " + total + " 分钟（还差 " + remainNeed + " 分钟）",
+                12, INK, true));
+        progBox.addView(progHead);
+        gap(progBox, 7);
+        CapsuleBar bar = new CapsuleBar(activity);
+        bar.setColors(isDark() ? 0xff1d324c : 0xffdbe8fb, BLUE);
+        bar.setProgress(total <= 0 ? 1f : (float) paid / total);
+        progBox.addView(bar, -1, dp(activity, 8));
+        content.addView(progBox);
+        gap(content, 10);
+
+        int defaultPay = Math.max(5, Math.min(remainNeed, Math.min(30, Math.max(5, spendableMins))));
+        int[] payChoice = {spendableMins > 0 ? Math.min(remainNeed, defaultPay) : Math.min(remainNeed, 30)};
+
+        content.addView(text(activity, "选择本次投入时间（可用 " + spendableMins + " 分钟"
+                + (state.isLayFlat() ? " · 仅储蓄罐" : "") + "）", 12, INK_SUB, true));
+        gap(content, 6);
+        LinearLayout chipsRow = row(activity);
+        TextView previewCost = text(activity, "", 12, BLUE, true);
+        bindInstallmentChipsRow(activity, chipsRow, previewCost, paid, total, remainNeed,
+                spendableMins, payChoice, "（本次满额即永久解锁！）");
         content.addView(chipsRow);
         gap(content, 8);
         content.addView(previewCost);
 
-        cardDialog(activity, R.drawable.ic_gift, AMBER_SOFT, AMBER,
-                "放纵卡 · 20h 分期兑换", null, content,
+        cardDialog(activity, R.drawable.ic_gift, BLUE_SOFT, BLUE,
+                entry.name() + " · 分期兑换", null, content,
                 "取消", spendableMins > 0 ? "确认投入" : null, false, true, () -> {
                     int req = payChoice[0];
-                    FocusState.InstallmentResult res = state.contributeIndulgentInstallment(
-                            req, System.currentTimeMillis(), ZoneId.systemDefault());
+                    FocusState.InstallmentResult res = state.contributePermanentItemInstallment(
+                            entry.id(), req, System.currentTimeMillis(), ZoneId.systemDefault());
                     if (res == FocusState.InstallmentResult.PAID || res == FocusState.InstallmentResult.COMPLETED) {
                         FocusStore.get(activity).save();
                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
                         busy[0] = true;
-                        flyOverlay.playCollect(sourceView, bagTarget, AMBER, () -> {
+                        flyOverlay.playCollect(sourceView, bagTarget, BLUE, () -> {
                             busy[0] = false;
                             CardCraftUi.bouncePill(bagTarget);
                             onUpdated.run();
-                            Toast.makeText(activity,
-                                    res == FocusState.InstallmentResult.COMPLETED
-                                            ? "分期满 20 小时！已获得 1 张放纵卡"
-                                            : "已分期投入，当前进度 " + state.indulgentPaidMinutes + "/" + total + " 分钟",
-                                    Toast.LENGTH_SHORT).show();
+                            if (res == FocusState.InstallmentResult.COMPLETED) {
+                                confirmDialog(activity, R.drawable.ic_check, GREEN_SOFT, GREEN,
+                                        "已收集「" + entry.name() + "」",
+                                        "分期攒满！已永久放入「背包 → 外观」，是否立即装备生效？",
+                                        "留存背包", "立即装备", false, () -> {
+                                            if (equipPermanentItem(activity, state, entry)) {
+                                                haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
+                                                onUpdated.run();
+                                                Toast.makeText(activity, "已装备「" + entry.name() + "」", Toast.LENGTH_SHORT).show();
+                                            }
+                                        });
+                            } else {
+                                Toast.makeText(activity,
+                                        "已分期投入，当前进度 " + state.shopItemPaidMinutes(entry.id()) + "/" + total + " 分钟",
+                                        Toast.LENGTH_SHORT).show();
+                            }
                         });
                     } else {
                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
                         Toast.makeText(activity,
-                                res == FocusState.InstallmentResult.FULL_INVENTORY ? "放纵卡已达 5 张上限"
+                                res == FocusState.InstallmentResult.FULL_INVENTORY ? "已拥有该外观"
                                         : state.isLayFlat() ? "储蓄时间不足" : "可支配时间不足",
                                 Toast.LENGTH_SHORT).show();
                     }
@@ -2646,15 +3452,19 @@ pill.setSingleLine(true);
         boolean afford = spendableMins >= entry.costMinutes();
 
         String typeDesc = switch (entry.type()) {
-            case PIGGY_SKIN -> "装备后将替换首页小猪储蓄罐的专属外观与涂装主题，可随时在「背包 → 外观」切换。";
-            case LIQUID_THEME -> "装备后将替换首页小猪储蓄罐内的流动水波色彩，可随时在「背包 → 外观」切换。";
+            case PIGGY_SKIN -> "装备后将替换首页小猪/摆件的专属动态造型与互动特效（含自配动态水波/意境粒子），可随时在「背包 → 外观」切换。";
             case REDEEM_EFFECT -> "装备后将在兑换页收获时间兑换券时绽放专属动画粒子效果。";
             case APP_THEME -> "装备后切换应用配色。";
             default -> "";
         };
 
+        boolean useLivePiggyPreview = entry.type() == ShopCatalog.ItemType.PIGGY_SKIN;
+        View previewView = useLivePiggyPreview
+                ? buildLivePiggyPreviewStage(activity, entry.id(), state.vaultCapacityMinutes(), entry.name())
+                : new ShopIllustrationView(activity, kind, entry.id(), 0f);
+
         LinearLayout content = buildDetailBody(activity,
-                new ShopIllustrationView(activity, kind, entry.id(), 0f),
+                previewView, useLivePiggyPreview,
                 entry.subtitle() + "\n\n" + typeDesc,
                 layFlat, spendableMins, entry.costMinutes(),
                 Math.max(0, spendableMins - entry.costMinutes()),
@@ -2715,13 +3525,95 @@ pill.setSingleLine(true);
                 });
     }
 
+    private static LinearLayout buildLivePiggyPreviewStage(MainActivity activity, String skinId,
+                                                           int vaultCapMinutes, String itemName) {
+        LinearLayout stage = column(activity);
+        stage.setGravity(Gravity.CENTER_HORIZONTAL);
+        stage.setClipChildren(false);
+        stage.setClipToPadding(false);
+        stage.setBackground(cardBg(activity, SURFACE_SUBTLE, BORDER, 16));
+        stage.setPadding(dp(activity, 12), dp(activity, 8), dp(activity, 12), dp(activity, 8));
+
+        PiggyBankView preview = new PiggyBankView(activity);
+        preview.setAppearance(skinId);
+        preview.setVaultCapacityMinutes(vaultCapMinutes);
+        preview.setProgress(0.62f, false);
+        preview.setContentDescription("实时预览「" + itemName + "」，轻点试看投币与专属特效");
+        boolean isMoon = "vault_moon_phase".equals(skinId);
+        LinearLayout.LayoutParams piggyLp = new LinearLayout.LayoutParams(
+                dp(activity, isMoon ? 220 : 192), dp(activity, isMoon ? 154 : 126));
+        piggyLp.gravity = Gravity.CENTER_HORIZONTAL;
+        stage.addView(preview, piggyLp);
+
+        gap(stage, 4);
+        LinearLayout stageRow = row(activity);
+        stageRow.setGravity(Gravity.CENTER);
+        String[] stageLabels = isMoon
+                ? new String[]{"娥眉月 20%", "盈凸月 62%", "满月 100%"}
+                : new String[]{"初态 20%", "半满 62%", "满槽 100%"};
+        float[] stageRatios = {0.20f, 0.62f, 1.00f};
+        int[] selectedStage = {1};
+        TextView[] stageButtons = new TextView[stageLabels.length];
+        Runnable syncStageChips = () -> {
+            for (int i = 0; i < stageButtons.length; i++) {
+                boolean active = i == selectedStage[0];
+                stageButtons[i].setTextColor(active ? BLUE : INK_SUB);
+                stageButtons[i].setBackground(touchCard(activity,
+                        active ? BLUE_SOFT : CARD, active ? blueStroke() : BORDER, 9));
+            }
+        };
+        for (int i = 0; i < stageLabels.length; i++) {
+            final int idx = i;
+            TextView chip = text(activity, stageLabels[i], 10, INK_SUB, true);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(activity, 10), dp(activity, 4), dp(activity, 10), dp(activity, 4));
+            chip.setOnClickListener(v -> {
+                tapHaptic(v);
+                selectedStage[0] = idx;
+                syncStageChips.run();
+                preview.setProgress(stageRatios[idx], true);
+            });
+            stageButtons[i] = chip;
+            LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(-2, -2);
+            if (i > 0) chipLp.leftMargin = dp(activity, 6);
+            stageRow.addView(chip, chipLp);
+        }
+        syncStageChips.run();
+        stage.addView(stageRow, -2, -2);
+
+        gap(stage, 4);
+        TextView hint = text(activity, "轻点造型试看互动特效 · 点击上方标签预览不同储蓄进度", 10, MUTED, false);
+        hint.setGravity(Gravity.CENTER);
+        stage.addView(hint, -1, -2);
+
+        View.OnClickListener burstTap = v -> {
+            tapHaptic(v);
+            preview.playDepositBurst();
+        };
+        preview.setOnClickListener(burstTap);
+        stage.setOnClickListener(burstTap);
+        return stage;
+    }
+
     private static LinearLayout buildDetailBody(MainActivity activity, View previewArt, String descText,
                                                 boolean layFlat, int spendableMins, int costMinutes,
                                                 int afterMins, String statusBanner, boolean affordable) {
+        return buildDetailBody(activity, previewArt, false, descText, layFlat,
+                spendableMins, costMinutes, afterMins, statusBanner, affordable);
+    }
+
+    private static LinearLayout buildDetailBody(MainActivity activity, View previewView, boolean fullWidthPreview,
+                                                String descText, boolean layFlat, int spendableMins,
+                                                int costMinutes, int afterMins, String statusBanner,
+                                                boolean affordable) {
         LinearLayout content = column(activity);
-        FrameLayout artWrap = new FrameLayout(activity);
-        artWrap.addView(previewArt, new FrameLayout.LayoutParams(dp(activity, 94), dp(activity, 90), Gravity.CENTER));
-        content.addView(artWrap, -1, -2);
+        if (fullWidthPreview) {
+            content.addView(previewView, -1, -2);
+        } else {
+            FrameLayout artWrap = new FrameLayout(activity);
+            artWrap.addView(previewView, new FrameLayout.LayoutParams(dp(activity, 94), dp(activity, 90), Gravity.CENTER));
+            content.addView(artWrap, -1, -2);
+        }
         gap(content, 8);
 
         TextView desc = text(activity, descText, 13, INK_SUB, false);
@@ -3150,7 +4042,7 @@ pill.setSingleLine(true);
             // 3. 外观 (Owned Cosmetics & Default Equip)
             if (t == BAG_ALL || t == BAG_APPEARANCE) {
                 if (t == BAG_ALL) {
-                    listWrap.addView(text(activity, "小猪与商店外观", 12, MUTED, true));
+                    listWrap.addView(text(activity, "摆件与商店外观", 12, MUTED, true));
                     gap(listWrap, 6);
                 }
                 for (ShopCatalog.AppTheme theme : ShopCatalog.appThemes()) {
@@ -3178,31 +4070,16 @@ pill.setSingleLine(true);
                 for (ShopCatalog.PiggySkinPalette s : ShopCatalog.piggySkins()) {
                     if (!state.isShopItemOwned(s.id())) continue;
                     boolean eq = s.id().equals(state.equippedPiggySkin);
+                    String prefix = s.isPiggyShape() ? "小猪 · " : "摆件 · ";
                     listWrap.addView(buildWarehouseRow(activity,
                             new ShopIllustrationView(activity, ShopIllustrationView.Kind.PIGGY, s.id(), 0f),
-                            "小猪 · " + s.name(), s.subtitle(),
+                            prefix + s.name(), s.subtitle(),
                             eq ? "已装备" : "装备", !eq, eq ? GREEN : BLUE, () -> {
                                 if (state.equipPiggySkin(s.id())) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
                                     onUpdated.run();
                                     rebuild[0].run();
-                                    Toast.makeText(activity, "已更换小猪外观「" + s.name() + "」", Toast.LENGTH_SHORT).show();
-                                }
-                            }));
-                    gap(listWrap, 8);
-                }
-                for (ShopCatalog.LiquidPalette l : ShopCatalog.liquidThemes()) {
-                    if (!state.isShopItemOwned(l.id())) continue;
-                    boolean eq = l.id().equals(state.equippedLiquidTheme);
-                    listWrap.addView(buildWarehouseRow(activity,
-                            new ShopIllustrationView(activity, ShopIllustrationView.Kind.LIQUID, l.id(), 0f),
-                            "液体 · " + l.name(), l.subtitle(),
-                            eq ? "已装备" : "装备", !eq, eq ? GREEN : BLUE, () -> {
-                                if (state.equipLiquidTheme(l.id())) {
-                                    haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
-                                    onUpdated.run();
-                                    rebuild[0].run();
-                                    Toast.makeText(activity, "已更换储蓄罐液体「" + l.name() + "」", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(activity, "已更换外观「" + s.name() + "」", Toast.LENGTH_SHORT).show();
                                 }
                             }));
                     gap(listWrap, 8);

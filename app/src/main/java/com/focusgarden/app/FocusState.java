@@ -36,6 +36,7 @@ final class FocusState {
     static final int MAX_STREAK_PROTECT_CARDS = 10;
     static final int VAULT_EXPAND_CARD_COST_MINUTES = 60;
     static final int INDULGENT_INSTALLMENT_TOTAL_MINUTES = 20 * 60;
+    static final int SHOP_INSTALLMENT_THRESHOLD_MINUTES = 150;
     static final int SLEEP_CONFIG_COST_MINUTES = 35;
     static final int SLEEP_START_MIN_MINUTE = 0;
     static final int SLEEP_START_MAX_MINUTE = 24 * 60 - 1;
@@ -347,6 +348,8 @@ final class FocusState {
         long offlineEarnedMs;
         long todoEarnedMs;
         long habitEarnedMs;
+        long wakeEarnedMs;
+        long areaEarnedMs;
         int steps;
         int stepsClaimed;
         long stepsEarnedMs;
@@ -367,6 +370,9 @@ final class FocusState {
     final Map<String, Reward> rewards = new LinkedHashMap<>();
     final TreeSet<String> earlySleepDays = new TreeSet<>();
     final TreeSet<String> earlySleepFailed = new TreeSet<>();
+    final TreeSet<String> earlySleepWakeDates = new TreeSet<>();
+    final EarlyWakeChallenge earlyWake = new EarlyWakeChallenge();
+    final AreaCheckIn areaCheckIn = new AreaCheckIn();
     final TreeSet<Long> heartbeats = new TreeSet<>();
     final Set<String> hiddenCards = new LinkedHashSet<>();
     final Set<String> expandedRedeemCards = new LinkedHashSet<>();
@@ -399,8 +405,8 @@ final class FocusState {
     int vaultExpandCards;
     int indulgentPaidMinutes;
     final Set<String> ownedShopItems = new LinkedHashSet<>();
+    final Map<String, Integer> shopItemPaidMinutes = new LinkedHashMap<>();
     String equippedPiggySkin = "default";
-    String equippedLiquidTheme = "default";
     String equippedRedeemEffect = "default";
     final List<WishVoucher> wishVouchers = new ArrayList<>();
 
@@ -599,6 +605,8 @@ final class FocusState {
         colorTheme = PALETTE_SAGE;
         hiddenCards.clear();
         hiddenCards.add("sleep");
+        hiddenCards.add("wake");
+        hiddenCards.add(AreaCheckIn.CARD_KEY);
         hiddenCards.add("todos");
         hiddenCards.add("steps");
         completedGuides.clear();
@@ -1201,6 +1209,8 @@ final class FocusState {
         boolean hasPositive = (d.focusMs + d.offlineMs + d.learningMs >= 10 * MINUTE)
                 || d.checkIns > 0
                 || earlySleepChecked(ld)
+                || d.wakeEarnedMs > 0
+                || d.areaEarnedMs > 0
                 || d.todoEarnedMs > 0
                 || d.stepsEarnedMs > 0;
         return hasPositive;
@@ -1599,6 +1609,49 @@ final class FocusState {
         return "default".equals(id) || ShopCatalog.SAGE_APP_THEME.equals(id) || ownedShopItems.contains(id);
     }
 
+    int shopItemPaidMinutes(String id) {
+        if (id == null || id.isEmpty() || isShopItemOwned(id)) return 0;
+        ShopCatalog.PermanentEntry entry = ShopCatalog.findPermanentItem(id);
+        if (entry == null || entry.costMinutes() <= 1) return 0;
+        Integer v = shopItemPaidMinutes.get(id);
+        if (v == null || v <= 0) return 0;
+        return Math.min(v, entry.costMinutes() - 1);
+    }
+
+    int shopItemRemainingMinutes(String id) {
+        if (id == null || id.isEmpty() || isShopItemOwned(id)) return 0;
+        ShopCatalog.PermanentEntry entry = ShopCatalog.findPermanentItem(id);
+        if (entry == null) return 0;
+        return Math.max(0, entry.costMinutes() - shopItemPaidMinutes(id));
+    }
+
+    InstallmentResult contributePermanentItemInstallment(String id, int requestedMinutes, long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        ShopCatalog.PermanentEntry entry = ShopCatalog.findPermanentItem(id);
+        if (entry == null || requestedMinutes <= 0 || !entry.supportsInstallment()) return InstallmentResult.INVALID;
+        if (isShopItemOwned(id)) return InstallmentResult.FULL_INVENTORY;
+        int paid = shopItemPaidMinutes(id);
+        int remaining = Math.max(0, entry.costMinutes() - paid);
+        int pay = remaining == 0 ? 0 : Math.min(requestedMinutes, remaining);
+        if (pay <= 0) return InstallmentResult.INVALID;
+        long costMs = pay * MINUTE;
+        if (!spendForShop(costMs, "分期积攒 · " + entry.name(),
+                "累计进度 " + (paid + pay) + "/" + entry.costMinutes() + " 分钟",
+                now, zone)) {
+            return InstallmentResult.INSUFFICIENT_TIME;
+        }
+        int nextPaid = paid + pay;
+        if (nextPaid >= entry.costMinutes()) {
+            shopItemPaidMinutes.remove(id);
+            ownedShopItems.add(id);
+            logEvent(date(now, zone), now, "REWARD", "分期集齐外观 · " + entry.name(),
+                    "累计满 " + entry.costMinutes() + " 分钟 · 永久收藏", 0L);
+            return InstallmentResult.COMPLETED;
+        }
+        shopItemPaidMinutes.put(id, nextPaid);
+        return InstallmentResult.PAID;
+    }
+
     boolean buyPermanentShopItem(String id, int costMinutes, String title, long now, ZoneId zone) {
         if (id == null || id.isEmpty() || costMinutes <= 0 || isShopItemOwned(id)) return false;
         var appTheme = ShopCatalog.appTheme(id);
@@ -1607,6 +1660,7 @@ final class FocusState {
         if (!spendForShop(costMs, "兑换外观 · " + (title == null ? id : title), "永久收藏", now, zone)) {
             return false;
         }
+        shopItemPaidMinutes.remove(id);
         ownedShopItems.add(id);
         return true;
     }
@@ -1614,12 +1668,6 @@ final class FocusState {
     boolean equipPiggySkin(String id) {
         if (!isShopItemOwned(id)) return false;
         equippedPiggySkin = ShopCatalog.piggySkin(id).id();
-        return true;
-    }
-
-    boolean equipLiquidTheme(String id) {
-        if (!isShopItemOwned(id)) return false;
-        equippedLiquidTheme = ShopCatalog.liquidTheme(id).id();
         return true;
     }
 
@@ -2179,6 +2227,7 @@ final class FocusState {
 
         if (targetDate.equals(curLogicDate)) {
             earlySleepPendingClaimDate = targetDate;
+            earlySleepWakeDates.add(EarlyWakeChallenge.date(completedEnd, zone).toString());
             logEvent(curLogicDate, now, "SLEEP", "完成夜间锁机 · 待领取奖励", "请主动领取早睡奖励", 0L);
         }
         return true;
@@ -2470,15 +2519,72 @@ final class FocusState {
         return total;
     }
 
+    private long wakeReward(EarlyWakeChallenge.Plan plan, long now) {
+        return plan != null && plan.status(now) == EarlyWakeChallenge.Status.READY
+                ? EarlyWakeChallenge.rewardMinutes(plan.marginMinutes) * MINUTE : 0L;
+    }
+
+    long pendingEarlyWakeMs(long now, ZoneId zone) {
+        LocalDate day = EarlyWakeChallenge.date(now, zone);
+        return wakeReward(earlyWake.on(day.minusDays(1)), now) + wakeReward(earlyWake.on(day), now);
+    }
+
+    long claimEarlyWake(long now, ZoneId zone) {
+        if (isLayFlat() || isSleepLocked(now, zone)) return 0L;
+        syncResetDay(now, zone);
+        LocalDate day = EarlyWakeChallenge.date(now, zone);
+        long previous = claimEarlyWakePlan(earlyWake.on(day.minusDays(1)), now, zone);
+        return previous + claimEarlyWakePlan(earlyWake.on(day), now, zone);
+    }
+
+    private long claimEarlyWakePlan(EarlyWakeChallenge.Plan plan, long now, ZoneId zone) {
+        long reward = wakeReward(plan, now);
+        if (reward == 0L) return 0L;
+        plan.claimed = true;
+        String creditDay = date(now, zone);
+        Day stats = day(creditDay);
+        stats.wakeEarnedMs += reward;
+        grant(stats, reward);
+        logEvent(creditDay, now, "WAKE", "领取早起挑战奖励", plan.task.label, reward);
+        evaluateDisciplinedDay(now, zone);
+        return reward;
+    }
+
+    AreaCheckIn.Result checkInArea(AreaCheckIn.Point point, AreaCheckIn.Fix fix, long elapsed, long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        LocalDate day = logicDate(now, zone);
+        var result = areaCheckIn.arrive(point, fix, elapsed, now, day, isLayFlat());
+        switch (result) {
+            case FIRST_REWARD, RECORDED, FROZEN -> logEvent(day.toString(), now, "AREA", "到达打卡 · " + point.name(),
+                    result == AreaCheckIn.Result.FIRST_REWARD ? "获得 15 分钟待兑换时长" : "", 0L);
+            default -> { }
+        }
+        return result;
+    }
+
+    long claimAreaCheckIn(long now, ZoneId zone) {
+        syncResetDay(now, zone);
+        if (isLayFlat()) return 0L;
+        long reward = areaCheckIn.claim();
+        if (reward <= 0L) return 0L;
+        String date = date(now, zone);
+        Day stats = day(date);
+        stats.areaEarnedMs += reward;
+        grant(stats, reward);
+        logEvent(date, now, "AREA", "领取区域打卡奖励", "", reward);
+        evaluateDisciplinedDay(now, zone);
+        return reward;
+    }
+
     record RedeemSummary(long totalMs, long timerMs, long sleepMs, long todoMs,
-                         long abstinenceMs, long stepMs, long learningMs, int readySourceCount) {}
+                         long abstinenceMs, long stepMs, long learningMs, long wakeMs, long areaMs, int readySourceCount) {}
 
     record ClaimAllResult(long totalMs, long timerMs, long sleepMs, long todoMs,
-                          long abstinenceMs, long stepMs, long learningMs, int claimedSources) {}
+                          long abstinenceMs, long stepMs, long learningMs, long wakeMs, long areaMs, int claimedSources) {}
 
     RedeemSummary redeemSummary(long now, ZoneId zone) {
         if (rateMode == RateMode.LAY_FLAT) {
-            return new RedeemSummary(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0);
+            return new RedeemSummary(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0);
         }
         LocalDate today = logicDate(now, zone);
         long timerMs = (!hiddenCards.contains("timer") && canClaimOffline(now, zone))
@@ -2492,16 +2598,19 @@ final class FocusState {
                 ? Math.min((long) units * Math.max(0, stepRewardMinutes) * MINUTE, remainingStepCapMs(today))
                 : 0L;
         long learningMs = !hiddenCards.contains("apps") ? claimableLearningMs() : 0L;
-        long total = timerMs + sleepMs + todoMs + abstinenceMs + stepMs + learningMs;
+        long wakeMs = !hiddenCards.contains("wake") ? pendingEarlyWakeMs(now, zone) : 0L;
+        long areaMs = !hiddenCards.contains(AreaCheckIn.CARD_KEY) ? areaCheckIn.pendingMs() : 0L;
+        long total = timerMs + sleepMs + todoMs + abstinenceMs + stepMs + learningMs + wakeMs + areaMs;
         int ready = (timerMs > 0L ? 1 : 0) + (sleepMs > 0L ? 1 : 0) + (todoMs > 0L ? 1 : 0)
-                + (abstinenceMs > 0L ? 1 : 0) + (stepMs > 0L ? 1 : 0) + (learningMs > 0L ? 1 : 0);
-        return new RedeemSummary(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, learningMs, ready);
+                + (abstinenceMs > 0L ? 1 : 0) + (stepMs > 0L ? 1 : 0) + (learningMs > 0L ? 1 : 0)
+                + (wakeMs > 0L ? 1 : 0) + (areaMs > 0L ? 1 : 0);
+        return new RedeemSummary(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, learningMs, wakeMs, areaMs, ready);
     }
 
     ClaimAllResult claimAllRedeemable(long now, ZoneId zone) {
         syncResetDay(now, zone);
         if (rateMode == RateMode.LAY_FLAT) {
-            return new ClaimAllResult(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0);
+            return new ClaimAllResult(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0);
         }
         long timerMs = !hiddenCards.contains("timer") ? claimOffline(now, zone) : 0L;
         long sleepMs = !hiddenCards.contains("sleep") ? claimPendingEarlySleep(now, zone) : 0L;
@@ -2509,10 +2618,13 @@ final class FocusState {
         long abstinenceMs = !hiddenCards.contains("habits") ? claimAllAbstinences(now, zone) : 0L;
         long stepMs = !hiddenCards.contains("steps") ? claimSteps(now, zone) : 0L;
         long learningMs = !hiddenCards.contains("apps") ? claimLearning(now, zone) : 0L;
-        long total = timerMs + sleepMs + todoMs + abstinenceMs + stepMs + learningMs;
+        long wakeMs = !hiddenCards.contains("wake") ? claimEarlyWake(now, zone) : 0L;
+        long areaMs = !hiddenCards.contains(AreaCheckIn.CARD_KEY) ? claimAreaCheckIn(now, zone) : 0L;
+        long total = timerMs + sleepMs + todoMs + abstinenceMs + stepMs + learningMs + wakeMs + areaMs;
         int claimed = (timerMs > 0L ? 1 : 0) + (sleepMs > 0L ? 1 : 0) + (todoMs > 0L ? 1 : 0)
-                + (abstinenceMs > 0L ? 1 : 0) + (stepMs > 0L ? 1 : 0) + (learningMs > 0L ? 1 : 0);
-        return new ClaimAllResult(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, learningMs, claimed);
+                + (abstinenceMs > 0L ? 1 : 0) + (stepMs > 0L ? 1 : 0) + (learningMs > 0L ? 1 : 0)
+                + (wakeMs > 0L ? 1 : 0) + (areaMs > 0L ? 1 : 0);
+        return new ClaimAllResult(total, timerMs, sleepMs, todoMs, abstinenceMs, stepMs, learningMs, wakeMs, areaMs, claimed);
     }
 
     private static void addAbstinenceRun(Abstinence a, AbstinenceRun run) {

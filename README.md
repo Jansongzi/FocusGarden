@@ -61,10 +61,14 @@ classes="$(mktemp -d)"
 javac --release 17 -cp "$ANDROID_SDK_ROOT/platforms/android-35/android.jar" -d "$classes" \
   app/src/main/java/com/focusgarden/app/ShopCatalog.java \
   app/src/main/java/com/focusgarden/app/FocusState.java \
+  app/src/main/java/com/focusgarden/app/EarlyWakeChallenge.java \
+  app/src/main/java/com/focusgarden/app/AreaCheckIn.java \
   app/src/main/java/com/focusgarden/app/UpdateRules.java \
   app/src/main/java/com/focusgarden/app/GitHubUpdates.java \
-  checks/FocusStateCheck.java checks/UpdateRulesCheck.java
+  checks/FocusStateCheck.java checks/EarlyWakeCheck.java checks/AreaCheckInCheck.java checks/UpdateRulesCheck.java
 java -cp "$classes:$ANDROID_SDK_ROOT/platforms/android-35/android.jar" com.focusgarden.app.FocusStateCheck
+java -cp "$classes:$ANDROID_SDK_ROOT/platforms/android-35/android.jar" com.focusgarden.app.EarlyWakeCheck
+java -cp "$classes:$ANDROID_SDK_ROOT/platforms/android-35/android.jar" com.focusgarden.app.AreaCheckInCheck
 java -cp "$classes:$ANDROID_SDK_ROOT/platforms/android-35/android.jar" com.focusgarden.app.UpdateRulesCheck
 ```
 

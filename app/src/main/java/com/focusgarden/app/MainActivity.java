@@ -198,7 +198,15 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private boolean stepListenerActive;
 
     private TextView learningRedeemedLabel;
+    private TextView wakeTopStatusLabel;
+    private TextView wakeScheduleLabel;
+    private LinearLayout wakeWeekWrap;
+    private String lastWakeWeekKey;
     private Dialog sleepProtectionPrompt;
+    private EarlyWakeUi earlyWakeUi;
+    private AreaCheckInUi areaCheckInUi;
+    private EarlyWakeStepMonitor wakeSteps;
+    private long sleepLockEndsAt;
 
     private final Runnable clock = new Runnable() {
         @Override public void run() {
@@ -219,6 +227,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
             if (liveStepsSheet != null && liveStepsSheet.isShowing()) liveStepsSheet.refresh();
             updateSleepLock(now);
+            earlyWakeUi.refresh(now);
+            areaCheckInUi.refreshStatus();
             updateSleepProtection(now);
             updateSoberTimer(now);
             main.postDelayed(this, 580);
@@ -245,6 +255,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         state = FocusStore.get(this).state;
+        earlyWakeUi = new EarlyWakeUi(this, state, this::changed);
+        areaCheckInUi = new AreaCheckInUi(this, state, this::changed);
+        wakeSteps = new EarlyWakeStepMonitor(this);
         applyTheme(this, state.themeMode, state.effectiveColorTheme());
         updatePanel = new UpdatePanel(this);
         if (saved != null) {
@@ -324,6 +337,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (resumed) redraw();
         });
         registerStepListener();
+        wakeSteps.sync(state);
         if (themeChanged) {
             render();
         } else {
@@ -339,8 +353,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (resumed && tab <= 1 && snap.accOk() != lastAccessibilityEnabled) redraw();
         });
         updateSleepLock(now);
+        handleEarlyWakeShortcut(getIntent());
         updateSleepProtection(now);
         updateSoberTimer(now);
+        areaCheckInUi.resume();
         main.post(clock);
         handleTimerShortcut(getIntent());
         scheduleOnboardingCheck(120L);
@@ -355,6 +371,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
         main.removeCallbacks(onboardingTrigger);
         cancelRedeemAnimations();
         unregisterStepListener();
+        wakeSteps.stop();
+        earlyWakeUi.closeScanner();
+        areaCheckInUi.pause();
         super.onPause();
     }
 
@@ -367,6 +386,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (resumed) {
             long now = System.currentTimeMillis();
             updateSleepLock(now);
+            handleEarlyWakeShortcut(intent);
             updateSleepProtection(now);
             updateSoberTimer(now);
             handleTimerShortcut(intent);
@@ -381,6 +401,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     boolean canShowAutomaticUpdate() {
         return isResumedForUpdate() && hasWindowFocus()
+                && !earlyWakeUi.isShowing() && !areaCheckInUi.isShowing()
                 && !isOnboardingActive() && !hasPendingOnboardingForCurrentScreen();
     }
 
@@ -397,6 +418,8 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (layFlatAuraOverlay != null) layFlatAuraOverlay.release();
         cancelVaultToggleAnimator();
         updatePanel.dismiss();
+        earlyWakeUi.destroy();
+        areaCheckInUi.destroy();
         if (sleepLockUi != null) sleepLockUi.dismiss();
         if (soberTimer != null) soberTimer.dismiss();
         super.onDestroy();
@@ -407,6 +430,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
         intent.removeExtra(EXTRA_CONFIRM_STOPWATCH);
         switchTab(REDEEM_PAGE);
         confirmDisciplineStart(0, this::openStartedTimer);
+    }
+
+    private void handleEarlyWakeShortcut(Intent intent) {
+        if (intent != null && EarlyWakeUi.OPEN_ACTION.equals(intent.getAction())) {
+            intent.setAction(null);
+            showEarlyWake();
+        }
+    }
+
+    void showEarlyWake() {
+        hideSleepProtection();
+        earlyWakeUi.show();
     }
 
     @Override public void onBackPressed() {
@@ -427,7 +462,11 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == 24) {
+        if (requestCode == EarlyWakeUi.PERMISSION_REQUEST) {
+            earlyWakeUi.permissionResult(grantResults);
+        } else if (requestCode == AreaCheckInUi.PERMISSION_REQUEST) {
+            areaCheckInUi.permissionResult();
+        } else if (requestCode == 24) {
             registerStepListener();
             redraw();
         } else if (requestCode == 12) {
@@ -678,6 +717,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemAccordions.clear();
         redeemCardBtns.clear();
         learningRedeemedLabel = null;
+        wakeTopStatusLabel = null;
+        wakeScheduleLabel = null;
+        wakeWeekWrap = null;
+        lastWakeWeekKey = null;
         redeemCardSubs.clear();
         displayedVoucherClaimableMin = -1L;
         displayedVoucherEarnedMin = -1L;
@@ -1038,7 +1081,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         piggyStage.setClipToPadding(false);
         piggyStage.setPadding(dp(this, 16), topInset + dp(this, 52), dp(this, 16), dp(this, 6));
         homePiggyBank = new PiggyBankView(this);
-        homePiggyBank.setAppearance(state.equippedPiggySkin, state.equippedLiquidTheme);
+        homePiggyBank.setAppearance(state.equippedPiggySkin);
         homePiggyBank.setVaultCapacityMinutes(state.vaultCapacityMinutes());
         long capMs = Math.max(1L, state.vaultCapacityMs());
         float vaultRatio = Math.min(1f, (float) state.vaultMs / capMs);
@@ -1598,6 +1641,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemAccordions.clear();
         redeemCardBtns.clear();
         learningRedeemedLabel = null;
+        wakeTopStatusLabel = null;
+        wakeScheduleLabel = null;
+        wakeWeekWrap = null;
+        lastWakeWeekKey = null;
         redeemCardSubs.clear();
 
         if (!state.hiddenCards.contains("apps")) {
@@ -1616,6 +1663,14 @@ public final class MainActivity extends Activity implements SensorEventListener 
             View c = homeSleepCard(today);
             if (redeemCardsGuideTarget == null) redeemCardsGuideTarget = c;
             pages.addView(c);
+            gap(pages, 10);
+        }
+        if (!state.hiddenCards.contains("wake")) {
+            pages.addView(earlyWakeCard(now, zone));
+            gap(pages, 10);
+        }
+        if (!state.hiddenCards.contains(AreaCheckIn.CARD_KEY)) {
+            pages.addView(areaCheckInCard(now, zone));
             gap(pages, 10);
         }
         if (!state.hiddenCards.contains("todos")) {
@@ -1723,6 +1778,10 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (result.learningMs() > 0L && redeemCardBtns.containsKey("apps")) hitBtns.add(redeemCardBtns.get("apps"));
         if (result.timerMs() > 0L && redeemCardBtns.containsKey("timer")) hitBtns.add(redeemCardBtns.get("timer"));
         if (result.sleepMs() > 0L && redeemCardBtns.containsKey("sleep")) hitBtns.add(redeemCardBtns.get("sleep"));
+        if (result.wakeMs() > 0L && redeemCardBtns.containsKey("wake")) hitBtns.add(redeemCardBtns.get("wake"));
+        if (result.areaMs() > 0L && redeemCardBtns.containsKey(AreaCheckIn.CARD_KEY)) {
+            hitBtns.add(redeemCardBtns.get(AreaCheckIn.CARD_KEY));
+        }
         if (result.todoMs() > 0L && redeemCardBtns.containsKey("todos")) hitBtns.add(redeemCardBtns.get("todos"));
         if (result.abstinenceMs() > 0L && redeemCardBtns.containsKey("habits")) hitBtns.add(redeemCardBtns.get("habits"));
         if (result.stepMs() > 0L && redeemCardBtns.containsKey("steps")) hitBtns.add(redeemCardBtns.get("steps"));
@@ -2379,6 +2438,89 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 "早睡挑战", sub, btnRef[0], body, null);
     }
 
+    private LinearLayout earlyWakeCard(long now, ZoneId zone) {
+        LocalDate wakeToday = EarlyWakeChallenge.date(now, zone);
+        TextView subtitle = text(this, EarlyWakeUi.cardSubtitle(state, now, zone), 12, MUTED, false);
+        RedeemUi.Pressable3DButton btn = buildRedeemActionBtn("wake", () -> {
+            long tapTime = System.currentTimeMillis();
+            ZoneId tapZone = ZoneId.systemDefault();
+            if (state.pendingEarlyWakeMs(tapTime, tapZone) > 0L && !state.isLayFlat()
+                    && !state.isSleepLocked(tapTime, tapZone)) {
+                handleSingleRedeemClaim("wake", redeemCardBtns.get("wake"), state::claimEarlyWake, null);
+            } else {
+                showEarlyWake();
+            }
+        });
+
+        LinearLayout body = column(this);
+        LinearLayout topInfo = row(this);
+        weight(topInfo, titleWithInfo(this, "早起打卡与任务", 14, INK,
+                "早起挑战", "前一天锁定次日起床时间与清醒任务；次日在窗口内打卡并 15 分钟内完成任务，即可手动领取 10–30 分钟奖励。"));
+        boolean hasReward = state.pendingEarlyWakeMs(now, zone) > 0L;
+        TextView wakeTopSt = text(this, EarlyWakeUi.cardRewardBadge(state, now, zone),
+                12, hasReward ? GREEN : MUTED, hasReward);
+        wakeTopSt.setSingleLine(true);
+        wakeTopStatusLabel = wakeTopSt;
+        topInfo.addView(wakeTopSt);
+        body.addView(topInfo);
+        gap(body, 10);
+
+        wakeWeekWrap = column(this);
+        lastWakeWeekKey = wakeWeekKey(now, zone, wakeToday);
+        wakeWeekWrap.addView(EarlyWakeUi.weekWakeStrip(this, state, wakeToday, now));
+        body.addView(wakeWeekWrap);
+        gap(body, 10);
+
+        LinearLayout wakeBtn = row(this);
+        wakeBtn.setGravity(Gravity.CENTER);
+        wakeBtn.setMinimumHeight(dp(this, 38));
+        wakeBtn.setBackground(touchCard(this, SURFACE_SUBTLE, BORDER, 12));
+        wakeBtn.setPadding(dp(this, 12), dp(this, 6), dp(this, 12), dp(this, 6));
+        wakeBtn.addView(iconView(this, R.drawable.ic_clock, 15, INK_SUB));
+        space(wakeBtn, 6);
+        TextView schedLabel = text(this, EarlyWakeUi.cardScheduleLabel(state, now, zone), 13, INK, true);
+        schedLabel.setSingleLine(true);
+        schedLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        wakeScheduleLabel = schedLabel;
+        wakeBtn.addView(schedLabel);
+        wakeBtn.setOnClickListener(v -> {
+            tapHaptic(v);
+            showEarlyWake();
+        });
+        body.addView(wakeBtn, -1, -2);
+
+        return wrapRedeemAccordionCard("wake", R.drawable.ic_sun, AMBER_SOFT, AMBER,
+                "早起挑战", subtitle, btn, body, null);
+    }
+
+    private String wakeWeekKey(long now, ZoneId zone, LocalDate wakeToday) {
+        var wakePlan = state.earlyWake.forAction(now, zone);
+        var wakeTomorrow = state.earlyWake.on(wakeToday.plusDays(1));
+        return wakeToday + "|" + (wakePlan == null ? "N" : wakePlan.status(now).name())
+                + "|" + (wakeTomorrow != null);
+    }
+
+    private LinearLayout areaCheckInCard(long now, ZoneId zone) {
+        String key = AreaCheckIn.CARD_KEY;
+        TextView subtitle = text(this, AreaCheckInUi.caption(state, now, zone), 12, MUTED, false);
+        RedeemUi.Pressable3DButton button = buildRedeemActionBtn(key, () -> {
+            if (state.areaCheckIn.pendingMs() > 0L && !state.isLayFlat()) {
+                handleSingleRedeemClaim(key, redeemCardBtns.get(key), state::claimAreaCheckIn, areaCheckInUi::show);
+            } else {
+                areaCheckInUi.show();
+            }
+        });
+        LinearLayout content = column(this);
+        TextView open = secondaryButton(this, "管理点位和打卡");
+        open.setOnClickListener(v -> {
+            tapHaptic(v);
+            areaCheckInUi.show();
+        });
+        content.addView(open, -1, -2);
+        return wrapRedeemAccordionCard(key, R.drawable.ic_target, CYAN_SOFT, CYAN,
+                "区域打卡", subtitle, button, content, null);
+    }
+
     private LinearLayout homeTodoCard(LocalDate today, FocusState.Day day) {
         long now = System.currentTimeMillis();
         int pendingCount = state.pendingTodoCount();
@@ -2566,7 +2708,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             long capMs = Math.max(1L, state.vaultCapacityMs());
             float vaultRatio = Math.min(1f, (float) state.vaultMs / capMs);
             if (homePiggyBank != null) {
-                homePiggyBank.setAppearance(state.equippedPiggySkin, state.equippedLiquidTheme);
+                homePiggyBank.setAppearance(state.equippedPiggySkin);
                 homePiggyBank.setVaultCapacityMinutes(state.vaultCapacityMinutes());
                 homePiggyBank.setProgress(vaultRatio, true);
                 homePiggyBank.setVaultMinutes(state.vaultMs);
@@ -2784,6 +2926,48 @@ public final class MainActivity extends Activity implements SensorEventListener 
                     "已兑换 " + duration(todayStats.learningEarnedMs));
             syncRedeemCardButton("timer", s.timerMs(), layFlat && state.offlineUnredeemedMs >= FocusState.MIN_OFFLINE_CLAIM_MS);
             syncRedeemCardButton("sleep", s.sleepMs(), layFlat && state.hasPendingEarlySleepReward(now, zone));
+            TextView areaSub = redeemCardSubs.get(AreaCheckIn.CARD_KEY);
+            if (areaSub != null) setTextIfChanged(areaSub, AreaCheckInUi.caption(state, now, zone));
+            RedeemUi.Pressable3DButton areaButton = redeemCardBtns.get(AreaCheckIn.CARD_KEY);
+            if (areaButton != null) {
+                areaButton.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED,
+                        s.areaMs() > 0L ? "+" + shortMinutes(s.areaMs()) + " 分钟" : "查看点位");
+            }
+            TextView wakeSub = redeemCardSubs.get("wake");
+            if (wakeSub != null) setTextIfChanged(wakeSub, EarlyWakeUi.cardSubtitle(state, now, zone));
+            if (wakeTopStatusLabel != null) {
+                boolean hasWakeReward = s.wakeMs() > 0L;
+                setTextIfChanged(wakeTopStatusLabel, EarlyWakeUi.cardRewardBadge(state, now, zone));
+                wakeTopStatusLabel.setTextColor(hasWakeReward ? GREEN : MUTED);
+            }
+            if (wakeScheduleLabel != null) {
+                setTextIfChanged(wakeScheduleLabel, EarlyWakeUi.cardScheduleLabel(state, now, zone));
+            }
+            if (wakeWeekWrap != null) {
+                LocalDate wakeToday = EarlyWakeChallenge.date(now, zone);
+                String wakeKey = wakeWeekKey(now, zone, wakeToday);
+                if (!wakeKey.equals(lastWakeWeekKey)) {
+                    lastWakeWeekKey = wakeKey;
+                    wakeWeekWrap.removeAllViews();
+                    wakeWeekWrap.addView(EarlyWakeUi.weekWakeStrip(this, state, wakeToday, now));
+                }
+            }
+            RedeemUi.Pressable3DButton wakeButton = redeemCardBtns.get("wake");
+            if (wakeButton != null) {
+                if (layFlat && state.pendingEarlyWakeMs(now, zone) > 0L) {
+                    wakeButton.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED, "今日暂停");
+                } else if (s.wakeMs() > 0L) {
+                    wakeButton.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED,
+                            "+" + shortMinutes(s.wakeMs()) + " 分钟");
+                } else {
+                    String urgent = EarlyWakeUi.sleepLockEntry(state, now, zone);
+                    if ("早起打卡".equals(urgent) || "继续任务".equals(urgent)) {
+                        wakeButton.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_ENABLED, urgent);
+                    } else {
+                        wakeButton.applyState(RedeemUi.Pressable3DButton.Mode.BLUE_DISABLED, "+0 分钟");
+                    }
+                }
+            }
             syncRedeemCardButton("todos", s.todoMs(), layFlat && state.pendingTodoRewardMs(now, today) > 0L);
             syncRedeemCardButton("habits", s.abstinenceMs(), layFlat);
             syncRedeemCardButton("steps", s.stepMs(), layFlat && state.claimableStepUnits(today) > 0);
@@ -3646,16 +3830,19 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private void changed() {
         TimerReceiver.changed(this);
         FocusService.refreshConnected();
+        if (resumed) wakeSteps.sync(state);
         if (applyTheme(this, state.themeMode, state.effectiveColorTheme())) {
             render();
         } else {
             redraw();
         }
         updateSleepLock(System.currentTimeMillis());
+        earlyWakeUi.refresh(System.currentTimeMillis());
     }
 
     private void updateSleepProtection(long now) {
         if (!resumed || isOnboardingActive() || hasPendingOnboardingForCurrentScreen()) return;
+        if (earlyWakeUi.isShowing()) return;
         ZoneId zone = ZoneId.systemDefault();
         long key = state.sleepProtectionPromptKey(now, zone);
         if (key == 0L) {
@@ -3680,14 +3867,18 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     private void updateSleepLock(long now) {
         if (!resumed) return;
-        boolean locked = state.isSleepLocked(now, ZoneId.systemDefault());
+        ZoneId zone = ZoneId.systemDefault();
+        boolean locked = state.isSleepLocked(now, zone);
         if (!locked) {
             if (sleepLockUi != null) {
                 sleepLockUi.dismiss();
                 sleepLockUi = null;
+                if (sleepLockEndsAt > 0 && now >= sleepLockEndsAt) earlyWakeUi.afterSleepUnlock(now, zone);
             }
+            sleepLockEndsAt = 0L;
             return;
         }
+        sleepLockEndsAt = state.currentSleepWindowEndMs(now, zone);
         if (soberTimer != null) {
             soberTimer.dismiss();
             soberTimer = null;

@@ -19,7 +19,6 @@ final class ShopCatalog {
         INDULGENT_INSTALLMENT,
         LAY_FLAT_CRAFT,
         PIGGY_SKIN,
-        LIQUID_THEME,
         REDEEM_EFFECT,
         APP_THEME
     }
@@ -39,17 +38,16 @@ final class ShopCatalog {
             int cheek,
             int slot,
             int glow,
-            String accentKind) {}
-
-    record LiquidPalette(
-            String id,
-            String name,
-            String subtitle,
-            int costMinutes,
-            int backWave,
-            int frontTop,
-            int frontBottom,
-            int meniscus) {}
+            String shapeKind,
+            String accentKind,
+            int waveBack,
+            int waveFrontTop,
+            int waveFrontBottom,
+            int waveMeniscus) {
+        boolean isPiggyShape() {
+            return "piggy".equals(shapeKind);
+        }
+    }
 
     record RedeemEffectPalette(
             String id,
@@ -64,7 +62,11 @@ final class ShopCatalog {
             ItemType type,
             String name,
             String subtitle,
-            int costMinutes) {}
+            int costMinutes) {
+        boolean supportsInstallment() {
+            return costMinutes > FocusState.SHOP_INSTALLMENT_THRESHOLD_MINUTES;
+        }
+    }
 
     record AppTheme(String id, int palette, String name, String subtitle, int costMinutes, int[] swatches) {}
 
@@ -123,61 +125,92 @@ final class ShopCatalog {
                     0xFFFFF0EB, 0xFFFFD9CE, 0xFFEDA899,
                     0xFFF7B0A0, 0xFFFFC4B5, 0xFFFFC8B9,
                     0xFF4A3531, 0x40FF8674, 0xFFBD6F60, 0xFFFFB88C,
-                    "none"),
+                    "piggy", "none",
+                    0x80FFB89E, 0xFFFFA580, 0xFFFF7A5B, 0x66FFF5F0),
             new PiggySkinPalette(
-                    "piggy_starry", "星空小猪", "把星光存进时间里", 150,
-                    0xFFB8A6FA, 0xFF6B52C7, 0xFF533CA8,
-                    0xFFC8B6FF, 0xFFB8A4F8, 0xFF7D66D4,
-                    0xFFF8F4FF, 0x44DDD6FE, 0xFF463291, 0xFFA78BFA,
-                    "stars"),
-            new PiggySkinPalette(
-                    "piggy_gold", "黄金小猪", "每刻都镀微光", 180,
-                    0xFFFFF2BE, 0xFFE0A42E, 0xFFB87B16,
-                    0xFFFEE599, 0xFFFAD370, 0xFFE6AC3E,
-                    0xFF5C3B07, 0x40F59E0B, 0xFF9C6611, 0xFFF6CD68,
-                    "glint"),
-            new PiggySkinPalette(
-                    "piggy_crystal", "冰晶小猪", "澄澈如初冬的晴空", 120,
-                    0xFFEBF8FF, 0xFFB6E3FF, 0xFF69B0DF,
-                    0xFFD7F0FF, 0xFFCDEEFF, 0xFFAADAF8,
-                    0xFF285578, 0x407DD3FC, 0xFF538BB3, 0xFF93C5FD,
-                    "crystal"),
-            new PiggySkinPalette(
-                    "piggy_sakura", "樱花小猪", "装满春日柔和气息", 90,
+                    "piggy_sakura", "樱花小猪", "耳畔落樱 · 飘瓣微动", 40,
                     0xFFFFF2F7, 0xFFFFCCE0, 0xFFE691B3,
                     0xFFFFBCD6, 0xFFFFD9E8, 0xFFFFC5DB,
                     0xFF5C3545, 0x44FB7185, 0xFFC26C8F, 0xFFF9A8D4,
-                    "sakura"),
+                    "piggy", "sakura",
+                    0x80FFC4DA, 0xFFFF96BC, 0xFFE46091, 0x77FFF4F8),
             new PiggySkinPalette(
-                    "piggy_jade", "翡翠小猪", "温润青瓷质感", 90,
+                    "piggy_jade", "翡翠小猪", "青瓷温润 · 玉光呼吸", 40,
                     0xFFECFCF4, 0xFFB6EBD0, 0xFF63B891,
                     0xFFCFF2DF, 0xFFC2EED7, 0xFFAAE3C6,
                     0xFF234F3C, 0x4034D399, 0xFF478F6E, 0xFF6EE7B7,
-                    "jade"),
+                    "piggy", "jade",
+                    0x808CE6C0, 0xFF56D2A2, 0xFF269B6E, 0x77EEFFF7),
             new PiggySkinPalette(
-                    "piggy_obsidian", "墨夜小猪", "静谧夜色守护", 120,
+                    "piggy_crystal", "冰晶小猪", "棱镜流光 · 晶冠切面", 40,
+                    0xFFEBF8FF, 0xFFB6E3FF, 0xFF69B0DF,
+                    0xFFD7F0FF, 0xFFCDEEFF, 0xFFAADAF8,
+                    0xFF285578, 0x407DD3FC, 0xFF538BB3, 0xFF93C5FD,
+                    "piggy", "crystal",
+                    0x809CE0FF, 0xFF63C5FF, 0xFF2889D4, 0x77EFFBFF),
+            new PiggySkinPalette(
+                    "piggy_gold", "黄金小猪", "皇冠流金 · 扫光微芒", 40,
+                    0xFFFFF2BE, 0xFFE0A42E, 0xFFB87B16,
+                    0xFFFEE599, 0xFFFAD370, 0xFFE6AC3E,
+                    0xFF5C3B07, 0x40F59E0B, 0xFF9C6611, 0xFFF6CD68,
+                    "piggy", "glint",
+                    0x80FDE08D, 0xFFF6C146, 0xFFD48817, 0x77FFFBEB),
+            new PiggySkinPalette(
+                    "piggy_starry", "星空小猪", "星环公转 · 星尘闪烁", 75,
+                    0xFFB8A6FA, 0xFF6B52C7, 0xFF533CA8,
+                    0xFFC8B6FF, 0xFFB8A4F8, 0xFF7D66D4,
+                    0xFFF8F4FF, 0x44DDD6FE, 0xFF463291, 0xFFA78BFA,
+                    "piggy", "stars",
+                    0x809D8BFF, 0xFF8167F2, 0xFF4F34B8, 0x77EEE9FF),
+            new PiggySkinPalette(
+                    "piggy_obsidian", "墨夜小猪", "星月夜晕 · 偶现流星", 75,
                     0xFF394258, 0xFF1D2333, 0xFF6E7FA3,
                     0xFF49546E, 0xFF3A445C, 0xFF2B3347,
                     0xFFF5E6B8, 0x3393C5FD, 0xFF141824, 0xFF818CF8,
-                    "moon")
-    ));
-
-    private static final List<LiquidPalette> LIQUID_THEMES = Collections.unmodifiableList(Arrays.asList(
-            new LiquidPalette(
-                    "default", "珊瑚暖橘", "原版温暖橙桃水波", 0,
-                    0x80FFB89E, 0xFFFFA580, 0xFFFF7A5B, 0x66FFF5F0),
-            new LiquidPalette(
-                    "liquid_mint", "海盐薄荷", "清爽薄荷波浪", 45,
-                    0x809BF0D5, 0xFF6BE0BE, 0xFF2FB88E, 0x77EEFFF9),
-            new LiquidPalette(
-                    "liquid_lavender", "极光紫雾", "温柔薰衣草微光", 50,
-                    0x80CAB8FF, 0xFFA88CFF, 0xFF7352EB, 0x77F4EEFF),
-            new LiquidPalette(
-                    "liquid_honey", "落日蜂蜜", "暖调琥珀蜂蜜色", 45,
-                    0x80FFE099, 0xFFFFCC5C, 0xFFE89324, 0x77FFF9E6),
-            new LiquidPalette(
-                    "liquid_berry", "樱桃奶昔", "轻甜浆果粉乳", 50,
-                    0x80FFB5C8, 0xFFFF8AA8, 0xFFE0527B, 0x77FFF0F4)
+                    "piggy", "moon",
+                    0x807288C8, 0xFF4F66B8, 0xFF2A3B80, 0x77DCE8FF),
+            new PiggySkinPalette(
+                    "vault_mug", "热气马克杯", "暖茶热气 · 方糖轻溅", 100,
+                    0xFFFFF8EE, 0xFFF0DFCA, 0xFFC49E7A,
+                    0xFFF4E6D4, 0xFFE8D0B6, 0xFFD9BC9E,
+                    0xFF5A3D28, 0x38F5B971, 0xFF8F6543, 0xFFF5B971,
+                    "mug", "mug",
+                    0x80E8A96B, 0xFFD9873E, 0xFFA85B1F, 0x77FFF3E0),
+            new PiggySkinPalette(
+                    "vault_boba_cup", "波波奶茶杯", "吸管波浪 · 珍珠浮冰", 120,
+                    0xE8FFFFFF, 0xE0F6EFE6, 0xFFD2B295,
+                    0xFFF7EFE6, 0xFFEEDCC8, 0xFFD8B899,
+                    0xFF4E3424, 0x38F4C58D, 0xFF7D5538, 0xFFF4C58D,
+                    "boba_cup", "boba",
+                    0x80F0CFA8, 0xFFE5B582, 0xFFC58A52, 0x88FFFDF9),
+            new PiggySkinPalette(
+                    "vault_wish_jar", "玻璃许愿瓶", "软木麻绳 · 星尘微浮", 150,
+                    0xE6F4FBFF, 0xD8DCF0FF, 0xFF84AECB,
+                    0xFFDCEEFB, 0xFFC8E0F4, 0xFF9AC0DC,
+                    0xFF294662, 0x3893C5FD, 0xFF6B8FB0, 0xFF93C5FD,
+                    "wish_jar", "wish_jar",
+                    0x8093C5FD, 0xFF60A5FA, 0xFF4F46E5, 0x88EFF8FF),
+            new PiggySkinPalette(
+                    "vault_lucky_cat", "招财猫存钱罐", "招手金铃 · 满腹金波", 180,
+                    0xFFFFFCF7, 0xFFF7EBD9, 0xFFD6A87C,
+                    0xFFF7A8B0, 0xFFFFE4CA, 0xFFF2DEC4,
+                    0xFF3E2C23, 0x48FF8A80, 0xFFE05246, 0xFFF6C453,
+                    "lucky_cat", "lucky_cat",
+                    0x80FDE08D, 0xFFF7C348, 0xFFDF901B, 0x80FFFBEB),
+            new PiggySkinPalette(
+                    "vault_bonsai", "生长盆栽", "四阶成树 · 微风落瓣", 240,
+                    0xFFE8F5E9, 0xFFC8E6C9, 0xFF5D8A66,
+                    0xFFA5D6A7, 0xFF81C784, 0xFF66BB6A,
+                    0xFF28472E, 0x3886EFAC, 0xFFB8865B, 0xFF86EFAC,
+                    "bonsai", "bonsai",
+                    0x808CE6C0, 0xFF66BB6A, 0xFF2E7D32, 0x77E8F5E9),
+            new PiggySkinPalette(
+                    "vault_moon_phase", "掌中月相", "真实月面 · 盈亏浮雕", 300,
+                    0xFF232C4B, 0xFF13192E, 0xFF8B9DC3,
+                    0xFF323E66, 0xFF293457, 0xFF1C243E,
+                    0xFFFFFBEB, 0x44FDE68A, 0xFF5A6B99, 0xFFFDE68A,
+                    "moon_phase", "moon_phase",
+                    0x809DB2E8, 0xFFFDE68A, 0xFFD9B24C, 0x77FFFBEB)
     ));
 
     private static final List<RedeemEffectPalette> REDEEM_EFFECTS = Collections.unmodifiableList(Arrays.asList(
@@ -217,6 +250,22 @@ final class ShopCatalog {
         return Collections.unmodifiableList(out);
     }
 
+    static List<PiggySkinPalette> classicPiggySkins() {
+        List<PiggySkinPalette> out = new ArrayList<>();
+        for (PiggySkinPalette s : PIGGY_SKINS) {
+            if (s.costMinutes() > 0 && s.isPiggyShape()) out.add(s);
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    static List<PiggySkinPalette> specialVaultSkins() {
+        List<PiggySkinPalette> out = new ArrayList<>();
+        for (PiggySkinPalette s : PIGGY_SKINS) {
+            if (s.costMinutes() > 0 && !s.isPiggyShape()) out.add(s);
+        }
+        return Collections.unmodifiableList(out);
+    }
+
     static PiggySkinPalette piggySkin(String id) {
         if (id != null) {
             for (PiggySkinPalette s : PIGGY_SKINS) {
@@ -224,27 +273,6 @@ final class ShopCatalog {
             }
         }
         return PIGGY_SKINS.get(0);
-    }
-
-    static List<LiquidPalette> liquidThemes() {
-        return LIQUID_THEMES;
-    }
-
-    static List<LiquidPalette> purchasableLiquidThemes() {
-        List<LiquidPalette> out = new ArrayList<>();
-        for (LiquidPalette l : LIQUID_THEMES) {
-            if (l.costMinutes() > 0) out.add(l);
-        }
-        return Collections.unmodifiableList(out);
-    }
-
-    static LiquidPalette liquidTheme(String id) {
-        if (id != null) {
-            for (LiquidPalette l : LIQUID_THEMES) {
-                if (l.id().equals(id)) return l;
-            }
-        }
-        return LIQUID_THEMES.get(0);
     }
 
     static List<RedeemEffectPalette> redeemEffects() {
@@ -275,11 +303,6 @@ final class ShopCatalog {
         for (PiggySkinPalette s : PIGGY_SKINS) {
             if (s.id().equals(id)) {
                 return new PermanentEntry(s.id(), ItemType.PIGGY_SKIN, s.name(), s.subtitle(), s.costMinutes());
-            }
-        }
-        for (LiquidPalette l : LIQUID_THEMES) {
-            if (l.id().equals(id)) {
-                return new PermanentEntry(l.id(), ItemType.LIQUID_THEME, l.name(), l.subtitle(), l.costMinutes());
             }
         }
         for (RedeemEffectPalette e : REDEEM_EFFECTS) {

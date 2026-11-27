@@ -1298,15 +1298,12 @@ final class FocusStateCheck {
         equal(false, cos.isShopItemOwned("piggy_starry"));
         equal(false, cos.equipPiggySkin("piggy_starry"));
         cos.creditMs = 500 * MINUTE;
-        equal(true, cos.buyPermanentShopItem("piggy_starry", 150, "星空小猪", shopNow, UTC));
-        equal(350 * MINUTE, cos.creditMs);
-        equal(false, cos.buyPermanentShopItem("piggy_starry", 150, "星空小猪", shopNow, UTC));
-        equal(350 * MINUTE, cos.creditMs);
+        equal(true, cos.buyPermanentShopItem("piggy_starry", 75, "星空小猪", shopNow, UTC));
+        equal(425 * MINUTE, cos.creditMs);
+        equal(false, cos.buyPermanentShopItem("piggy_starry", 75, "星空小猪", shopNow, UTC));
+        equal(425 * MINUTE, cos.creditMs);
         equal(true, cos.equipPiggySkin("piggy_starry"));
         equal("piggy_starry", cos.equippedPiggySkin);
-        equal(true, cos.buyPermanentShopItem("liquid_mint", 45, "海盐薄荷", shopNow, UTC));
-        equal(true, cos.equipLiquidTheme("liquid_mint"));
-        equal("liquid_mint", cos.equippedLiquidTheme);
         equal(true, cos.buyPermanentShopItem("fx_starlight", 60, "星河蓝焰", shopNow, UTC));
         equal(true, cos.equipRedeemEffect("fx_starlight"));
         equal("fx_starlight", cos.equippedRedeemEffect);
@@ -1323,7 +1320,64 @@ final class FocusStateCheck {
         equal(true, wish.useWishVoucher(vid, shopNow + 2000, UTC));
         equal(0, wish.unusedWishVoucherCount());
         equal(false, wish.useWishVoucher(vid, shopNow + 3000, UTC));
-        equal(150, ShopCatalog.piggySkin("piggy_starry").costMinutes());
+
+        // Vault style pricing tiers, liquid removal & >2.5h permanent installment rules
+        equal(0, ShopCatalog.piggySkin("default").costMinutes());
+        equal(40, ShopCatalog.piggySkin("piggy_sakura").costMinutes());
+        equal(40, ShopCatalog.piggySkin("piggy_jade").costMinutes());
+        equal(40, ShopCatalog.piggySkin("piggy_crystal").costMinutes());
+        equal(40, ShopCatalog.piggySkin("piggy_gold").costMinutes());
+        equal(75, ShopCatalog.piggySkin("piggy_obsidian").costMinutes());
+        equal(75, ShopCatalog.piggySkin("piggy_starry").costMinutes());
+        equal(100, ShopCatalog.piggySkin("vault_mug").costMinutes());
+        equal(120, ShopCatalog.piggySkin("vault_boba_cup").costMinutes());
+        equal(150, ShopCatalog.piggySkin("vault_wish_jar").costMinutes());
+        equal(180, ShopCatalog.piggySkin("vault_lucky_cat").costMinutes());
+        equal(240, ShopCatalog.piggySkin("vault_bonsai").costMinutes());
+        equal(300, ShopCatalog.piggySkin("vault_moon_phase").costMinutes());
+        equal(6, ShopCatalog.classicPiggySkins().size());
+        equal(6, ShopCatalog.specialVaultSkins().size());
+        equal(true, ShopCatalog.piggySkin("piggy_starry").isPiggyShape());
+        equal(false, ShopCatalog.piggySkin("vault_moon_phase").isPiggyShape());
+        equal(true, ShopCatalog.findPermanentItem("liquid_mint") == null);
+        equal(false, ShopCatalog.findPermanentItem("vault_wish_jar").supportsInstallment());
+        equal(true, ShopCatalog.findPermanentItem("vault_lucky_cat").supportsInstallment());
+        equal(true, ShopCatalog.findPermanentItem("vault_bonsai").supportsInstallment());
+        equal(true, ShopCatalog.findPermanentItem("vault_moon_phase").supportsInstallment());
+
+        // >2.5h permanent cosmetic installment lifecycle + lay-flat vault-only spending
+        var permInst = new FocusState();
+        permInst.creditMs = 400 * MINUTE;
+        equal(FocusState.InstallmentResult.INVALID,
+                permInst.contributePermanentItemInstallment("vault_wish_jar", 50, shopNow, UTC));
+        equal(FocusState.InstallmentResult.INVALID,
+                permInst.contributePermanentItemInstallment("vault_moon_phase", 0, shopNow, UTC));
+        equal(FocusState.InstallmentResult.PAID,
+                permInst.contributePermanentItemInstallment("vault_moon_phase", 120, shopNow, UTC));
+        equal(120, permInst.shopItemPaidMinutes("vault_moon_phase"));
+        equal(180, permInst.shopItemRemainingMinutes("vault_moon_phase"));
+        equal(280 * MINUTE, permInst.creditMs);
+        equal(false, permInst.isShopItemOwned("vault_moon_phase"));
+        permInst.rateMode = FocusState.RateMode.LAY_FLAT;
+        permInst.layFlatActiveDate = "2026-11-24";
+        permInst.vaultMs = 30 * MINUTE;
+        equal(FocusState.InstallmentResult.INSUFFICIENT_TIME,
+                permInst.contributePermanentItemInstallment("vault_moon_phase", 60, shopNow, UTC));
+        equal(FocusState.InstallmentResult.PAID,
+                permInst.contributePermanentItemInstallment("vault_moon_phase", 30, shopNow, UTC));
+        equal(0L, permInst.vaultMs);
+        equal(150, permInst.shopItemPaidMinutes("vault_moon_phase"));
+        permInst.rateMode = FocusState.RateMode.MODERATE;
+        equal(FocusState.InstallmentResult.COMPLETED,
+                permInst.contributePermanentItemInstallment("vault_moon_phase", 220, shopNow, UTC)); // Clamped to remaining 150m
+        equal(130 * MINUTE, permInst.creditMs);
+        equal(0, permInst.shopItemPaidMinutes("vault_moon_phase"));
+        equal(0, permInst.shopItemRemainingMinutes("vault_moon_phase"));
+        equal(true, permInst.isShopItemOwned("vault_moon_phase"));
+        equal(true, permInst.equipPiggySkin("vault_moon_phase"));
+        equal("vault_moon_phase", permInst.equippedPiggySkin);
+        equal(FocusState.InstallmentResult.FULL_INVENTORY,
+                permInst.contributePermanentItemInstallment("vault_moon_phase", 30, shopNow, UTC));
 
         // Regression: spendForShop syncs 04:00 reset before checking isLayFlat(), so post-reset purchases use creditMs
         var lfShop = new FocusState();
@@ -1583,6 +1637,8 @@ final class FocusStateCheck {
         equal(false, fresh.isShopItemOwned(ShopCatalog.DEFAULT_APP_THEME));
 
         equal(true, fresh.hiddenCards.contains("sleep"));
+        equal(true, fresh.hiddenCards.contains("wake"));
+        equal(true, fresh.hiddenCards.contains(AreaCheckIn.CARD_KEY));
         equal(true, fresh.hiddenCards.contains("todos"));
         equal(true, fresh.hiddenCards.contains("steps"));
         equal(false, fresh.hiddenCards.contains("apps"));

@@ -41,6 +41,7 @@ final class SleepLockUi extends Dialog {
     private final TextView streakView;
     private final TextView promptView;
     private final TextView scheduleView;
+    private final TextView wakeButton;
     private final FrameLayout dimBtn;
     private boolean hasPhotoBackdrop;
     private boolean dimmed;
@@ -174,6 +175,13 @@ final class SleepLockUi extends Dialog {
         scheduleView = text(activity, "", 12, 0xb8ffffff, false);
         scheduleView.setGravity(Gravity.CENTER);
         content.addView(scheduleView, -1, -2);
+
+        wakeButton = glassButton(activity, "早起打卡", 0x38ffffff, 0x66ffffff);
+        wakeButton.setOnClickListener(v -> {
+            tapHaptic(v);
+            activity.showEarlyWake();
+        });
+        content.addView(wakeButton, -1, -2);
 
         gap(content, 24);
 
@@ -338,6 +346,9 @@ final class SleepLockUi extends Dialog {
         MainActivity.setTextIfChanged(scheduleView,
                 clock(state.sleepStart) + " – " + clock(state.sleepEnd)
                         + " · " + reward + state.earlySleepRewardMinutes + " 分钟");
+        String wakeAction = EarlyWakeUi.sleepLockEntry(state, now, zone);
+        wakeButton.setVisibility(wakeAction.isEmpty() ? View.GONE : View.VISIBLE);
+        MainActivity.setTextIfChanged(wakeButton, wakeAction);
     }
 
     private static TextView glassButton(Context context, String label, int fillColor, int strokeColor) {

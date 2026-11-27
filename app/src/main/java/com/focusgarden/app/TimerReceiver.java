@@ -17,13 +17,16 @@ import java.time.ZoneId;
 public final class TimerReceiver extends BroadcastReceiver {
     private static final String CHANNEL = "focus_timer";
     private static final String REST_CHANNEL = "sleep_protection";
+    private static final String WAKE_CHANNEL = "early_wake";
     static final int REST_NOTIFICATION_ID = 8;
+    private static final int WAKE_NOTIFICATION_ID = 9;
 
     @Override public void onReceive(Context context, Intent intent) {
         long now = System.currentTimeMillis();
         advance(context, now);
         FocusStore store = FocusStore.get(context);
         store.state.recordHeartbeat(now);
+        notifyEarlyWake(context, store.state, now);
         store.save();
         KeepAliveManager.syncServiceState(context);
         schedule(context);
@@ -63,6 +66,7 @@ public final class TimerReceiver extends BroadcastReceiver {
         long now = System.currentTimeMillis();
         ZoneId zone = ZoneId.systemDefault();
         long next = Math.min(FocusState.nextResetMs(now, zone), state.nextSleepProtectionStart(now, zone));
+        next = Math.min(next, state.earlyWake.nextAlarmAt(now, zone));
         if (state.phaseEnd > now && (next == 0L || state.phaseEnd < next)) next = state.phaseEnd;
         if (state.soberUntil > now && (next == 0L || state.soberUntil < next)) {
             next = state.soberUntil;
@@ -99,6 +103,45 @@ public final class TimerReceiver extends BroadcastReceiver {
                 .setOnlyAlertOnce(true)
                 .setTimeoutAfter(protectionEnd - now)
                 .setAutoCancel(true)
+                .build());
+    }
+
+    private static void notifyEarlyWake(Context context, FocusState state, long now) {
+        if (Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
+        ZoneId zone = ZoneId.systemDefault();
+        var waiting = state.earlyWake.workingTask(now, zone, EarlyWakeChallenge.Task.CONFIRM);
+        boolean canConfirm = waiting != null && !waiting.reminderSent
+                && now >= waiting.checkedInAt + EarlyWakeChallenge.CONFIRM_DELAY;
+        String title;
+        String message;
+        long expires;
+        if (canConfirm) {
+            waiting.reminderSent = true;
+            title = "回来确认起床";
+            message = "已满 5 分钟，点此完成清醒任务。";
+            expires = waiting.deadline();
+        } else {
+            var plan = state.earlyWake.on(EarlyWakeChallenge.date(now, zone));
+            if (plan == null || plan.openingReminderSent || plan.status(now) != EarlyWakeChallenge.Status.OPEN) return;
+            plan.openingReminderSent = true;
+            title = "早起挑战可以打卡了";
+            message = "点此打卡并开始清醒任务。";
+            expires = plan.closesAt;
+        }
+        Intent intent = new Intent(context, MainActivity.class).setAction(EarlyWakeUi.OPEN_ACTION)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent openWake = PendingIntent.getActivity(context, WAKE_NOTIFICATION_ID, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(new NotificationChannel(WAKE_CHANNEL, "早起挑战", NotificationManager.IMPORTANCE_DEFAULT));
+        manager.notify(WAKE_NOTIFICATION_ID, new Notification.Builder(context, WAKE_CHANNEL)
+                .setSmallIcon(R.drawable.ic_tile)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setContentIntent(openWake)
+                .setAutoCancel(true)
+                .setTimeoutAfter(Math.max(1, expires - now))
                 .build());
     }
 

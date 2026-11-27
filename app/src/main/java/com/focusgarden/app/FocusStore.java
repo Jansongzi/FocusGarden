@@ -8,7 +8,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.time.DateTimeException;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Iterator;
+import java.util.Map;
 
 final class FocusStore {
     private static FocusStore instance;
@@ -71,16 +75,26 @@ final class FocusStore {
         if (ownedArr != null) {
             for (int i = 0; i < ownedArr.length(); i++) {
                 String oid = ownedArr.optString(i);
-                if (!oid.isEmpty()) state.ownedShopItems.add(oid);
+                if (!oid.isEmpty() && !oid.startsWith("liquid_")) state.ownedShopItems.add(oid);
             }
         }
         if (legacyBeforeOnboarding) {
             state.ownedShopItems.add(ShopCatalog.DEFAULT_APP_THEME);
         }
+        state.shopItemPaidMinutes.clear();
+        JSONObject shopPaidObj = root.optJSONObject("shopItemPaidMinutes");
+        if (shopPaidObj != null) {
+            for (var it = shopPaidObj.keys(); it.hasNext(); ) {
+                String key = it.next();
+                int paid = shopPaidObj.optInt(key, 0);
+                ShopCatalog.PermanentEntry entry = ShopCatalog.findPermanentItem(key);
+                if (entry != null && entry.supportsInstallment() && !state.isShopItemOwned(key) && paid > 0) {
+                    state.shopItemPaidMinutes.put(key, Math.min(paid, entry.costMinutes() - 1));
+                }
+            }
+        }
         String skin = root.optString("equippedPiggySkin", "default");
         state.equippedPiggySkin = state.isShopItemOwned(skin) ? ShopCatalog.piggySkin(skin).id() : "default";
-        String liquid = root.optString("equippedLiquidTheme", "default");
-        state.equippedLiquidTheme = state.isShopItemOwned(liquid) ? ShopCatalog.liquidTheme(liquid).id() : "default";
         String effect = root.optString("equippedRedeemEffect", "default");
         state.equippedRedeemEffect = state.isShopItemOwned(effect) ? ShopCatalog.redeemEffect(effect).id() : "default";
 
@@ -111,6 +125,15 @@ final class FocusStore {
             }
         }
         state.bedtime = root.optBoolean("bedtime");
+        readEarlyWake(root.optJSONArray("earlyWake"), state.earlyWake);
+        readAreaCheckIn(root.optJSONObject("areaCheckIn"), state.areaCheckIn);
+        JSONArray wakeDates = root.optJSONArray("earlySleepWakeDates");
+        if (wakeDates != null) {
+            for (int i = 0; i < wakeDates.length(); i++) {
+                String day = wakeDates.optString(i);
+                if (!day.isEmpty()) state.earlySleepWakeDates.add(day);
+            }
+        }
         state.acknowledgedSleepProtectionEnd = root.optLong("acknowledgedSleepProtectionEnd");
         state.pendingLearningMs = Math.max(0L, root.optLong("pendingLearningMs"));
         state.sleepStart = root.optInt("sleepStart", 1380);
@@ -500,6 +523,8 @@ final class FocusStore {
             day.offlineEarnedMs = row.optLong("offlineEarned");
             day.todoEarnedMs = row.optLong("todoEarned");
             day.habitEarnedMs = row.optLong("habitEarned");
+            day.wakeEarnedMs = row.optLong("wakeEarned");
+            day.areaEarnedMs = row.optLong("areaEarned");
             int steps = Math.max(0, row.optInt("steps"));
             int manualSteps = Math.max(0, Math.min(steps, row.optInt("manualSteps")));
             day.steps = steps - manualSteps;
@@ -537,6 +562,109 @@ final class FocusStore {
             state.totalDisciplineSessions = fallbackSessions;
         }
         return needSave;
+    }
+
+    static void readAreaCheckIn(JSONObject root, AreaCheckIn area) {
+        if (root == null) return;
+        JSONArray points = root.optJSONArray("points");
+        if (points != null) {
+            for (int i = 0; i < points.length(); i++) {
+                JSONObject p = points.optJSONObject(i);
+                if (p == null) continue;
+                area.restore(new AreaCheckIn.Point(p.optString("id"), p.optString("name"),
+                        p.optDouble("lat"), p.optDouble("lon"), p.optDouble("accuracy"), p.optInt("radius")));
+            }
+        }
+        JSONArray arrivals = root.optJSONArray("arrivals");
+        if (arrivals != null) {
+            for (int i = 0; i < arrivals.length(); i++) {
+                JSONObject a = arrivals.optJSONObject(i);
+                if (a == null) continue;
+                area.restore(new AreaCheckIn.Arrival(a.optString("point"), a.optString("name"), a.optLong("at")));
+            }
+        }
+        JSONObject rewards = root.optJSONObject("rewards");
+        for (Iterator<String> it = keys(rewards); it.hasNext();) {
+            String day = it.next();
+            try {
+                area.restore(LocalDate.parse(day), AreaCheckIn.Reward.valueOf(rewards.optString(day)));
+            } catch (DateTimeException | IllegalArgumentException ignored) {
+                // Keep the other dates if one entry is malformed.
+            }
+        }
+    }
+
+    static JSONObject writeAreaCheckIn(AreaCheckIn area) throws JSONException {
+        JSONArray points = new JSONArray();
+        for (AreaCheckIn.Point p : area.points()) {
+            points.put(new JSONObject().put("id", p.id()).put("name", p.name()).put("lat", p.latitude())
+                    .put("lon", p.longitude()).put("accuracy", p.accuracyMeters()).put("radius", p.radiusMeters()));
+        }
+        JSONArray arrivals = new JSONArray();
+        for (AreaCheckIn.Arrival a : area.arrivals()) {
+            arrivals.put(new JSONObject().put("point", a.pointId()).put("name", a.pointName()).put("at", a.at()));
+        }
+        JSONObject rewards = new JSONObject();
+        for (var entry : area.rewards().entrySet()) {
+            rewards.put(entry.getKey().toString(), entry.getValue().name());
+        }
+        return new JSONObject().put("points", points).put("arrivals", arrivals).put("rewards", rewards);
+    }
+
+    static void readEarlyWake(JSONArray rows, EarlyWakeChallenge challenge) {
+        if (rows == null) return;
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject row = rows.optJSONObject(i);
+            if (row == null) continue;
+            try {
+                LocalDate day = LocalDate.parse(row.optString("day"));
+                ZoneId zone = ZoneId.of(row.optString("zone"));
+                EarlyWakeChallenge.Task task = EarlyWakeChallenge.Task.valueOf(row.optString("task"));
+                int target = row.optInt("target", -1);
+                int margin = row.optInt("margin");
+                String digest = row.optString("qrDigest");
+                if (!EarlyWakeChallenge.validSettings(target, margin, task, digest)) continue;
+                var plan = new EarlyWakeChallenge.Plan(day, zone, target, margin, task, digest);
+                plan.checkedInAt = row.optLong("checkedInAt");
+                plan.completedAt = row.optLong("completedAt");
+                plan.frozen = row.optBoolean("frozen");
+                plan.claimed = row.optBoolean("claimed");
+                plan.openingReminderSent = row.optBoolean("openingReminderSent");
+                plan.reminderSent = row.optBoolean("reminderSent");
+                plan.steps = Math.max(0, Math.min(EarlyWakeChallenge.GOAL_STEPS, row.optInt("steps")));
+                plan.stepBoot = row.optInt("stepBoot", -1);
+                plan.stepTimestamp = row.optLong("stepTimestamp");
+                float counter = (float) row.optDouble("stepCounter", -1);
+                plan.stepCounter = Float.isFinite(counter) && counter >= 0 ? counter : -1;
+                challenge.restore(plan);
+            } catch (DateTimeException | IllegalArgumentException ignored) {
+                // Skip the malformed plan and keep other days intact.
+            }
+        }
+    }
+
+    static JSONArray writeEarlyWake(EarlyWakeChallenge challenge) throws JSONException {
+        JSONArray rows = new JSONArray();
+        for (EarlyWakeChallenge.Plan p : challenge.all()) {
+            rows.put(new JSONObject()
+                    .put("day", p.day.toString())
+                    .put("zone", p.zone.getId())
+                    .put("target", p.targetMinute)
+                    .put("margin", p.marginMinutes)
+                    .put("task", p.task.name())
+                    .put("qrDigest", p.qrDigest)
+                    .put("checkedInAt", p.checkedInAt)
+                    .put("completedAt", p.completedAt)
+                    .put("frozen", p.frozen)
+                    .put("claimed", p.claimed)
+                    .put("openingReminderSent", p.openingReminderSent)
+                    .put("reminderSent", p.reminderSent)
+                    .put("steps", p.steps)
+                    .put("stepBoot", p.stepBoot)
+                    .put("stepTimestamp", p.stepTimestamp)
+                    .put("stepCounter", p.stepCounter));
+        }
+        return rows;
     }
 
     private static Iterator<String> keys(JSONObject o) {
@@ -616,6 +744,12 @@ final class FocusStore {
             for (FocusState.SoberWindow window : state.soberWindows) {
                 soberWindows.put(new JSONArray().put(window.start()).put(window.end()));
             }
+            JSONObject shopPaidJson = new JSONObject();
+            for (Map.Entry<String, Integer> entry : state.shopItemPaidMinutes.entrySet()) {
+                if (entry.getValue() != null && entry.getValue() > 0) {
+                    shopPaidJson.put(entry.getKey(), entry.getValue());
+                }
+            }
             JSONObject root = new JSONObject()
                     .put("credit", state.creditMs)
                     .put("creditRemainder", state.creditRemainder)
@@ -626,8 +760,8 @@ final class FocusStore {
                     .put("vaultExpandCards", state.vaultExpandCards)
                     .put("indulgentPaidMinutes", state.indulgentPaidMinutes)
                     .put("ownedShopItems", new JSONArray(state.ownedShopItems))
+                    .put("shopItemPaidMinutes", shopPaidJson)
                     .put("equippedPiggySkin", state.equippedPiggySkin)
-                    .put("equippedLiquidTheme", state.equippedLiquidTheme)
                     .put("equippedRedeemEffect", state.equippedRedeemEffect)
                     .put("rateMode", state.rateMode.name())
                     .put("previousMode", state.previousMode.name())
@@ -645,6 +779,9 @@ final class FocusStore {
                     .put("focusPercent", state.focusPercent)
                     .put("offlinePercent", state.offlinePercent)
                     .put("bedtime", state.bedtime)
+                    .put("earlyWake", writeEarlyWake(state.earlyWake))
+                    .put("areaCheckIn", writeAreaCheckIn(state.areaCheckIn))
+                    .put("earlySleepWakeDates", new JSONArray(state.earlySleepWakeDates))
                     .put("sleepStart", state.sleepStart)
                     .put("pendingLearningMs", state.pendingLearningMs)
                     .put("sleepEnd", state.sleepEnd)
@@ -854,6 +991,8 @@ final class FocusStore {
                         .put("offlineEarned", day.offlineEarnedMs)
                         .put("todoEarned", day.todoEarnedMs)
                         .put("habitEarned", day.habitEarnedMs)
+                        .put("wakeEarned", day.wakeEarnedMs)
+                        .put("areaEarned", day.areaEarnedMs)
                         .put("steps", day.steps)
                         .put("stepsClaimed", day.stepsClaimed)
                         .put("stepsEarned", day.stepsEarnedMs)

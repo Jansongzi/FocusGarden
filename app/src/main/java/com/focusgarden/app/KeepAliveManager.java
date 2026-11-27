@@ -335,11 +335,14 @@ final class KeepAliveManager {
         return false;
     }
 
+    static boolean needsService(FocusState state) {
+        return state.floatingBall || state.offlineRunning() || state.active()
+                || EarlyWakeStepMonitor.isNeeded(state, System.currentTimeMillis(), ZoneId.systemDefault());
+    }
+
     static void syncServiceState(Context context) {
-        FocusState state = FocusStore.get(context).state;
-        boolean need = state.floatingBall || state.offlineRunning() || state.active();
         Intent intent = new Intent(context, KeepAliveService.class);
-        if (need) {
+        if (needsService(FocusStore.get(context).state)) {
             try {
                 if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent);
                 else context.startService(intent);

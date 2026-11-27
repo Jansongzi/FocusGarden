@@ -58,7 +58,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
             store.save();
             refreshNotification();
             updateFloatingBall();
-            if (shouldStayAlive(store.state)) {
+            if (KeepAliveManager.needsService(store.state)) {
                 main.postDelayed(this, HEARTBEAT_MS);
             } else {
                 stopSelf();
@@ -73,13 +73,12 @@ public final class KeepAliveService extends Service implements SensorEventListen
         }
     };
 
-    private static boolean shouldStayAlive(FocusState state) {
-        return state.floatingBall || state.offlineRunning() || state.active();
-    }
+    private EarlyWakeStepMonitor wakeSteps;
 
     @Override public void onCreate() {
         super.onCreate();
         windows = getSystemService(WindowManager.class);
+        wakeSteps = new EarlyWakeStepMonitor(this);
         registerStepListener();
     }
 
@@ -88,13 +87,14 @@ public final class KeepAliveService extends Service implements SensorEventListen
         store.state.recordHeartbeat(System.currentTimeMillis());
         store.save();
 
-        if (!shouldStayAlive(store.state)) {
+        if (!KeepAliveManager.needsService(store.state)) {
             removeFloatingBall();
             stopSelf();
             return START_NOT_STICKY;
         }
 
         ensureForeground(buildNotification(store.state));
+        wakeSteps.sync(store.state);
         updateFloatingBall();
         main.removeCallbacks(heartbeatTick);
         main.postDelayed(heartbeatTick, HEARTBEAT_MS);
@@ -394,6 +394,7 @@ public final class KeepAliveService extends Service implements SensorEventListen
     @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
     @Override public void onDestroy() {
+        wakeSteps.stop();
         main.removeCallbacks(heartbeatTick);
         main.removeCallbacks(notificationTick);
         removeFloatingBall();

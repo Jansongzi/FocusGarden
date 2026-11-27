@@ -22,6 +22,23 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/focus-garden.XXXXXXXX")"
 trap 'rm -r "$work"' EXIT HUP INT TERM
 mkdir -p "$work/gen" "$work/classes" "$work/dex" "$(dirname "$out")" "$(dirname "$key")"
 
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/focus-garden"
+zxing="$cache/zxing-core-3.5.4.jar"
+zxing_sha="71de5d89341b5fcf5dd89da7f44e84d825d0e084cdf3ec77c9abe26b0f0ceb13"
+verify_zxing() {
+    [ "$(shasum -a 256 "$1" | cut -d ' ' -f 1)" = "$zxing_sha" ]
+}
+if [ ! -f "$zxing" ] || ! verify_zxing "$zxing"; then
+    curl -fsSL --retry 2 'https://repo.maven.apache.org/maven2/com/google/zxing/core/3.5.4/core-3.5.4.jar' \
+        -o "$work/zxing.jar"
+    if ! verify_zxing "$work/zxing.jar"; then
+        printf '%s\n' "ZXing 校验失败。" >&2
+        exit 1
+    fi
+    mkdir -p "$cache"
+    mv -f "$work/zxing.jar" "$zxing"
+fi
+
 sed 's/<manifest /<manifest package="com.focusgarden.app" /' \
     app/src/main/AndroidManifest.xml > "$work/AndroidManifest.xml"
 "$tools/aapt2" compile --dir app/src/main/res -o "$work/resources.zip"
@@ -29,9 +46,9 @@ sed 's/<manifest /<manifest package="com.focusgarden.app" /' \
     --java "$work/gen" --min-sdk-version 27 --target-sdk-version 35 \
     --version-code "$version_code" --version-name "$version_name" -o "$work/unsigned.apk" "$work/resources.zip"
 find app/src/main/java "$work/gen" -name '*.java' -print0 |
-    xargs -0 javac --release 17 -cp "$android" -d "$work/classes"
+    xargs -0 javac --release 17 -cp "$android:$zxing" -d "$work/classes"
 jar cf "$work/classes.jar" -C "$work/classes" .
-"$tools/d8" --lib "$android" --min-api 27 --output "$work/dex" "$work/classes.jar"
+"$tools/d8" --lib "$android" --min-api 27 --output "$work/dex" "$work/classes.jar" "$zxing"
 (cd "$work/dex" && zip -q -0 -j "$work/unsigned.apk" classes*.dex)
 "$tools/zipalign" -f 4 "$work/unsigned.apk" "$work/aligned.apk"
 
