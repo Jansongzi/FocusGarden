@@ -73,7 +73,7 @@ final class AreaCheckIn {
             if (preciseCenter != null && nowElapsed - preciseCenter.capturedAt() <= CENTER_PAIR_WINDOW_MS
                     && !overlaps(preciseCenter, fix)) conflictingCenter = true;
             // A single fix can place a point when its error is small relative to the radius.
-            if (fix.accuracyMeters() > Math.min(25.0, radiusMeters / 3.0)) return;
+            if (fix.accuracyMeters() > Math.min(40.0, radiusMeters * 0.4)) return;
             for (Fix earlier : previous.values()) {
                 if (nowElapsed - earlier.capturedAt() <= CENTER_PAIR_WINDOW_MS
                         && !overlaps(earlier, fix)) conflictingCenter = true;

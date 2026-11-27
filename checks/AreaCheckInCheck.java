@@ -18,6 +18,17 @@ final class AreaCheckInCheck {
     }
 
     private static void checkSparseCenterLocation() {
+        var indoor = new AreaCheckIn.Sampler(null, 100, ELAPSED);
+        var indoorFix = fix(0, 35, ELAPSED);
+        equal(null, indoor.accept("network", indoorFix, ELAPSED));
+        equal(indoorFix, indoor.preciseCenter(ELAPSED + 2_000).fix());
+        var indoorPoint = new AreaCheckIn.Point("indoor", "宿舍", 0, 0, 35, 100);
+        equal(AreaCheckIn.Match.INSIDE, AreaCheckIn.locate(indoorPoint, fix(0, 35, ELAPSED + 2_000), ELAPSED + 2_000));
+        equal(AreaCheckIn.Match.UNCERTAIN, AreaCheckIn.locate(indoorPoint, fix(40, 35, ELAPSED + 2_000), ELAPSED + 2_000));
+        var smallRadius = new AreaCheckIn.Sampler(null, 50, ELAPSED);
+        equal(null, smallRadius.accept("network", indoorFix, ELAPSED));
+        equal(null, smallRadius.preciseCenter(ELAPSED + 2_000));
+
         var sparse = new AreaCheckIn.Sampler(null, 100, ELAPSED);
         equal(null, sparse.accept("network", fix(6, 10, ELAPSED - 100), ELAPSED));
         equal(null, sparse.accept("network", new AreaCheckIn.Fix(0, 0, 10, ELAPSED, true), ELAPSED));
