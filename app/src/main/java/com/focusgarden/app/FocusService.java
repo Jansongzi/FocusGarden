@@ -36,8 +36,6 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import java.time.Instant;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.Set;
@@ -75,6 +73,9 @@ public final class FocusService extends AccessibilityService {
     private final SparseArray<String> windowPackages = new SparseArray<>();
     private final SparseBooleanArray floatingWindowIds = new SparseBooleanArray();
     private final Rect tmpBounds = new Rect();
+    private View restPrompt;
+    private long restPromptKey;
+    private String lastAbstinenceReminderPackage;
     private String lastEventPackage;
     private long lastEventAt;
     private long soberLaunchGraceUntil;
@@ -95,6 +96,8 @@ public final class FocusService extends AccessibilityService {
             flushUsage();
             foreground = null;
             foregroundFocused = false;
+            hideRestPrompt();
+            lastAbstinenceReminderPackage = null;
             hideOverlay();
             hideAwarenessBar();
             hideSoberPill();
@@ -409,6 +412,8 @@ public final class FocusService extends AccessibilityService {
         if (!screenUsable()) {
             foreground = null;
             foregroundFocused = false;
+            hideRestPrompt();
+            lastAbstinenceReminderPackage = null;
             flushUsage();
             hideOverlay();
             hideAwarenessBar();
@@ -420,6 +425,8 @@ public final class FocusService extends AccessibilityService {
         foregroundFocused = focused != null;
         if (focused != null && !focused.equals(foreground)) {
             flushUsage();
+            hideRestPrompt();
+            lastAbstinenceReminderPackage = null;
             foreground = focused;
         }
         long now = System.currentTimeMillis();
@@ -464,6 +471,7 @@ public final class FocusService extends AccessibilityService {
                 && now > settingsBypassUntil;
 
         if (focusGuardActive) {
+            hideRestPrompt();
             hideAwarenessBar();
             hideSoberPill();
             if (!showingGuard || overlay == null) {
@@ -504,6 +512,17 @@ public final class FocusService extends AccessibilityService {
             if (showingGuard || !fgKey.equals(blockedPackage) || reason != showing || overlay == null) {
                 flushUsage();
                 showOverlay(fgKey, reason);
+            }
+        }
+
+        updateRestPrompt(now, zone);
+        if (layFlatNow && reason == FocusState.Restriction.NONE && !exempt
+                && !java.util.Objects.equals(lastAbstinenceReminderPackage, foreground)) {
+            FocusState.Abstinence abstinence = store.state.linkedAbstinenceForPackage(foreground);
+            if (abstinence != null) {
+                lastAbstinenceReminderPackage = foreground;
+                android.widget.Toast.makeText(this, "戒断提醒 · " + abstinence.name,
+                        android.widget.Toast.LENGTH_LONG).show();
             }
         }
 
@@ -555,17 +574,61 @@ public final class FocusService extends AccessibilityService {
             main.postDelayed(pulse, 1000);
         } else {
             hideAwarenessBar();
-            if (store.state.bedtime && store.state.sleepStart != store.state.sleepEnd) {
-                var date = Instant.ofEpochMilli(now).atZone(zone).toLocalDate();
-                var start = date.atTime(LocalTime.ofSecondOfDay(store.state.sleepStart * 60L)).atZone(zone);
-                if (start.toInstant().toEpochMilli() <= now) start = start.plusDays(1);
-                long nextStart = start.toInstant().toEpochMilli();
-                if (store.state.bedtimeSuspended(FocusState.date(now, zone))) {
-                    nextStart = Math.min(nextStart, FocusState.nextResetMs(now, zone));
-                }
-                main.postDelayed(pulse, Math.max(1L, nextStart - now));
+            long nextStart = store.state.nextSleepProtectionStart(now, zone);
+            if (restPrompt != null) nextStart = Math.min(nextStart, restPromptKey);
+            if (store.state.bedtimeSuspended(FocusState.date(now, zone))) {
+                nextStart = Math.min(nextStart, FocusState.nextResetMs(now, zone));
             }
+            if (nextStart != Long.MAX_VALUE) main.postDelayed(pulse, Math.max(1L, nextStart - now));
         }
+    }
+
+    private void updateRestPrompt(long now, ZoneId zone) {
+        long key = store.state.sleepProtectionPromptKey(now, zone);
+        refreshExemptSets();
+        if (key == 0L || foreground == null || getPackageName().equals(foreground)
+                || coreExemptPackages.contains(foreground) || "com.android.settings".equals(foreground)) {
+            hideRestPrompt();
+            return;
+        }
+        if (restPrompt != null && restPromptKey == key) return;
+        hideRestPrompt();
+        GardenUi.applyTheme(this, store.state.themeMode, store.state.effectiveColorTheme());
+        View content = OnboardingUi.sleepProtectionPromptView(this,
+                () -> resolveRestPrompt(key, false), () -> resolveRestPrompt(key, true));
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(-1, -1,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        params.setTitle("松时睡眠保护");
+        try {
+            windows.addView(content, params);
+            restPrompt = content;
+            restPromptKey = key;
+        } catch (WindowManager.BadTokenException | IllegalStateException e) {
+            android.util.Log.w("FocusService", "Could not show sleep protection reminder", e);
+        }
+    }
+
+    private void resolveRestPrompt(long key, boolean enableBedtime) {
+        hideRestPrompt();
+        long now = System.currentTimeMillis();
+        ZoneId zone = ZoneId.systemDefault();
+        if (store.state.sleepProtectionPromptKey(now, zone) != key) return;
+        store.state.acknowledgedSleepProtectionEnd = key;
+        if (enableBedtime) store.state.enableBedtime(now, zone);
+        TimerReceiver.changed(this);
+        if (enableBedtime) openMainAppFromOverlay();
+        requestWindowRefresh();
+    }
+
+    private void hideRestPrompt() {
+        if (restPrompt == null) return;
+        try {
+            windows.removeViewImmediate(restPrompt);
+        } catch (IllegalArgumentException ignored) { }
+        restPrompt = null;
+        restPromptKey = 0L;
     }
 
     private void refreshExemptSets() {
@@ -1010,6 +1073,7 @@ public final class FocusService extends AccessibilityService {
         hideOverlay();
         hideAwarenessBar();
         hideSoberPill();
+        hideRestPrompt();
         if (screenListenerRegistered) {
             unregisterReceiver(screenListener);
             screenListenerRegistered = false;

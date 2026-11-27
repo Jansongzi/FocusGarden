@@ -36,6 +36,7 @@ final class FocusStateCheck {
         checkAppThemePurchase(noon);
         checkFreshInstallAndOnboarding(noon);
         checkScopedRules(noon);
+        checkSleepProtectionAndManualLearning(noon);
         equal(3, FocusState.INDULGENT_UNLOCK_DAYS);
         equal(5, FocusState.MAX_INDULGENT_CARDS);
         equal(2, FocusState.INDULGENT_CARDS_PER_LAY_FLAT);
@@ -43,7 +44,7 @@ final class FocusStateCheck {
         equal(33, state.offlinePercent);
         equal(33, state.learningPercent);
         equal(33, state.focusPercent);
-        equal(10, state.earlySleepRewardMinutes);
+        equal(15, state.earlySleepRewardMinutes);
         equal(2000, state.stepsPerReward);
         equal(5, state.stepRewardMinutes);
         equal(30, state.todoDailyCapMinutes);
@@ -54,8 +55,11 @@ final class FocusStateCheck {
         state.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING));
         state.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
 
-        // MODERATE 3:1 -> Learning 9m earns 3m credit; Video spends 150s from the shared balance -> 30s remaining
+        // Learning earns pending time, while the shared balance changes only after redemption.
         state.addUsage(STUDY, noon, noon + 9 * MINUTE, UTC);
+        equal(0L, state.creditMs);
+        equal(3 * MINUTE, state.claimLearning(noon + 9 * MINUTE, UTC));
+        equal(0L, state.claimLearning(noon + 9 * MINUTE, UTC));
         equal(3 * MINUTE, state.creditMs);
         state.addUsage(VIDEO, noon, noon + 150_000, UTC);
         equal(30_000L, state.creditMs);
@@ -195,14 +199,14 @@ final class FocusStateCheck {
         equal(false, extra.claimEarlySleep(midAfternoon, UTC));
         equal(true, extra.claimEarlySleep(preSleep, UTC));
         equal(false, extra.claimEarlySleep(preSleep + 1_000, UTC));
-        equal(10 * MINUTE, extra.creditMs);
+        equal(15 * MINUTE, extra.creditMs);
         equal(true, extra.markEarlySleepFailed(at("2026-11-23T04:30:00Z"), UTC));
         equal(false, extra.claimEarlySleep(postWake, UTC));
         equal(true, extra.earlySleepFailedOn(LocalDate.parse("2026-11-23")));
         equal(1, extra.earlySleepStreak(LocalDate.parse("2026-11-23")));
-        // Next clean morning resets at 04:00 and succeeds with +10m
+        // Next clean morning resets at 04:00 and succeeds with +15m
         equal(true, extra.claimEarlySleep(at("2026-11-24T09:30:00Z"), UTC));
-        equal(10 * MINUTE, extra.creditMs);
+        equal(15 * MINUTE, extra.creditMs);
 
         // Todos: 10m creation cooldown + daily 30m cap
         extra.creditMs = 10 * MINUTE;
@@ -262,7 +266,8 @@ final class FocusStateCheck {
         sync.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING));
         sync.rules.put(VIDEO, new FocusState.Rule("Video", LIMITED));
         equal(9 * MINUTE, sync.syncUsageTotal(STUDY, 9 * MINUTE, noon + 20 * MINUTE, UTC));
-        equal(3 * MINUTE, sync.creditMs);
+        equal(0L, sync.creditMs);
+        equal(3 * MINUTE, sync.claimLearning(noon + 20 * MINUTE, UTC));
         equal(0L, sync.syncUsageTotal(STUDY, 9 * MINUTE, noon + 21 * MINUTE, UTC));
         equal(4 * MINUTE, sync.syncUsageTotal(VIDEO, 4 * MINUTE, noon + 22 * MINUTE, UTC));
         equal(0L, sync.creditMs);
@@ -302,7 +307,8 @@ final class FocusStateCheck {
         modes.addUsage(STUDY, noon, noon + MINUTE, UTC);
         modes.addUsage(STUDY, noon + MINUTE, noon + 2 * MINUTE, UTC);
         modes.addUsage(STUDY, noon + 2 * MINUTE, noon + 3 * MINUTE, UTC);
-        equal(MINUTE, modes.creditMs);
+        equal(0L, modes.creditMs);
+        equal(MINUTE, modes.claimableLearningMs());
         modes.rateMode = FocusState.RateMode.SCHOLAR;
         equal(3 * MINUTE, modes.convertByMode(12 * MINUTE));
         modes.rateMode = FocusState.RateMode.INDULGENT;
@@ -907,8 +913,8 @@ final class FocusStateCheck {
         equal(0L, sleep.creditMs);
         equal(false, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
         equal(true, sleep.hasPendingEarlySleepReward(at("2026-11-25T07:05:00Z"), UTC));
-        equal(10 * MINUTE, sleep.claimPendingEarlySleep(at("2026-11-25T08:00:00Z"), UTC));
-        equal(10 * MINUTE, sleep.creditMs);
+        equal(15 * MINUTE, sleep.claimPendingEarlySleep(at("2026-11-25T08:00:00Z"), UTC));
+        equal(15 * MINUTE, sleep.creditMs);
         equal(true, sleep.earlySleepChecked(LocalDate.parse("2026-11-25")));
         equal(false, sleep.hasPendingEarlySleepReward(at("2026-11-25T08:05:00Z"), UTC));
         equal(0L, sleep.claimPendingEarlySleep(at("2026-11-25T08:05:00Z"), UTC));
@@ -916,6 +922,8 @@ final class FocusStateCheck {
         // Daytime and cross-midnight schedules work with arbitrary minutes.
         for (boolean overnight : new boolean[]{false, true}) {
             var custom = new FocusState();
+            int rewardMinutes = overnight ? 45 : 15;
+            custom.earlySleepRewardMinutes = rewardMinutes;
             custom.sleepStart = overnight ? 23 * 60 + 57 : 8 * 60 + 13;
             custom.sleepEnd = overnight ? 6 * 60 + 43 : 15 * 60 + 47;
             long start = at(overnight ? "2026-11-25T23:57:00Z" : "2026-11-25T08:13:00Z");
@@ -928,7 +936,8 @@ final class FocusStateCheck {
             equal(false, custom.isSleepLocked(end, UTC));
             equal(false, custom.evaluateEarlySleep(end - 1, UTC));
             equal(true, custom.evaluateEarlySleep(end, UTC));
-            equal(10 * MINUTE, custom.claimPendingEarlySleep(end, UTC));
+            equal(rewardMinutes * MINUTE, custom.redeemSummary(end, UTC).sleepMs());
+            equal(rewardMinutes * MINUTE, custom.claimPendingEarlySleep(end, UTC));
         }
 
         // Enabling bedtime at 06:50 inside an existing sleep window must lock now, but require next full 23:00->07:00 cycle for reward
@@ -989,7 +998,7 @@ final class FocusStateCheck {
         equal(600, FocusState.sleepDurationMinutes(22 * 60 + 30, 8 * 60 + 30));
         equal(true, FocusState.isValidSleepDuration(22 * 60 + 30, 8 * 60 + 30));
         equal(330, FocusState.sleepDurationMinutes(23 * 60 + 30, 5 * 60));
-        equal(true, FocusState.isValidSleepSchedule(23 * 60 + 30, 5 * 60));
+        equal(false, FocusState.isValidSleepSchedule(23 * 60 + 30, 5 * 60));
         equal(false, FocusState.isValidSleepSchedule(21 * 60, 8 * 60 + 30));
         equal(true, FocusState.isValidSleepSchedule(20 * 60 + 30, 6 * 60));
         equal(18 * 60, FocusState.clampSleepStart(18 * 60));
@@ -1095,41 +1104,41 @@ final class FocusStateCheck {
         long rvNow = at("2026-11-24T10:36:00Z");
         rv.creditMs = 0L;
         rv.debugSeedRedeemables(rvNow, UTC);
-        // Seeded: offline 15m (3:1 -> 5m) + sleep 10m + steps >= 2225 (5m) = 20m across 3 sources
+        // Seeded: offline 15m (3:1 -> 5m) + sleep 15m + steps >= 2225 (5m) = 25m across 3 sources
         FocusState.RedeemSummary s1 = rv.redeemSummary(rvNow, UTC);
-        equal(20 * MINUTE, s1.totalMs());
+        equal(25 * MINUTE, s1.totalMs());
         equal(5 * MINUTE, s1.timerMs());
-        equal(10 * MINUTE, s1.sleepMs());
+        equal(15 * MINUTE, s1.sleepMs());
         equal(5 * MINUTE, s1.stepMs());
         equal(3, s1.readySourceCount());
         equal(0L, rv.creditMs);
 
-        // Add mature todo (+8m) and reached abstinence (+12m) -> 40m across 5 sources
+        // Add mature todo (+8m) and reached abstinence (+12m) -> 45m across 5 sources
         LocalDate rvDay = LocalDate.parse("2026-11-24");
         rv.addTodo("t_rv", "背单词", 8, rvDay, rvNow - 20 * MINUTE);
         rv.toggleTodo("t_rv", rvDay);
         rv.addAbstinence("a_rv", "戒夜宵", rvNow - 25L * 60 * MINUTE, 24, 12);
         FocusState.RedeemSummary s2 = rv.redeemSummary(rvNow, UTC);
-        equal(40 * MINUTE, s2.totalMs());
+        equal(45 * MINUTE, s2.totalMs());
         equal(5, s2.readySourceCount());
 
         // Hiding a card excludes it from summary and claimAllRedeemable
         rv.hiddenCards.add("todos");
         FocusState.RedeemSummary sHidden = rv.redeemSummary(rvNow, UTC);
-        equal(32 * MINUTE, sHidden.totalMs());
+        equal(37 * MINUTE, sHidden.totalMs());
         equal(4, sHidden.readySourceCount());
 
         // Atomic one-click claim & strict idempotency
         FocusState.ClaimAllResult c1 = rv.claimAllRedeemable(rvNow, UTC);
-        equal(32 * MINUTE, c1.totalMs());
+        equal(37 * MINUTE, c1.totalMs());
         equal(4, c1.claimedSources());
-        equal(32 * MINUTE, rv.creditMs);
-        equal(32 * MINUTE, rv.day("2026-11-24").earnedMs);
+        equal(37 * MINUTE, rv.creditMs);
+        equal(37 * MINUTE, rv.day("2026-11-24").earnedMs);
         equal(false, rv.todos.get("t_rv").claimed);
         FocusState.ClaimAllResult c2 = rv.claimAllRedeemable(rvNow, UTC);
         equal(0L, c2.totalMs());
         equal(0, c2.claimedSources());
-        equal(32 * MINUTE, rv.creditMs);
+        equal(37 * MINUTE, rv.creditMs);
 
         // Unhiding todos reveals remaining 8m; LAY_FLAT blocks one-click claim cleanly
         rv.hiddenCards.remove("todos");
@@ -1418,6 +1427,97 @@ final class FocusStateCheck {
                 rewardDay + 2 * MINUTE, UTC);
         equal(true, backfill.rewardClaimed);
         equal(0L, ac.claimAbstinence("backfill", at("2026-11-27T10:00:00Z"), UTC));
+    }
+
+    private static void checkSleepProtectionAndManualLearning(long noon) {
+        long bedtime = at("2026-11-22T23:30:00Z");
+        long wake = at("2026-11-23T05:00:00Z");
+        long customBedtime = at("2026-11-22T22:30:00Z");
+        long customWake = at("2026-11-23T07:00:00Z");
+        var timer = new FocusState();
+        timer.sleepStart = 22 * 60 + 30;
+        equal(bedtime, timer.nextSleepProtectionStart(noon, UTC));
+        equal(0L, timer.sleepProtectionPromptKey(bedtime - 1, UTC));
+        equal(wake, timer.sleepProtectionPromptKey(bedtime, UTC));
+        equal(wake, timer.sleepProtectionPromptKey(wake - 1, UTC));
+        equal(0L, timer.sleepProtectionPromptKey(wake, UTC));
+        equal(false, timer.isSleepLocked(bedtime, UTC));
+        equal(20 * 60 * MINUTE, timer.eligibleDisciplineMs(wake - 24 * 60 * MINUTE, wake + 90 * MINUTE, UTC));
+        timer.acknowledgedSleepProtectionEnd = wake;
+        equal(0L, timer.sleepProtectionPromptKey(bedtime + MINUTE, UTC));
+        equal(wake + 24 * 60 * MINUTE, timer.sleepProtectionPromptKey(bedtime + 24 * 60 * MINUTE, UTC));
+
+        timer.start(30, 0, 1, bedtime - 15 * MINUTE);
+        equal(FOCUS, timer.restriction(VIDEO, bedtime, UTC));
+        equal(5 * MINUTE, timer.projectedCountdownRewardMs(UTC));
+        equal(FocusState.Transition.FINISHED, timer.advance(bedtime + 15 * MINUTE, UTC));
+        equal(5 * MINUTE, timer.creditMs);
+        equal(30 * MINUTE, timer.day("2026-11-22").focusMs);
+
+        var night = new FocusState();
+        night.sleepStart = timer.sleepStart;
+        night.start(30, 0, 1, bedtime);
+        equal(FOCUS, night.restriction(VIDEO, bedtime + MINUTE, UTC));
+        equal(FocusState.Transition.FINISHED, night.advance(bedtime + 30 * MINUTE, UTC));
+        equal(0L, night.creditMs);
+        equal(30 * MINUTE, night.day("2026-11-22").focusMs);
+
+        var stopwatch = new FocusState();
+        stopwatch.sleepStart = timer.sleepStart;
+        stopwatch.startOffline(bedtime - 15 * MINUTE);
+        stopwatch.pauseOffline(bedtime + 5 * MINUTE, UTC);
+        stopwatch.startOffline(wake - 10 * MINUTE);
+        equal(10 * MINUTE, stopwatch.claimOffline(wake + 15 * MINUTE, UTC));
+        equal(45 * MINUTE, stopwatch.day("2026-11-23").offlineMs);
+        equal(0L, stopwatch.claimOffline(wake + 15 * MINUTE, UTC));
+
+        // A schedule edit cannot turn already recorded night minutes into income.
+        var edited = new FocusState();
+        edited.sleepStart = timer.sleepStart;
+        edited.enableBedtime(noon, UTC);
+        equal(customBedtime, edited.nextSleepProtectionStart(noon, UTC));
+        equal(0L, edited.eligibleDisciplineMs(customBedtime, customWake, UTC));
+        equal(MINUTE, edited.eligibleDisciplineMs(customWake, customWake + MINUTE, UTC));
+        equal(0L, edited.sleepProtectionPromptKey(customBedtime, UTC));
+        edited.startOffline(customBedtime - 15 * MINUTE);
+        edited.changeSleepSchedule(23 * 60, 7 * 60, customBedtime + 15 * MINUTE, UTC);
+        equal(10 * MINUTE, edited.claimOffline(customBedtime + 30 * MINUTE, UTC));
+
+        var enabledMidStopwatch = new FocusState();
+        enabledMidStopwatch.sleepStart = timer.sleepStart;
+        enabledMidStopwatch.startOffline(customBedtime - 15 * MINUTE);
+        enabledMidStopwatch.enableBedtime(customBedtime + 15 * MINUTE, UTC);
+        equal(10 * MINUTE, enabledMidStopwatch.claimOffline(customBedtime + 30 * MINUTE, UTC));
+
+        var disabledMidCountdown = new FocusState();
+        disabledMidCountdown.sleepStart = timer.sleepStart;
+        disabledMidCountdown.enableBedtime(noon, UTC);
+        disabledMidCountdown.start(60, 0, 1, customBedtime - 15 * MINUTE);
+        disabledMidCountdown.failEarlySleepByConfigChange(customBedtime + 15 * MINUTE, UTC, "test", true);
+        equal(bedtime, disabledMidCountdown.nextSleepProtectionStart(customBedtime + 15 * MINUTE, UTC));
+        equal(15 * MINUTE, disabledMidCountdown.projectedCountdownRewardMs(UTC));
+        equal(FocusState.Transition.FINISHED, disabledMidCountdown.advance(customBedtime + 45 * MINUTE, UTC));
+        equal(15 * MINUTE, disabledMidCountdown.creditMs);
+
+        equal(FocusState.SleepScheduleIssue.INVALID, FocusState.sleepScheduleIssue(420, 420));
+        equal(FocusState.SleepScheduleIssue.TOO_SHORT, FocusState.sleepScheduleIssue(23 * 60, 4 * 60));
+        equal(FocusState.SleepScheduleIssue.TOO_LONG, FocusState.sleepScheduleIssue(21 * 60, 8 * 60));
+        equal(FocusState.SleepScheduleIssue.NONE, FocusState.sleepScheduleIssue(22 * 60 + 30, 7 * 60));
+
+        var learner = new FocusState();
+        learner.rules.put(STUDY, new FocusState.Rule("Reading", LEARNING));
+        learner.day("2026-11-22").learningEarnedMs = 10 * MINUTE; // already paid in a previous version
+        equal(0L, learner.claimableLearningMs());
+        learner.addUsage(STUDY, noon, noon + 10 * MINUTE, UTC);
+        equal(0L, learner.creditMs);
+        equal(3 * MINUTE, learner.redeemSummary(noon + 11 * MINUTE, UTC).learningMs());
+        learner.hiddenCards.add("apps");
+        equal(0L, learner.claimAllRedeemable(noon + 11 * MINUTE, UTC).learningMs());
+        learner.hiddenCards.remove("apps");
+        equal(3 * MINUTE, learner.claimAllRedeemable(noon + 11 * MINUTE, UTC).learningMs());
+        equal(3 * MINUTE, learner.creditMs);
+        equal(20_000L, learner.pendingLearningMs);
+        equal(0L, learner.claimAllRedeemable(noon + 11 * MINUTE, UTC).totalMs());
     }
 
     private static void checkScopedRules(long noon) {

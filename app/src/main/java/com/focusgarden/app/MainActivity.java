@@ -197,6 +197,9 @@ public final class MainActivity extends Activity implements SensorEventListener 
     private SensorManager sensorManager;
     private boolean stepListenerActive;
 
+    private TextView learningRedeemedLabel;
+    private Dialog sleepProtectionPrompt;
+
     private final Runnable clock = new Runnable() {
         @Override public void run() {
             long now = System.currentTimeMillis();
@@ -216,6 +219,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             }
             if (liveStepsSheet != null && liveStepsSheet.isShowing()) liveStepsSheet.refresh();
             updateSleepLock(now);
+            updateSleepProtection(now);
             updateSoberTimer(now);
             main.postDelayed(this, 580);
         }
@@ -335,6 +339,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             if (resumed && tab <= 1 && snap.accOk() != lastAccessibilityEnabled) redraw();
         });
         updateSleepLock(now);
+        updateSleepProtection(now);
         updateSoberTimer(now);
         main.post(clock);
         handleTimerShortcut(getIntent());
@@ -344,6 +349,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
     @Override protected void onPause() {
         resumed = false;
+        hideSleepProtection();
         syncLayFlatAura();
         main.removeCallbacks(clock);
         main.removeCallbacks(onboardingTrigger);
@@ -361,6 +367,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         if (resumed) {
             long now = System.currentTimeMillis();
             updateSleepLock(now);
+            updateSleepProtection(now);
             updateSoberTimer(now);
             handleTimerShortcut(intent);
             scheduleOnboardingCheck(120L);
@@ -670,6 +677,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         redeemToggleAllBtn = null;
         redeemAccordions.clear();
         redeemCardBtns.clear();
+        learningRedeemedLabel = null;
         redeemCardSubs.clear();
         displayedVoucherClaimableMin = -1L;
         displayedVoucherEarnedMin = -1L;
@@ -1589,6 +1597,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
 
         redeemAccordions.clear();
         redeemCardBtns.clear();
+        learningRedeemedLabel = null;
         redeemCardSubs.clear();
 
         if (!state.hiddenCards.contains("apps")) {
@@ -1711,6 +1720,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
             return;
         }
         List<RedeemUi.Pressable3DButton> hitBtns = new ArrayList<>();
+        if (result.learningMs() > 0L && redeemCardBtns.containsKey("apps")) hitBtns.add(redeemCardBtns.get("apps"));
         if (result.timerMs() > 0L && redeemCardBtns.containsKey("timer")) hitBtns.add(redeemCardBtns.get("timer"));
         if (result.sleepMs() > 0L && redeemCardBtns.containsKey("sleep")) hitBtns.add(redeemCardBtns.get("sleep"));
         if (result.todoMs() > 0L && redeemCardBtns.containsKey("todos")) hitBtns.add(redeemCardBtns.get("todos"));
@@ -1899,13 +1909,16 @@ public final class MainActivity extends Activity implements SensorEventListener 
         String earnedTxt = day.learningEarnedMs > 0L
                 ? " · 已兑 " + shortMinutes(day.learningEarnedMs) + " 分" : "";
         TextView sub = text(this, "今日学习 " + duration(day.learningMs) + earnedTxt, 12, MUTED, false);
-        RedeemUi.Pressable3DButton btn = buildRedeemActionBtn("apps", () -> {});
+        RedeemUi.Pressable3DButton btn = buildRedeemActionBtn("apps", () ->
+                handleSingleRedeemClaim("apps", redeemCardBtns.get("apps"), state::claimLearning,
+                        () -> toast("正向学习时长可兑换满 1 分钟后领取")));
 
         LinearLayout body = column(this);
         LinearLayout topInfo = row(this);
         weight(topInfo, titleWithInfo(this, "正向学习应用", 14, INK,
-                "正向学习应用", "使用学习应用按当前倍率自动赚取时长（躺平当日暂停）。"));
-        TextView learnEarnedTv = text(this, "已自动兑 " + duration(day.learningEarnedMs), 12, MUTED, false);
+                "正向学习应用", "学习时长按使用时的倍率计入待兑换，可在这里手动领取。"));
+        TextView learnEarnedTv = text(this, "已兑换 " + duration(day.learningEarnedMs), 12, MUTED, false);
+        learningRedeemedLabel = learnEarnedTv;
         learnEarnedTv.setSingleLine(true);
         topInfo.addView(learnEarnedTv);
         body.addView(topInfo);
@@ -2200,7 +2213,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         };
         start.setOnClickListener(v -> {
             if (mode == 0) startSession.run();
-            else OnboardingUi.showMascotPrompt(this, R.drawable.dialog_mascot_countdown,
+            else OnboardingUi.showMascotPrompt(this, R.drawable.guide_mascot_cheer,
                     "倒计时不可暂停", "开始后需等待计时自然结束。确认开始 " + minutes + " 分钟吗？",
                     "再想想", "开始倒计时", startSession);
         });
@@ -2652,7 +2665,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                 long rem = state.remaining(now);
                 if (homeTimerReward != null) {
                     setTextIfChanged(homeTimerReward, layFlat ? "今日暂停兑换"
-                            : shortMinutes(state.convertByMode(state.phaseDuration)) + " 分钟 预计奖励");
+                            : shortMinutes(state.projectedCountdownRewardMs(ZoneId.systemDefault())) + " 分钟 预计奖励");
                 }
                 if (homeTimerEarnedLabel != null) {
                     setTextIfChanged(homeTimerEarnedLabel, "已兑换 " + duration(day == null ? 0L : day.focusEarnedMs));
@@ -2762,7 +2775,13 @@ public final class MainActivity extends Activity implements SensorEventListener 
                         : "完成正向行为后可在此一键领取";
                 setTextIfChanged(redeemVoucherCaptionTv, cap);
             }
-            syncRedeemCardButton("apps", 0L, false);
+            syncRedeemCardButton("apps", s.learningMs(), layFlat && state.pendingLearningMs >= FocusState.MINUTE);
+            FocusState.Day todayStats = state.day(today.toString());
+            TextView appsSub = redeemCardSubs.get("apps");
+            if (appsSub != null) setTextIfChanged(appsSub, "今日学习 " + duration(todayStats.learningMs)
+                    + " · 已兑 " + shortMinutes(todayStats.learningEarnedMs) + " 分");
+            if (learningRedeemedLabel != null) setTextIfChanged(learningRedeemedLabel,
+                    "已兑换 " + duration(todayStats.learningEarnedMs));
             syncRedeemCardButton("timer", s.timerMs(), layFlat && state.offlineUnredeemedMs >= FocusState.MIN_OFFLINE_CLAIM_MS);
             syncRedeemCardButton("sleep", s.sleepMs(), layFlat && state.hasPendingEarlySleepReward(now, zone));
             syncRedeemCardButton("todos", s.todoMs(), layFlat && state.pendingTodoRewardMs(now, today) > 0L);
@@ -2823,7 +2842,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
         LinearLayout titleBox = column(this);
         LinearLayout hRow = titleWithInfo(this, "应用规则", 26, INK,
                 "应用规则",
-                "学习应用自动赚取时长，所有受限应用共用今日可用时长。");
+                "学习应用积累待兑换时长，所有受限应用共用今日可用时长。");
         if (Build.VERSION.SDK_INT >= 28) hRow.getChildAt(0).setAccessibilityHeading(true);
         titleBox.addView(hRow);
         gap(titleBox, 4);
@@ -3635,6 +3654,30 @@ public final class MainActivity extends Activity implements SensorEventListener 
         updateSleepLock(System.currentTimeMillis());
     }
 
+    private void updateSleepProtection(long now) {
+        if (!resumed || isOnboardingActive() || hasPendingOnboardingForCurrentScreen()) return;
+        ZoneId zone = ZoneId.systemDefault();
+        long key = state.sleepProtectionPromptKey(now, zone);
+        if (key == 0L) {
+            hideSleepProtection();
+            return;
+        }
+        if (sleepProtectionPrompt != null && sleepProtectionPrompt.isShowing()) return;
+        sleepProtectionPrompt = OnboardingUi.showSleepProtectionPrompt(this, action -> {
+            if (state.sleepProtectionPromptKey(System.currentTimeMillis(), zone) != key) return;
+            state.acknowledgedSleepProtectionEnd = key;
+            getSystemService(android.app.NotificationManager.class).cancel(TimerReceiver.REST_NOTIFICATION_ID);
+            if (action) state.enableBedtime(System.currentTimeMillis(), zone);
+            changed();
+        });
+    }
+
+    private void hideSleepProtection() {
+        if (sleepProtectionPrompt == null) return;
+        sleepProtectionPrompt.dismiss();
+        sleepProtectionPrompt = null;
+    }
+
     private void updateSleepLock(long now) {
         if (!resumed) return;
         boolean locked = state.isSleepLocked(now, ZoneId.systemDefault());
@@ -3944,7 +3987,7 @@ public final class MainActivity extends Activity implements SensorEventListener 
                             rulesGuideTarget,
                             R.drawable.guide_mascot_think,
                             "分类管理应用规则",
-                            "「学习」里的应用打开就自动赚时间，「限制」里的应用共用今日余额，用完自动拦截～",
+                            "「学习」里的应用用过后可以手动兑换时间，「限制」里的应用共用今日余额，用完自动拦截～",
                             15, 3));
                 }
             }

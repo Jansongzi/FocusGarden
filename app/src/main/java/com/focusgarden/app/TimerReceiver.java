@@ -16,6 +16,8 @@ import java.time.ZoneId;
 
 public final class TimerReceiver extends BroadcastReceiver {
     private static final String CHANNEL = "focus_timer";
+    private static final String REST_CHANNEL = "sleep_protection";
+    static final int REST_NOTIFICATION_ID = 8;
 
     @Override public void onReceive(Context context, Intent intent) {
         long now = System.currentTimeMillis();
@@ -26,6 +28,11 @@ public final class TimerReceiver extends BroadcastReceiver {
         KeepAliveManager.syncServiceState(context);
         schedule(context);
         FocusWidget.refresh(context);
+        if (FocusService.isConnected()) {
+            FocusService.refreshConnected();
+        } else {
+            notifySleepProtection(context, store.state, now);
+        }
     }
 
     static void advance(Context context, long now) {
@@ -54,7 +61,8 @@ public final class TimerReceiver extends BroadcastReceiver {
     static void schedule(Context context) {
         FocusState state = FocusStore.get(context).state;
         long now = System.currentTimeMillis();
-        long next = FocusState.nextResetMs(now, ZoneId.systemDefault());
+        ZoneId zone = ZoneId.systemDefault();
+        long next = Math.min(FocusState.nextResetMs(now, zone), state.nextSleepProtectionStart(now, zone));
         if (state.phaseEnd > now && (next == 0L || state.phaseEnd < next)) next = state.phaseEnd;
         if (state.soberUntil > now && (next == 0L || state.soberUntil < next)) {
             next = state.soberUntil;
@@ -76,6 +84,24 @@ public final class TimerReceiver extends BroadcastReceiver {
         FocusWidget.refresh(context);
     }
 
+    private static void notifySleepProtection(Context context, FocusState state, long now) {
+        long protectionEnd = state.sleepProtectionPromptKey(now, ZoneId.systemDefault());
+        if (protectionEnd == 0L) return;
+        if (Build.VERSION.SDK_INT >= 33
+                && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(new NotificationChannel(REST_CHANNEL, "睡眠保护", NotificationManager.IMPORTANCE_LOW));
+        manager.notify(REST_NOTIFICATION_ID, new Notification.Builder(context, REST_CHANNEL)
+                .setSmallIcon(R.drawable.ic_tile)
+                .setContentTitle("该休息啦！")
+                .setContentText("已进入睡眠保护时段，点此选择是否开启早睡模式")
+                .setContentIntent(FocusWidget.openApp(context))
+                .setOnlyAlertOnce(true)
+                .setTimeoutAfter(protectionEnd - now)
+                .setAutoCancel(true)
+                .build());
+    }
+
     private static void notify(Context context, FocusState.Transition transition) {
         if (Build.VERSION.SDK_INT >= 33
                 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
@@ -89,7 +115,8 @@ public final class TimerReceiver extends BroadcastReceiver {
         notifications.notify(7, new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(title)
-                .setContentText("奖励已自动发放，点此查看时间结余")
+                .setContentText(transition == FocusState.Transition.WORK ? "点此查看自律进度"
+                        : "收益仅结算非睡眠保护时段，点此查看时间结余")
                 .setContentIntent(FocusWidget.openApp(context))
                 .setAutoCancel(true)
                 .build());

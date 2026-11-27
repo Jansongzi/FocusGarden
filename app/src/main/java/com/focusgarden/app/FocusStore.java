@@ -111,6 +111,8 @@ final class FocusStore {
             }
         }
         state.bedtime = root.optBoolean("bedtime");
+        state.acknowledgedSleepProtectionEnd = root.optLong("acknowledgedSleepProtectionEnd");
+        state.pendingLearningMs = Math.max(0L, root.optLong("pendingLearningMs"));
         state.sleepStart = root.optInt("sleepStart", 1380);
         state.sleepEnd = root.optInt("sleepEnd", 420);
         state.sleepTargetEndMs = Math.max(0L, root.optLong("sleepTargetEndMs", 0L));
@@ -126,7 +128,9 @@ final class FocusStore {
         }
         state.sleepLockBypassEndMs = Math.max(0L, root.optLong("sleepLockBypassEndMs", 0L));
         state.earlySleepPendingClaimDate = root.optString("earlySleepPendingClaimDate", "");
-        state.earlySleepRewardMinutes = root.optInt("earlySleepRewardMinutes", 10);
+        state.earlySleepRewardMinutes = Math.max(FocusState.MIN_EARLY_SLEEP_REWARD_MINUTES,
+                Math.min(FocusState.MAX_EARLY_SLEEP_REWARD_MINUTES,
+                        root.optInt("earlySleepRewardMinutes", FocusState.MIN_EARLY_SLEEP_REWARD_MINUTES)));
         state.todoDailyCapMinutes = root.optInt("todoDailyCapMinutes", 30);
         state.habitDailyCapMinutes = root.optInt("habitDailyCapMinutes", 25);
         state.stepDailyCapMinutes = root.optInt("stepDailyCapMinutes", 30);
@@ -175,7 +179,9 @@ final class FocusStore {
             }
         }
         state.phaseEnd = root.optLong("phaseEnd");
+        state.phaseRewardCursor = root.optLong("phaseRewardCursor");
         state.phaseDuration = root.optLong("phaseDuration");
+        state.phaseEligibleMs = root.optLong("phaseEligibleMs");
         state.pausedRemaining = root.optLong("pausedRemaining");
         state.workMinutes = root.optInt("workMinutes");
         state.restMinutes = root.optInt("restMinutes");
@@ -186,6 +192,7 @@ final class FocusStore {
         state.offlineSessionStarted = root.optLong("offlineSessionStarted", 0L);
         state.offlineStartMs = root.optLong("offlineStartMs");
         state.offlineAccumulatedMs = root.optLong("offlineAccumulatedMs");
+        state.offlineEligibleAccumulatedMs = root.optLong("offlineEligibleAccumulatedMs", state.offlineAccumulatedMs);
         state.offlineUnredeemedMs = root.optLong("offlineUnredeemedMs");
         state.stopwatchCategory = state.disciplineCategory(root.optString("stopwatchCategory"));
 
@@ -639,7 +646,9 @@ final class FocusStore {
                     .put("offlinePercent", state.offlinePercent)
                     .put("bedtime", state.bedtime)
                     .put("sleepStart", state.sleepStart)
+                    .put("pendingLearningMs", state.pendingLearningMs)
                     .put("sleepEnd", state.sleepEnd)
+                    .put("acknowledgedSleepProtectionEnd", state.acknowledgedSleepProtectionEnd)
                     .put("sleepTargetEndMs", state.sleepTargetEndMs)
                     .put("sleepLockBypassEndMs", state.sleepLockBypassEndMs)
                     .put("bedtimeSuspendedOn", state.bedtimeSuspendedOn)
@@ -657,7 +666,9 @@ final class FocusStore {
                     .put("pomodoroRest", state.pomodoroRest)
                     .put("pomodoroRounds", state.pomodoroRounds)
                     .put("phaseEnd", state.phaseEnd)
+                    .put("phaseRewardCursor", state.phaseRewardCursor)
                     .put("phaseDuration", state.phaseDuration)
+                    .put("phaseEligibleMs", state.phaseEligibleMs)
                     .put("pausedRemaining", state.pausedRemaining)
                     .put("workMinutes", state.workMinutes)
                     .put("restMinutes", state.restMinutes)
@@ -667,6 +678,7 @@ final class FocusStore {
                     .put("offlineStartMs", state.offlineStartMs)
                     .put("offlineSessionStarted", state.offlineSessionStarted)
                     .put("offlineAccumulatedMs", state.offlineAccumulatedMs)
+                    .put("offlineEligibleAccumulatedMs", state.offlineEligibleAccumulatedMs)
                     .put("offlineUnredeemedMs", state.offlineUnredeemedMs)
                     .put("stopwatchCategory", state.stopwatchCategory.id())
                     .put("customDisciplineCategories", new JSONObject(state.customDisciplineCategories))

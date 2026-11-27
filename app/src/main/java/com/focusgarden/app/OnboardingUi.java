@@ -615,20 +615,73 @@ final class OnboardingUi {
         parent.addView(line, -1, dp(parent.getContext(), 1));
     }
 
-    /** Pop-out angry chibi modal shown when the configured sleep span exceeds 10 hours. */
-    static void showSleepTooLongDialog(Activity activity) {
-        showMascotPrompt(activity, R.drawable.guide_mascot_sleep_angry,
-                "请调整睡眠时段", "入睡和起床时间需要不同，锁机最长 10 小时。",
-                null, "知道啦", null);
+    private static final String REST_PROMPT = "已进入睡眠保护时段，期间自律将不再产生时间收益（跨时段自律仅结算非睡眠保护时段的收益）。"
+            + "熬夜不利于身体健康，开启早睡模式，好好休息吧！";
+
+    static void showSleepScheduleError(Activity activity, FocusState.SleepScheduleIssue issue) {
+        switch (issue) {
+            case TOO_SHORT -> showMascotPrompt(activity, R.drawable.dialog_mascot_sleep_pause,
+                    "再留一点休息时间吧", "睡眠时段至少需要 6 小时，试试把起床时间调晚一些。", null, "知道啦", null);
+            case TOO_LONG -> showMascotPrompt(activity, R.drawable.dialog_mascot_sleep_pause,
+                    "休息时间有点长啦", "睡眠时段最长 10 小时，试试调整入睡或起床时间。", null, "知道啦", null);
+            case INVALID -> showMascotPrompt(activity, R.drawable.dialog_mascot_sleep_pause,
+                    "请重新选个作息吧", "请选择不同的入睡和起床时间。跨午夜时，会在次日解锁。", null, "知道啦", null);
+            case NONE -> { }
+        }
+    }
+
+    static Dialog showSleepProtectionPrompt(Activity activity, java.util.function.Consumer<Boolean> choice) {
+        Dialog dialog = openMascotPrompt(activity, R.drawable.guide_mascot_calm, "该休息啦！", REST_PROMPT,
+                "继续自律（无收益）", "开启早睡模式", () -> choice.accept(false), () -> choice.accept(true));
+        dialog.setCancelable(false);
+        dialog.setCanceledOnTouchOutside(false);
+        return dialog;
+    }
+
+    static View sleepProtectionPromptView(Context context, Runnable continueAction, Runnable sleepAction) {
+        View body = mascotPromptView(context, R.drawable.guide_mascot_calm, "该休息啦！", REST_PROMPT,
+                "继续自律（无收益）", "开启早睡模式", continueAction, sleepAction);
+        body.setBackgroundColor(isDark() ? 0xa6000000 : 0x75000000);
+        return body;
     }
 
     static void showMascotPrompt(Activity activity, int imageRes, String title, String detail,
                                  String cancel, String confirm, Runnable onConfirm) {
+        openMascotPrompt(activity, imageRes, title, detail, cancel, confirm, null, onConfirm);
+    }
+
+    private static Dialog openMascotPrompt(Activity activity, int imageRes, String title, String detail,
+                                           String cancel, String confirm, Runnable onCancel, Runnable onConfirm) {
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         dialog.setCancelable(true);
         dialog.setCanceledOnTouchOutside(true);
 
+        View content = mascotPromptView(activity, imageRes, title, detail, cancel, confirm,
+                () -> {
+                    dialog.dismiss();
+                    if (onCancel != null) onCancel.run();
+                }, () -> {
+                    dialog.dismiss();
+                    if (onConfirm != null) onConfirm.run();
+                });
+        dialog.setContentView(content);
+
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawableResource(android.R.color.transparent);
+            win.setGravity(Gravity.CENTER);
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            win.setDimAmount(isDark() ? 0.65f : 0.46f);
+        }
+
+        dialog.show();
+        return dialog;
+    }
+
+    private static View mascotPromptView(Context activity, int imageRes, String title, String detail,
+                                         String cancel, String confirm, Runnable onCancel, Runnable onConfirm) {
         FrameLayout backdrop = new FrameLayout(activity);
         backdrop.setClipChildren(false);
         backdrop.setClipToPadding(false);
@@ -636,7 +689,7 @@ final class OnboardingUi {
         backdrop.setPadding(hPad, dp(activity, 16), hPad, dp(activity, 16));
 
         int screenW = activity.getResources().getDisplayMetrics().widthPixels;
-        int stageW = Math.min(dp(activity, 344), Math.max(dp(activity, 240), screenW - dp(activity, 40)));
+        int stageW = Math.min(dp(activity, 344), Math.max(1, screenW - dp(activity, 40)));
         FrameLayout stage = new FrameLayout(activity);
         stage.setClipChildren(false);
         stage.setClipToPadding(false);
@@ -661,25 +714,31 @@ final class OnboardingUi {
         gap(copyCol, 6);
 
         TextView subTv = text(activity, detail, 13, INK_SUB, false);
+        subTv.setGravity(Gravity.CENTER);
         subTv.setLineSpacing(dp(activity, 2.5f), 1.08f);
         subTv.setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED);
-        copyCol.addView(subTv);
+        boolean wideCopy = detail.length() > 49;
+        if (!wideCopy) copyCol.addView(subTv);
         card.addView(copyCol, -1, -2);
+        if (wideCopy) {
+            gap(card, 8);
+            card.addView(subTv, -1, -2);
+        }
         gap(card, 16);
 
         TextView okBtn = pillButton(activity, confirm, BLUE, ON_ACCENT, 14, 46);
         okBtn.setTextSize(14f);
         okBtn.setOnClickListener(v -> {
             tapHaptic(v);
-            dialog.dismiss();
-            if (onConfirm != null) onConfirm.run();
+            onConfirm.run();
         });
         if (cancel == null) {
             card.addView(okBtn, -1, -2);
         } else {
             LinearLayout actions = row(activity);
             TextView cancelBtn = pillButton(activity, cancel, SURFACE_SUBTLE, INK_SUB, 14, 46);
-            cancelBtn.setOnClickListener(v -> dialog.dismiss());
+            cancelBtn.setSingleLine(false);
+            cancelBtn.setOnClickListener(v -> onCancel.run());
             weight(actions, cancelBtn);
             space(actions, 8);
             weight(actions, okBtn);
@@ -716,17 +775,6 @@ final class OnboardingUi {
         stage.addView(mascotImg, mascotLp);
 
         backdrop.addView(stage, new FrameLayout.LayoutParams(stageW, -2, Gravity.CENTER));
-        dialog.setContentView(backdrop);
-
-        Window win = dialog.getWindow();
-        if (win != null) {
-            win.setBackgroundDrawableResource(android.R.color.transparent);
-            win.setGravity(Gravity.CENTER);
-            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
-            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-            win.setDimAmount(isDark() ? 0.65f : 0.46f);
-        }
-
         if (!RedeemUi.reducedMotion(activity)) {
             stage.setScaleX(0.94f);
             stage.setScaleY(0.94f);
@@ -734,7 +782,7 @@ final class OnboardingUi {
             stage.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(170)
                     .setInterpolator(new DecelerateInterpolator(1.6f)).start();
         }
-        dialog.show();
+        return backdrop;
     }
 
     private static final class BoundedScrollView extends ScrollView {

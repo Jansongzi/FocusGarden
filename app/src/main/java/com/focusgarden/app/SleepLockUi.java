@@ -258,9 +258,10 @@ final class SleepLockUi extends Dialog {
         tapHaptic(v);
         FocusSheets.pickSleepStartClock(activity, state.sleepStart, newStart -> {
             if (newStart == state.sleepStart) return;
-            if (!FocusState.isValidSleepDuration(newStart, state.sleepEnd)) {
+            FocusState.SleepScheduleIssue issue = FocusState.sleepScheduleIssue(newStart, state.sleepEnd);
+            if (issue != FocusState.SleepScheduleIssue.NONE) {
                 haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.REJECT);
-                OnboardingUi.showSleepTooLongDialog(activity);
+                OnboardingUi.showSleepScheduleError(activity, issue);
                 return;
             }
             confirmDialog(activity, R.drawable.ic_clock, AMBER_SOFT, AMBER,
@@ -327,14 +328,16 @@ final class SleepLockUi extends Dialog {
         clockView.update(hhmm, colonVisible);
 
         MainActivity.setTextIfChanged(remainSub,
-                String.format(Locale.ROOT, "距明早 %s 解锁还有 %02d:%02d:%02d",
+                String.format(Locale.ROOT, "距 %s 解锁还有 %02d:%02d:%02d",
                         clock(state.sleepEnd), hrs, mins, secs));
         int streak = state.earlySleepStreak(LocalDate.now());
         MainActivity.setTextIfChanged(streakView,
                 "已连续早睡 " + streak + " 天 · 今晚安静休息");
+        String reward = state.sleepTargetEndMs == endMs && endMs > now
+                ? "醒来后可领取 +" : "完成完整时段可领取 +";
         MainActivity.setTextIfChanged(scheduleView,
                 clock(state.sleepStart) + " – " + clock(state.sleepEnd)
-                        + " · 明早醒来后主动领取 +" + state.earlySleepRewardMinutes + " 分钟");
+                        + " · " + reward + state.earlySleepRewardMinutes + " 分钟");
     }
 
     private static TextView glassButton(Context context, String label, int fillColor, int strokeColor) {

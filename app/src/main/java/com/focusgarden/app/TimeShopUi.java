@@ -3130,7 +3130,8 @@ pill.setSingleLine(true);
                         layActive ? "生效中" : canLay ? "开启免限" : "暂无",
                         canLay, PURPLE, () -> confirmDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
                                 "消耗 1 张躺平卡开启躺平？",
-                                "开启后放开受限应用额度，早睡锁机继续生效。时间消费仅从储蓄罐扣除，明日 04:00 恢复正常模式。",
+                                "开启后放开受限应用额度，早睡锁机继续生效。时间消费仅从储蓄罐扣除，明日 04:00 恢复正常模式。"
+                                        + FocusSheets.layFlatAbstinenceNotice(state),
                                 "取消", "立即躺平", false, () -> {
                                     if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                         haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);

@@ -1003,6 +1003,13 @@ final class FocusSheets {
                 "待办规则", "新建待办需等 10 分钟冷静期才可领奖，每日上限 " + state.todoDailyCapMinutes + " 分钟。");
     }
 
+    static String layFlatAbstinenceNotice(FocusState state) {
+        for (FocusState.Abstinence item : state.abstinences.values()) {
+            if (!item.linkedPackages.isEmpty()) return "\n\n已关联的戒断应用仍会显示提醒。";
+        }
+        return "";
+    }
+
     static void confirmSuspendBedtime(MainActivity activity, FocusState state, Runnable onChanged) {
         OnboardingUi.showMascotPrompt(activity, R.drawable.dialog_mascot_sleep_pause,
                 "暂停早睡锁机？", "躺平期间可免费暂停，凌晨 04:00 重置后恢复执行。",
@@ -1103,13 +1110,20 @@ final class FocusSheets {
 
         body.addView(text(activity, "早睡挑战奖励", 13, INK_SUB, true));
         gap(body, 8);
-        LinearLayout rewardRow = row(activity);
-        int[] options = {5, 10, 15, 20};
+        LinearLayout rewardOptions = column(activity);
         Runnable[] rebuildRewards = new Runnable[1];
         rebuildRewards[0] = () -> {
-            rewardRow.removeAllViews();
-            for (int i = 0; i < options.length; i++) {
-                int mins = options[i];
+            rewardOptions.removeAllViews();
+            LinearLayout lowerRewards = row(activity);
+            rewardOptions.addView(lowerRewards, -1, -2);
+            gap(rewardOptions, 8);
+            LinearLayout higherRewards = row(activity);
+            rewardOptions.addView(higherRewards, -1, -2);
+            for (int minutes = FocusState.MIN_EARLY_SLEEP_REWARD_MINUTES;
+                    minutes <= FocusState.MAX_EARLY_SLEEP_REWARD_MINUTES; minutes += 5) {
+                int mins = minutes;
+                LinearLayout rewardRow = mins <= 30 ? lowerRewards : higherRewards;
+                if (rewardRow.getChildCount() > 0) space(rewardRow, 8);
                 boolean active = state.earlySleepRewardMinutes == mins;
                 TextView c = pillButton(activity, "+" + mins + "分", active ? BLUE_SOFT : SURFACE_SUBTLE,
                         active ? BLUE : INK_SUB, 12, 38);
@@ -1129,11 +1143,10 @@ final class FocusSheets {
                             });
                 });
                 weight(rewardRow, c);
-                if (i + 1 < options.length) space(rewardRow, 8);
             }
         };
         rebuildRewards[0].run();
-        body.addView(rewardRow);
+        body.addView(rewardOptions, -1, -2);
         gap(body, 14);
 
         LinearLayout weekWrap = column(activity);
@@ -1218,7 +1231,7 @@ final class FocusSheets {
 
         sheetRef[0] = bottomSheet(activity, "早睡挑战", null, body, true,
                 "早睡挑战",
-                "可设置 21:00–23:30 入睡、05:00–08:30 起床，睡眠时长不超过 10 小时。完整经历睡眠锁机时段后可手动领奖。");
+                "可自由设置入睡与起床时间，睡眠时长为 6–10 小时。完成整个睡眠锁机时段后可手动领奖。");
     }
 
     private static String sleepScheduleLabel(int start, int end) {
@@ -1273,26 +1286,24 @@ final class FocusSheets {
         space(timeRow, 10);
         weight(timeRow, end);
         body.addView(timeRow);
+        gap(body, 14);
+        body.addView(text(activity, "可选 20:00–23:30 入睡、05:00–08:30 起床", 13, INK_SUB, false), -1, -2);
         gap(body, 16);
         body.addView(save, -1, -2);
         refresh.run();
         Dialog sheet = bottomSheet(activity, "编辑作息", null, body);
         save.setOnClickListener(v -> {
-            if (!FocusState.isValidSleepDuration(times[0], times[1])) {
+            FocusState.SleepScheduleIssue issue = FocusState.sleepScheduleIssue(times[0], times[1]);
+            if (issue != FocusState.SleepScheduleIssue.NONE) {
                 haptic(v, state.hapticFeedback, HapticKind.REJECT);
-                OnboardingUi.showSleepTooLongDialog(activity);
-                return;
-            }
-            if (!FocusState.isValidSleepStart(times[0]) || !FocusState.isValidSleepEnd(times[1])) {
-                haptic(v, state.hapticFeedback, HapticKind.REJECT);
+                OnboardingUi.showSleepScheduleError(activity, issue);
                 return;
             }
             tapHaptic(v);
             sheet.dismiss();
             if (times[0] == state.sleepStart && times[1] == state.sleepEnd) return;
             Runnable apply = () -> {
-                state.sleepStart = times[0];
-                state.sleepEnd = times[1];
+                state.changeSleepSchedule(times[0], times[1], System.currentTimeMillis(), ZoneId.systemDefault());
                 if (state.bedtime) {
                     state.failEarlySleepByConfigChange(System.currentTimeMillis(), ZoneId.systemDefault(),
                             "修改了作息时段", false);
@@ -1443,7 +1454,7 @@ final class FocusSheets {
 
         Dialog sheet = bottomSheet(activity, "选择应用", null, body, false,
                 "应用分类",
-                "支持多选：学习应用自动赚时长，受限应用按可用时长管控。");
+                "支持多选：学习应用积累可手动领取的时长，受限应用按可用时长管控。");
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -1566,7 +1577,7 @@ final class FocusSheets {
                 String rateDesc = state.rateMode.label;
                 tip.addView(text(activity,
                         cost > 0 ? "使用此应用按当前" + rateDesc + "赚取时间 · 新增/改型需消耗 " + cost + " 分钟"
-                                : "使用此应用将按当前" + rateDesc + "自动赚取可用时间",
+                                : "使用此应用将按当前" + rateDesc + "积累待兑换时间",
                         13, GREEN, true));
                 quotaArea.addView(tip);
             } else {
@@ -2573,7 +2584,7 @@ final class FocusSheets {
                     confirmDialog(activity, R.drawable.ic_moon, PURPLE_SOFT, PURPLE,
                             "消耗 1 张躺平卡开启躺平？",
                             "开启后放开受限应用额度，早睡锁机会按作息执行。明日凌晨 04:00 自动恢复为「"
-                                    + restoreTarget.label + "」。",
+                                    + restoreTarget.label + "」。" + layFlatAbstinenceNotice(state),
                             "稍后", "立即躺平（今天）", false, () -> {
                                 if (state.activateLayFlatMode(System.currentTimeMillis(), ZoneId.systemDefault())) {
                                     haptic(activity.getWindow().getDecorView(), state.hapticFeedback, HapticKind.CONFIRM);
@@ -2979,7 +2990,7 @@ final class FocusSheets {
     static void showCardManager(MainActivity activity, FocusState state, Runnable onChanged, Runnable onDismissBack) {
         LinearLayout body = column(activity);
         String[][] defs = {
-                {"apps", "应用", "统计正向学习应用时长并自动兑换"},
+                {"apps", "应用", "统计正向学习应用时长，手动兑换"},
                 {"timer", "自律模式", "正计时与倒计时自律锁定控制"},
                 {"sleep", "早睡挑战", "睡眠时段强制全锁，完整醒来次日手动领奖"},
                 {"todos", "待办", "完成日常任务兑换时间奖励"},
@@ -3552,13 +3563,13 @@ final class FocusSheets {
         body.addView(mockSleepDoneBtn, -1, -2);
         gap(body, 8);
 
-        TextView seedRedeemBtn = secondaryButton(activity, "模拟 20 分钟多源奖励");
+        TextView seedRedeemBtn = secondaryButton(activity, "模拟多源待兑换奖励");
         seedRedeemBtn.setOnClickListener(v -> {
             tapHaptic(v);
             state.debugSeedRedeemables(System.currentTimeMillis(), ZoneId.systemDefault());
             onChanged.run();
             refreshStatus[0].run();
-            Toast.makeText(activity, "已生成 20 分钟多源待领奖励（共 3 项正向行为）", Toast.LENGTH_SHORT).show();
+            Toast.makeText(activity, "已生成多源待兑换奖励（共 3 项正向行为）", Toast.LENGTH_SHORT).show();
         });
         body.addView(seedRedeemBtn, -1, -2);
         gap(body, 8);
